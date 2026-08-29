@@ -244,6 +244,21 @@ describe("Sidechat MCP tool policy", () => {
             description: "x".repeat(110_000),
           },
         },
+        {
+          serverId: "mcp-example-123",
+          name: "external_ref",
+          inputSchema: {
+            $ref: "https://schemas.example.com/customer.json",
+          },
+        },
+        {
+          serverId: "mcp-example-123",
+          name: "unsupported_draft",
+          inputSchema: {
+            $schema: "https://json-schema.org/draft/2020-12/schema",
+            type: "object",
+          },
+        },
       ],
       configured,
     );

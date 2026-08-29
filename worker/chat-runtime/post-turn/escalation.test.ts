@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createEscalation } from "./escalation";
+import { createEscalation, sendEscalationEmails } from "./escalation";
 import { type PublicConversationStore } from "../../conversations/public-conversation-store";
 import { type ProjectService } from "../../services/project-service";
 import { type AgentChannelAdapter } from "../../services/agent-channel";
@@ -256,6 +256,63 @@ describe("createEscalation - repeat escalation (already forwarded)", () => {
   });
 });
 
+test("sends one private escalation email to each deduplicated recipient", async () => {
+  const recipients: string[] = [];
+  await sendEscalationEmails(
+    {
+      async sendEscalationNotification(input) {
+        recipients.push(input.ownerEmail);
+      },
+    },
+    ["owner@example.com", "member@example.com", "OWNER@example.com"],
+    {
+      projectName: "Acme",
+      projectSlug: "acme",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      visitorId: "visitor-1",
+      summary: "Visitor needs help.",
+      conversationUrl: "https://app.test/conversation",
+      accentColor: null,
+    },
+  );
+
+  expect(recipients).toEqual([
+    "owner@example.com",
+    "member@example.com",
+  ]);
+});
+
+test("continues the private email fan-out when one recipient fails", async () => {
+  const attempted: string[] = [];
+  await expect(sendEscalationEmails(
+    {
+      async sendEscalationNotification(input) {
+        attempted.push(input.ownerEmail);
+        if (input.ownerEmail === "first@example.com") {
+          throw new Error("mailbox unavailable");
+        }
+      },
+    },
+    ["first@example.com", "second@example.com"],
+    {
+      projectName: "Acme",
+      projectSlug: "acme",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      visitorId: "visitor-1",
+      summary: "Visitor needs help.",
+      conversationUrl: "https://app.test/conversation",
+      accentColor: null,
+    },
+  )).rejects.toThrow("mailbox unavailable");
+
+  expect(attempted).toEqual([
+    "first@example.com",
+    "second@example.com",
+  ]);
+});
+
 describe("createEscalation - telegram notification", () => {
   function makeTelegramAdapter() {
     const calls: Array<{
@@ -371,6 +428,52 @@ describe("createEscalation - telegram notification", () => {
       { channel: "slack", threadId: "88.1" },
     ]);
     expect(slackCalls[0].threadId).toBeNull();
+  });
+
+  test("continues initial channel fan-out after one delivery fails", async () => {
+    const attempted: string[] = [];
+    const failed: AgentChannelAdapter = {
+      channel: "telegram",
+      async resolveConversation() {
+        return { kind: "none", reason: "unused" };
+      },
+      async notifyEscalation() {
+        attempted.push("telegram");
+        throw new Error("telegram unavailable");
+      },
+      async forwardVisitorMessage() {},
+      async confirm() {},
+    };
+    const successful: AgentChannelAdapter = {
+      channel: "slack",
+      async resolveConversation() {
+        return { kind: "none", reason: "unused" };
+      },
+      async notifyEscalation() {
+        attempted.push("slack");
+        return "slack-thread";
+      },
+      async forwardVisitorMessage() {},
+      async confirm() {},
+    };
+    const persisted: string[] = [];
+    let released = 0;
+    const { params } = baseParams({
+      agentChannels: [failed, successful],
+      releaseExternalNotificationAttempt: async () => {
+        released += 1;
+      },
+      persistChannelThread: async (_channel: string, threadId: string) => {
+        persisted.push(threadId);
+        return true;
+      },
+    });
+
+    await createEscalation(params as never);
+
+    expect(attempted.sort()).toEqual(["slack", "telegram"]);
+    expect(persisted).toEqual(["slack-thread"]);
+    expect(released).toBe(1);
   });
 
   test("does not notify after the conversation becomes unavailable", async () => {

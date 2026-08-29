@@ -286,7 +286,7 @@ export interface ExecuteProjectToolRequest {
 export interface PendingSidechatApprovalScope {
   approvalId: string;
   toolCallId: string;
-  exposedName: string;
+  toolRef: string;
 }
 
 export interface ExecuteProjectToolResult {

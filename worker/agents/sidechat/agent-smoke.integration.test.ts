@@ -110,6 +110,7 @@ describe("native Sidechat Agent registration", () => {
       visitorName: "Ada",
       visitorEmail: "ADA@example.com",
       telegramThreadId: "telegram-1",
+      slackThreadId: null,
       status: "waiting_agent" as const,
       closeReason: null,
       metadata: { source: "docs" },

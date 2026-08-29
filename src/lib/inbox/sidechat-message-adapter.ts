@@ -19,6 +19,13 @@ const MAX_ACTIVITY_LABEL = 240;
 const MAX_TOOL_DISPLAY_NAME = 160;
 const MAX_SOURCE_NAME = 100;
 const SAFE_INTEGRATION_ICON = /^\/integrations\/[a-z0-9-]+\.svg$/u;
+const GATEWAY_CALL_TOOL_NAME = "call_project_tool";
+const HIDDEN_GATEWAY_TOOL_NAMES = new Set([
+  "search_project_tools",
+  "describe_project_tool",
+]);
+const LEGACY_APPROVAL_EXPIRED =
+  "This approval expired after the connected-tool upgrade. Ask Maven to retry.";
 
 export type SafeSidechatDataPart =
   | { type: "turn-accepted"; messageId: string }
@@ -227,6 +234,32 @@ function fallbackToolPresentation(part: UIMessage["parts"][number]) {
   };
 }
 
+function visibleToolInput(toolName: string, input: unknown): unknown {
+  if (
+    toolName === GATEWAY_CALL_TOOL_NAME &&
+    isRecord(input) &&
+    typeof input.argumentsJson === "string" &&
+    input.argumentsJson.length <= 20_000
+  ) {
+    try {
+      const parsed: unknown = JSON.parse(input.argumentsJson);
+      return isRecord(parsed) ? parsed : { error: "Invalid tool arguments" };
+    } catch {
+      return { error: "Invalid tool arguments" };
+    }
+  }
+  return input;
+}
+
+function visibleToolError(
+  legacyPendingApproval: boolean,
+  errorText: unknown,
+): string | null {
+  if (legacyPendingApproval) return LEGACY_APPROVAL_EXPIRED;
+  if (typeof errorText !== "string") return null;
+  return redactPrivateToolText(errorText).slice(0, 2_000);
+}
+
 function readSidechatTrace(
   nativeMessage: UIMessage,
   canAlwaysAllow: boolean,
@@ -267,9 +300,13 @@ function readSidechatTrace(
       return;
     }
     if (!isToolUIPart(part)) return;
+    const toolName = getToolName(part);
     // The internal reply-draft tool is presentation plumbing, not an action:
     // its result already renders as the draft bubble with "Add to reply".
-    if (getToolName(part) === "present_reply_draft") return;
+    if (
+      toolName === "present_reply_draft" ||
+      HIDDEN_GATEWAY_TOOL_NAMES.has(toolName)
+    ) return;
     const toolCallId = boundedString(getToolCallId(part), 200);
     if (!toolCallId) return;
     const context = contextByToolCallId.get(toolCallId);
@@ -280,28 +317,38 @@ function readSidechatTrace(
       output?: unknown;
       errorText?: string;
     };
+    const legacyPendingApproval =
+      part.state === "approval-requested" &&
+      toolName !== GATEWAY_CALL_TOOL_NAME &&
+      toolName !== "search_knowledge";
+    const errorText = visibleToolError(
+      legacyPendingApproval,
+      value.errorText,
+    );
     traceItems.push({
       type: "tool",
       id: `${nativeMessage.id}:${toolCallId}`,
       toolCallId,
-      state,
+      state: legacyPendingApproval ? "output-error" : state,
       tool: {
         ...(context?.tool ?? fallbackToolPresentation(part)),
         safety: context?.safety ?? "write",
       },
       ...(value.input !== undefined
-        ? { input: redactPrivateToolPayload(value.input) }
+        ? {
+            input: redactPrivateToolPayload(
+              visibleToolInput(toolName, value.input),
+            ),
+          }
         : {}),
       ...(value.output !== undefined
         ? { output: redactPrivateToolPayload(value.output) }
         : {}),
-      ...(typeof value.errorText === "string"
-        ? { errorText: redactPrivateToolText(value.errorText).slice(0, 2_000) }
-        : {}),
+      ...(errorText ? { errorText } : {}),
       ...(durationByToolCallId.has(toolCallId)
         ? { durationMs: durationByToolCallId.get(toolCallId) }
         : {}),
-      ...(approval
+      ...(approval && !legacyPendingApproval
         ? {
             approval: {
               id: approval.id,

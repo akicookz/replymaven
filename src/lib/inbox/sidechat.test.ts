@@ -7,8 +7,12 @@ import {
   deriveMessagePresentation,
   deriveSidechatPaneMode,
   deriveSidechatPresentation,
+  deriveSidechatStartupWorkingPhase,
   deriveSidechatWorkingTail,
   readLastCompletedSidechatToolKind,
+  readLastSidechatBotMessageId,
+  readLastSidechatHumanMessageId,
+  shouldShowSidechatSenderTimestamp,
   deriveSidechatStatusDot,
   isSidechatToolRunning,
 } from "./sidechat";
@@ -260,7 +264,7 @@ describe("Sidechat presentation helpers", () => {
     })).toEqual({
       showWorking: true,
       showError: false,
-      workingLabel: "Reading the docs…",
+      workingLabel: "Planning next moves…",
     });
     expect(deriveSidechatWorkingTail({
       busy: true,
@@ -273,7 +277,7 @@ describe("Sidechat presentation helpers", () => {
     })).toEqual({
       showWorking: true,
       showError: false,
-      workingLabel: "Reading the results…",
+      workingLabel: "Planning next moves…",
     });
     expect(deriveSidechatWorkingTail({
       busy: true,
@@ -286,7 +290,21 @@ describe("Sidechat presentation helpers", () => {
     })).toEqual({
       showWorking: true,
       showError: false,
-      workingLabel: "Reading the conversation…",
+      workingLabel: "Thinking…",
+    });
+    expect(deriveSidechatWorkingTail({
+      busy: true,
+      status: "submitted",
+      hasError: false,
+      hasRunningTool: false,
+      hasStreamingReasoning: false,
+      hasVisibleAnswer: false,
+      lastCompletedToolKind: null,
+      startupPhase: "planning",
+    })).toEqual({
+      showWorking: true,
+      showError: false,
+      workingLabel: "Planning next moves…",
     });
     expect(deriveSidechatWorkingTail({
       busy: true,
@@ -299,7 +317,7 @@ describe("Sidechat presentation helpers", () => {
     })).toEqual({
       showWorking: false,
       showError: false,
-      workingLabel: "Reading the conversation…",
+      workingLabel: "Thinking…",
     });
     expect(deriveSidechatWorkingTail({
       busy: true,
@@ -321,8 +339,53 @@ describe("Sidechat presentation helpers", () => {
     })).toEqual({
       showWorking: false,
       showError: true,
-      workingLabel: "Reading the docs…",
+      workingLabel: "Planning next moves…",
     });
+  });
+
+  test("holds Maven · time until the in-flight Sidechat turn settles", () => {
+    expect(shouldShowSidechatSenderTimestamp({
+      perspective: "sidechat",
+      role: "bot",
+      messageId: "bot-2",
+      turnInFlight: true,
+      inFlightBotMessageId: "bot-2",
+      toolPending: false,
+    })).toBe(false);
+    expect(shouldShowSidechatSenderTimestamp({
+      perspective: "sidechat",
+      role: "bot",
+      messageId: "bot-1",
+      turnInFlight: true,
+      inFlightBotMessageId: "bot-2",
+      toolPending: false,
+    })).toBe(true);
+    expect(shouldShowSidechatSenderTimestamp({
+      perspective: "sidechat",
+      role: "bot",
+      messageId: "bot-2",
+      turnInFlight: false,
+      inFlightBotMessageId: null,
+      toolPending: false,
+    })).toBe(true);
+    expect(readLastSidechatBotMessageId([
+      { id: "human-1", role: "agent" },
+      { id: "bot-1", role: "bot" },
+      { id: "human-2", role: "agent" },
+      { id: "bot-2", role: "bot" },
+    ])).toBe("bot-2");
+  });
+
+  test("swaps the post-send working line after two seconds", () => {
+    expect(deriveSidechatStartupWorkingPhase(0)).toBe("thinking");
+    expect(deriveSidechatStartupWorkingPhase(1_999)).toBe("thinking");
+    expect(deriveSidechatStartupWorkingPhase(2_000)).toBe("planning");
+    expect(readLastSidechatHumanMessageId([
+      { id: "human-1", role: "agent" },
+      { id: "bot-1", role: "bot" },
+      { id: "human-2", role: "agent" },
+      { id: "bot-2", role: "bot" },
+    ])).toBe("human-2");
   });
 
   test("classifies a finished Docs search without repeating the tool chrome", () => {

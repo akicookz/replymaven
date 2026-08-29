@@ -1,6 +1,8 @@
 import { beforeAll, describe, expect, mock, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import type { SidechatChildClaims } from "../../../shared/sidechat-agent";
+import type { SidechatToolDescriptor } from "../../../shared/sidechat-agent";
+import { encodeSidechatToolRef } from "./project-tool-gateway";
 
 const secret = "task-2-test-secret-with-at-least-32-bytes";
 
@@ -66,13 +68,14 @@ function childClaims(): SidechatChildClaims {
   };
 }
 
-function createAgent(): InstanceType<typeof MavenProjectAgent> & {
+function createAgent(
+  database = new Database(":memory:"),
+): InstanceType<typeof MavenProjectAgent> & {
   state: unknown;
   hasSubAgent: ReturnType<typeof mock>;
   subAgent: ReturnType<typeof mock>;
   deleteSubAgent: ReturnType<typeof mock>;
 } {
-  const database = new Database(":memory:");
   const agent = new MavenProjectAgent({
     storage: {
       sql: {
@@ -84,7 +87,16 @@ function createAgent(): InstanceType<typeof MavenProjectAgent> & {
     },
   } as never, {
     SIDECHAT_TOKEN_SECRET: secret,
+    ENCRYPTION_KEY: "11".repeat(32),
   } as never) as ReturnType<typeof createAgent>;
+  Object.assign(agent, {
+    sql<T>(
+      strings: TemplateStringsArray,
+      ...bindings: Array<string | number | boolean | null>
+    ): T[] {
+      return database.query(strings.join("?")).all(...bindings) as T[];
+    },
+  });
   agent.state = agent.initialState;
   agent.hasSubAgent = mock(() => false);
   agent.subAgent = mock(async () => ({}));
@@ -94,6 +106,318 @@ function createAgent(): InstanceType<typeof MavenProjectAgent> & {
 }
 
 describe("MavenProjectAgent child registry", () => {
+  test("stages encrypted write input and consumes it once after reconstruction", async () => {
+    const database = new Database(":memory:");
+    const descriptor: SidechatToolDescriptor = {
+      connectionId: "mcp-linear",
+      toolName: "create_issue",
+      exposedName: "tool_mcplinear_create_issue",
+      displayName: "Create issue",
+      description: "Create a Linear issue.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["token"],
+        properties: {
+          token: { type: "string" },
+        },
+      },
+      catalogFingerprint: "f".repeat(64),
+      audience: "sidechat",
+      safety: "write",
+      access: "write",
+      enabled: true,
+    };
+    const toolRef = encodeSidechatToolRef(descriptor);
+    const first = createAgent(database);
+    Object.assign(first, {
+      canUseSidechatGateway: mock(async () => true),
+      resolveSidechatToolDescriptor: mock(async () => descriptor),
+    });
+
+    await expect(first.stageProjectToolApproval({
+      childName: "sc_conversation-1",
+      conversationId: "conversation-1",
+      actorUserId: "user-1",
+      toolCallId: "tool-call-1",
+      toolRef,
+      argumentsJson: '{"token":"original-secret"}',
+    })).resolves.toBe(true);
+
+    const stored = database.query(
+      "SELECT ciphertext, created_at, expires_at FROM sidechat_tool_approval_payloads",
+    ).get() as {
+      ciphertext: string;
+      created_at: number;
+      expires_at: number;
+    };
+    expect(stored.ciphertext).not.toContain("original-secret");
+    expect(stored.expires_at - stored.created_at).toBe(24 * 60 * 60 * 1_000);
+
+    const reconstructed = createAgent(database);
+    const executeResolvedProjectTool = mock(async () => ({
+      status: "completed" as const,
+      output: { ok: true },
+      safeActivity: "Done",
+    }));
+    Object.assign(reconstructed, {
+      resolveSidechatToolDescriptor: mock(async () => descriptor),
+      executeResolvedProjectTool,
+    });
+    const request = {
+      childName: "sc_conversation-1",
+      conversationId: "conversation-1",
+      actorUserId: "user-1",
+      toolCallId: "tool-call-1",
+      toolRef,
+      argumentsJson: '{"token":"[redacted]"}',
+      approvalMode: "once" as const,
+      approvedOnce: true,
+    };
+
+    await expect(reconstructed.executeProjectTool(request)).resolves
+      .toMatchObject({ status: "completed" });
+    expect(executeResolvedProjectTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: { token: "original-secret" },
+        approvalMode: "once",
+      }),
+    );
+    await expect(reconstructed.executeProjectTool(request)).resolves.toEqual({
+      status: "denied",
+      safeActivity: "Tool unavailable",
+      errorCode: "approval_payload_unavailable",
+    });
+  });
+
+  test("fails closed for conflicting, expired, mismatched, and corrupt staged input", async () => {
+    const database = new Database(":memory:");
+    const descriptor: SidechatToolDescriptor = {
+      connectionId: "mcp-linear",
+      toolName: "create_issue",
+      exposedName: "tool_mcplinear_create_issue",
+      displayName: "Create issue",
+      description: "Create a Linear issue.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["title"],
+        properties: {
+          title: { type: "string" },
+        },
+      },
+      catalogFingerprint: "f".repeat(64),
+      audience: "sidechat",
+      safety: "write",
+      access: "write",
+      enabled: true,
+    };
+    const toolRef = encodeSidechatToolRef(descriptor);
+    const agent = createAgent(database);
+    Object.assign(agent, {
+      canUseSidechatGateway: mock(async () => true),
+      resolveSidechatToolDescriptor: mock(async () => descriptor),
+      executeResolvedProjectTool: mock(async () => ({
+        status: "completed" as const,
+        safeActivity: "Done",
+      })),
+    });
+    const staged = {
+      childName: "sc_conversation-1",
+      conversationId: "conversation-1",
+      actorUserId: "user-1",
+      toolCallId: "tool-call-2",
+      toolRef,
+      argumentsJson: '{"title":"Original"}',
+    };
+
+    await expect(agent.stageProjectToolApproval(staged)).resolves.toBe(true);
+    await expect(agent.stageProjectToolApproval(staged)).resolves.toBe(true);
+    await expect(agent.stageProjectToolApproval({
+      ...staged,
+      argumentsJson: '{"title":"Conflicting"}',
+    })).resolves.toBe(false);
+    const concurrent = {
+      ...staged,
+      toolCallId: "concurrent-call",
+    };
+    await expect(Promise.all([
+      agent.stageProjectToolApproval(concurrent),
+      agent.stageProjectToolApproval(concurrent),
+    ])).resolves.toEqual([true, true]);
+
+    const execute = (overrides: Partial<typeof staged> = {}) =>
+      agent.executeProjectTool({
+        ...staged,
+        ...overrides,
+        argumentsJson: '{"title":"[redacted]"}',
+        approvalMode: "once",
+        approvedOnce: true,
+      });
+
+    await expect(execute({ actorUserId: "other-user" })).resolves.toMatchObject({
+      status: "denied",
+      errorCode: "approval_payload_unavailable",
+    });
+    await expect(execute()).resolves.toMatchObject({ status: "completed" });
+
+    await agent.stageProjectToolApproval({
+      ...staged,
+      toolCallId: "expired-call",
+    });
+    database.query(
+      "UPDATE sidechat_tool_approval_payloads SET expires_at = 0 WHERE tool_call_id = ?",
+    ).run("expired-call");
+    await expect(execute({ toolCallId: "expired-call" })).resolves.toMatchObject({
+      status: "denied",
+      errorCode: "approval_payload_unavailable",
+    });
+
+    await agent.stageProjectToolApproval({
+      ...staged,
+      toolCallId: "corrupt-call",
+    });
+    database.query(
+      "UPDATE sidechat_tool_approval_payloads SET ciphertext = ? WHERE tool_call_id = ?",
+    ).run("not-ciphertext", "corrupt-call");
+    await expect(execute({ toolCallId: "corrupt-call" })).resolves.toMatchObject({
+      status: "denied",
+      errorCode: "approval_payload_unavailable",
+    });
+  });
+
+  test("grants always-allow only when the exact pending payload is staged", async () => {
+    const descriptor: SidechatToolDescriptor = {
+      connectionId: "mcp-linear",
+      toolName: "create_issue",
+      exposedName: "tool_mcplinear_create_issue",
+      displayName: "Create issue",
+      description: "Create a Linear issue.",
+      inputSchema: { type: "object", additionalProperties: true },
+      catalogFingerprint: "f".repeat(64),
+      audience: "sidechat",
+      safety: "write",
+      access: "write",
+      enabled: true,
+    };
+    const toolRef = encodeSidechatToolRef(descriptor);
+    const agent = createAgent();
+    Object.assign(agent, {
+      assertRegisteredSidechat: mock(() => undefined),
+      canUseSidechatGateway: mock(async () => true),
+      canActorAccessProject: mock(async () => true),
+      resolveSidechatToolDescriptor: mock(async () => descriptor),
+      conversationDirectory: mock(() => ({
+        getConversation: () => ({ archivedAt: null }),
+      })),
+      subAgent: mock(async () => ({
+        getPendingApprovalScope: async (
+          approvalId: string,
+          toolCallId: string,
+        ) => ({
+          approvalId,
+          toolCallId,
+          toolRef,
+        }),
+      })),
+    });
+
+    await expect(agent.grantAlwaysForPendingApproval(
+      "conversation-1",
+      "user-1",
+      "approval-1",
+      "missing-call",
+    )).resolves.toBe(false);
+
+    await agent.stageProjectToolApproval({
+      childName: "sc_conversation-1",
+      conversationId: "conversation-1",
+      actorUserId: "user-1",
+      toolCallId: "staged-call",
+      toolRef,
+      argumentsJson: "{}",
+    });
+    await expect(agent.grantAlwaysForPendingApproval(
+      "conversation-1",
+      "user-1",
+      "approval-2",
+      "staged-call",
+    )).resolves.toBe(true);
+  });
+
+  test("derives authoritative execution identity from the gateway reference", async () => {
+    const agent = createAgent();
+    const executeResolvedProjectTool = mock(async () => ({
+      status: "completed" as const,
+      output: { ok: true },
+      safeActivity: "Done",
+    }));
+    Object.assign(agent, { executeResolvedProjectTool });
+    const descriptor: SidechatToolDescriptor = {
+      connectionId: "mcp-linear",
+      toolName: "create_issue",
+      exposedName: "tool_mcplinear_create_issue",
+      displayName: "Create issue",
+      description: "Create a Linear issue.",
+      inputSchema: { type: "object" },
+      catalogFingerprint: "f".repeat(64),
+      audience: "sidechat",
+      safety: "read",
+      access: "read",
+      enabled: true,
+    };
+    Object.assign(agent, {
+      resolveSidechatToolDescriptor: mock(async () => descriptor),
+    });
+
+    const result = await agent.executeProjectTool({
+      childName: "sc_conversation-1",
+      conversationId: "conversation-1",
+      actorUserId: "user-1",
+      toolCallId: "read-call",
+      toolRef: encodeSidechatToolRef(descriptor),
+      argumentsJson: '{"title":"Checkout failed"}',
+      approvalMode: "none",
+      approvedOnce: false,
+    });
+
+    expect(result.status).toBe("completed");
+    expect(executeResolvedProjectTool).toHaveBeenCalledWith({
+      childName: "sc_conversation-1",
+      conversationId: "conversation-1",
+      actorUserId: "user-1",
+      connectionId: "mcp-linear",
+      toolName: "create_issue",
+      catalogFingerprint: "f".repeat(64),
+      safety: "read",
+      access: "read",
+      approvalMode: "none",
+      input: { title: "Checkout failed" },
+    });
+  });
+
+  test("rejects malformed gateway references before project execution", async () => {
+    const agent = createAgent();
+    const executeResolvedProjectTool = mock(async () => {
+      throw new Error("must not execute");
+    });
+    Object.assign(agent, { executeResolvedProjectTool });
+
+    await expect(agent.executeProjectTool({
+      childName: "sc_conversation-1",
+      conversationId: "conversation-1",
+      actorUserId: "user-1",
+      toolRef: "sct1.invalid",
+      argumentsJson: "{}",
+      approvalMode: "none",
+    })).resolves.toEqual({
+      status: "denied",
+      safeActivity: "Tool unavailable",
+      errorCode: "tool_unavailable",
+    });
+    expect(executeResolvedProjectTool).not.toHaveBeenCalled();
+  });
+
   test("creates the native child before recording its summary", async () => {
     const agent = createAgent();
     const result = await agent.registerSidechat("conversation-1");

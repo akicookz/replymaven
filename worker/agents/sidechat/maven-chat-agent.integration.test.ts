@@ -77,10 +77,13 @@ describe("native MavenChatAgent transcript", () => {
       role: "assistant",
       parts: [{
         type: "dynamic-tool",
-        toolName: "tool_mcpserver_write_customer",
+        toolName: "call_project_tool",
         toolCallId: "write-call",
         state: "approval-requested",
-        input: { hidden: true },
+        input: {
+          toolRef: "sct1.exact-reference",
+          argumentsJson: '{"hidden":true}',
+        },
         approval: { id: "approval-1" },
       }],
     }];
@@ -92,7 +95,7 @@ describe("native MavenChatAgent transcript", () => {
     )).toEqual({
       approvalId: "approval-1",
       toolCallId: "write-call",
-      exposedName: "tool_mcpserver_write_customer",
+      toolRef: "sct1.exact-reference",
     });
     expect(readPendingApprovalScope(
       messages,
@@ -107,10 +110,13 @@ describe("native MavenChatAgent transcript", () => {
         role: "assistant",
         parts: [{
           type: "dynamic-tool",
-          toolName: "tool_mcpserver_write_customer",
+          toolName: "call_project_tool",
           toolCallId: "write-call",
           state: "approval-responded",
-          input: { hidden: true },
+          input: {
+            toolRef: "sct1.exact-reference",
+            argumentsJson: '{"hidden":true}',
+          },
           approval: { id: "approval-1", approved: true },
         }],
       },
@@ -121,6 +127,19 @@ describe("native MavenChatAgent transcript", () => {
       "write-call",
     )).toBeNull();
     expect(hasPendingSidechatApproval(resolvedMessages)).toBe(false);
+
+    expect(readPendingApprovalScope([{
+      id: "assistant-legacy",
+      role: "assistant",
+      parts: [{
+        type: "dynamic-tool",
+        toolName: "tool_mcpserver_write_customer",
+        toolCallId: "legacy-call",
+        state: "approval-requested",
+        input: { hidden: true },
+        approval: { id: "legacy-approval" },
+      }],
+    }], "legacy-approval", "legacy-call")).toBeNull();
   });
 
   nativeTest("builds the transient acceptance part from the submitted UI message ID", async () => {
@@ -138,6 +157,37 @@ describe("native MavenChatAgent transcript", () => {
     );
     expect(selectSidechatModelMessages(messages)).toHaveLength(80);
     expect(selectSidechatModelMessages(messages)[0]?.id).toBe("message-2");
+
+    const projected = selectSidechatModelMessages([{
+      id: "assistant-legacy-settled",
+      role: "assistant",
+      parts: [
+        { type: "text", text: "Found it." },
+        {
+          type: "dynamic-tool",
+          toolName: "tool_posthog_query_events",
+          toolCallId: "legacy-call",
+          state: "output-available",
+          input: { query: "private" },
+          output: { events: [] },
+        },
+        {
+          type: "dynamic-tool",
+          toolName: "call_project_tool",
+          toolCallId: "gateway-call",
+          state: "output-available",
+          input: {
+            toolRef: "sct1.current",
+            argumentsJson: '{"query":"safe"}',
+          },
+          output: { events: [] },
+        },
+      ],
+    }] as UIMessage[]);
+    expect(projected[0]?.parts).toEqual([
+      { type: "text", text: "Found it." },
+      expect.objectContaining({ toolCallId: "gateway-call" }),
+    ]);
   });
 
   nativeTest("emits the accepted submitted message ID before a native model response", async () => {
@@ -201,8 +251,17 @@ describe("native MavenChatAgent transcript", () => {
             if (failContext) throw new Error("private context failed");
             return sidechatContext();
           },
-          async getSidechatToolDescriptors() {
-            return [];
+          async searchSidechatProjectTools() {
+            return { tools: [], nextCursor: null };
+          },
+          async describeSidechatProjectTool() {
+            return null;
+          },
+          async resolveSidechatProjectTool() {
+            return null;
+          },
+          async executeSidechatKnowledge() {
+            throw new Error("unexpected knowledge tool");
           },
           async setLastSidechatTurnOrigin(
             _conversationId: string,
@@ -314,8 +373,17 @@ describe("native MavenChatAgent transcript", () => {
           async getSidechatContext() {
             return sidechatContext();
           },
-          async getSidechatToolDescriptors() {
-            return [];
+          async searchSidechatProjectTools() {
+            return { tools: [], nextCursor: null };
+          },
+          async describeSidechatProjectTool() {
+            return null;
+          },
+          async resolveSidechatProjectTool() {
+            return null;
+          },
+          async executeSidechatKnowledge() {
+            throw new Error("unexpected knowledge tool");
           },
           async setLastSidechatTurnOrigin(
             _conversationId: string,
@@ -525,10 +593,13 @@ describe("native MavenChatAgent transcript", () => {
         role: "assistant",
         parts: [{
           type: "dynamic-tool",
-          toolName: "tool_mcpserver_write_customer",
+          toolName: "call_project_tool",
           toolCallId: "write-call",
           state: "approval-requested",
-          input: { hidden: true },
+          input: {
+            toolRef: "sct1.exact-reference",
+            argumentsJson: '{"hidden":true}',
+          },
           approval: { id: "approval-1" },
         }],
       } as UIMessage;
@@ -739,10 +810,13 @@ describe("native MavenChatAgent transcript", () => {
         role: "assistant",
         parts: [{
           type: "dynamic-tool",
-          toolName: "tool_mcpserver_write_customer",
+          toolName: "call_project_tool",
           toolCallId: "write-call",
           state: "approval-requested",
-          input: { opaque: "native-only" },
+          input: {
+            toolRef: "sct1.exact-reference",
+            argumentsJson: '{"opaque":"native-only"}',
+          },
           approval: { id: "approval-1" },
         }],
       } as UIMessage]);
@@ -762,7 +836,7 @@ describe("native MavenChatAgent transcript", () => {
       )).resolves.toEqual({
         approvalId: "approval-1",
         toolCallId: "write-call",
-        exposedName: "tool_mcpserver_write_customer",
+        toolRef: "sct1.exact-reference",
       });
     },
   );

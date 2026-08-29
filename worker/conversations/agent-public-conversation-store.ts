@@ -182,6 +182,11 @@ interface PublicChildStub {
     conversationId: string,
     acceptanceToken: string,
   ): Promise<boolean>;
+  releaseTeamRequestNotification(
+    projectId: string,
+    conversationId: string,
+    acceptanceToken: string,
+  ): Promise<boolean>;
   addTeamRequestSummary(
     projectId: string,
     conversationId: string,
@@ -891,6 +896,21 @@ export class AgentPublicConversationStore implements PublicConversationStore {
       : false;
   }
 
+  async releaseTeamRequestNotification(
+    projectId: string,
+    conversationId: string,
+    acceptanceToken: string,
+  ): Promise<boolean> {
+    const child = await this.resolveChild(projectId, conversationId);
+    return child
+      ? child.releaseTeamRequestNotification(
+          projectId,
+          conversationId,
+          acceptanceToken,
+        )
+      : false;
+  }
+
   async addTeamRequestSummary(
     projectId: string,
     conversationId: string,
@@ -1040,6 +1060,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
           state: "active",
           aiParticipation: "continuous",
           ownershipRevision: 0,
+          activeHumanRoutes: [],
           askedClarifications: [],
           clarificationAttempts: 0,
           lastBotQuestion: null,

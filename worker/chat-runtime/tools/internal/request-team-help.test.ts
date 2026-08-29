@@ -11,6 +11,7 @@ import { buildMavenToolRegistry } from "../build-maven-tool-registry";
 import { type MavenTurnContext } from "../../types";
 import {
   createRequestTeamHelpTool,
+  repairAcceptedTeamRequest,
   type RequestTeamHelpResult,
 } from "./request-team-help";
 
@@ -180,6 +181,7 @@ function createHarness(options: {
   harness: TestHarness;
   definition: ReturnType<typeof createRequestTeamHelpTool>;
   chatService: PublicConversationStore;
+  repair(): Promise<void>;
 } {
   const harness: TestHarness = {
     context: createContext(options.channel ?? "public"),
@@ -522,6 +524,24 @@ function createHarness(options: {
       });
       return true;
     },
+    async releaseTeamRequestNotification(
+      _projectId: string,
+      _conversationId: string,
+      acceptanceToken: string,
+    ) {
+      const metadata = harness.conversation.metadata
+        ? JSON.parse(harness.conversation.metadata)
+        : {};
+      if (metadata.mavenTeamRequestAcceptanceToken !== acceptanceToken) {
+        return false;
+      }
+      harness.notificationClaimed = false;
+      harness.conversation.metadata = JSON.stringify({
+        ...metadata,
+        teamRequestNotificationState: "pending",
+      });
+      return true;
+    },
   } as unknown as PublicConversationStore;
 
   const settings = {
@@ -565,6 +585,18 @@ function createHarness(options: {
   return {
     harness,
     chatService,
+    repair() {
+      return repairAcceptedTeamRequest({
+        context: harness.context,
+        chatService,
+        projectService,
+        telegramService,
+        env: {
+          BETTER_AUTH_URL: "https://app.test",
+        },
+        executionCtx,
+      });
+    },
     definition: createRequestTeamHelpTool({
       context: harness.context,
       chatService,
@@ -601,6 +633,20 @@ async function executePublicTool(
     toolCallId: "team-help-call",
     messages: [],
   }) as Promise<RequestTeamHelpResult>;
+}
+
+function acceptedRequestMetadata(overrides: Record<string, unknown> = {}): string {
+  const acceptedAt = new Date(0).toISOString();
+  return JSON.stringify({
+    teamRequestSummary: "Visitor needs account help.",
+    escalatedAt: acceptedAt,
+    reviewSummaryMessageId: "summary-1",
+    teamRequestSummaryPending: false,
+    teamRequestNotificationState: "pending",
+    mavenTeamRequestAcceptedAt: acceptedAt,
+    mavenTeamRequestAcceptanceToken: "acceptance-1",
+    ...overrides,
+  });
 }
 
 describe("createRequestTeamHelpTool", () => {
@@ -686,9 +732,11 @@ describe("createRequestTeamHelpTool", () => {
 
     expect(result).toEqual({
       status: "requested",
-      visitorMessage:
-        "I've passed this along and an engineer will follow up with you shortly.",
+      requestState: "created",
+      agentLabel: "an engineer",
+      avgResponseTime: null,
     });
+    expect(result).not.toHaveProperty("visitorMessage");
     expect(harness.conversation.status).toBe("waiting_agent");
     expect(harness.ownershipClaims).toBe(1);
     expect(harness.teamRequestNotifications).toBe(1);
@@ -714,8 +762,9 @@ describe("createRequestTeamHelpTool", () => {
 
     expect(repeated).toEqual({
       status: "requested",
-      visitorMessage:
-        "This is already with an engineer and they'll continue the follow-up there.",
+      requestState: "already_pending",
+      agentLabel: "an engineer",
+      avgResponseTime: null,
     });
     expect(harness.ownershipClaims).toBe(1);
     expect(harness.teamRequestNotifications).toBe(1);
@@ -741,6 +790,65 @@ describe("createRequestTeamHelpTool", () => {
     });
 
     expect(result.status).toBe("requested");
+    expect(harness.reviewSummaries).toEqual([]);
+    expect(harness.telegramSummaries).toEqual([]);
+  });
+
+  test.each([
+    [
+      "complete",
+      {
+        status: "waiting_agent",
+        chatState: JSON.stringify({
+          aiParticipation: "assist_until_agent",
+          contactDeclined: false,
+        }),
+        metadata: acceptedRequestMetadata({
+          teamRequestNotificationState: "attempted",
+        }),
+      },
+    ],
+    [
+      "malformed",
+      {
+        status: "waiting_agent",
+        chatState: JSON.stringify({
+          aiParticipation: "assist_until_agent",
+          contactDeclined: false,
+        }),
+        metadata: JSON.stringify({
+          teamRequestNotificationState: "pending",
+        }),
+      },
+    ],
+    [
+      "human-only",
+      {
+        status: "waiting_agent",
+        chatState: JSON.stringify({
+          aiParticipation: "human_only",
+          contactDeclined: false,
+        }),
+        metadata: acceptedRequestMetadata(),
+      },
+    ],
+    [
+      "non-waiting",
+      {
+        status: "active",
+        chatState: JSON.stringify({
+          aiParticipation: "assist_until_agent",
+          contactDeclined: false,
+        }),
+        metadata: acceptedRequestMetadata(),
+      },
+    ],
+  ] as const)("repair no-ops for %s state", async (_name, conversation) => {
+    const { harness, repair } = createHarness({ conversation });
+
+    await repair();
+
+    expect(harness.notificationClaims).toBe(0);
     expect(harness.reviewSummaries).toEqual([]);
     expect(harness.telegramSummaries).toEqual([]);
   });
@@ -885,8 +993,9 @@ describe("createRequestTeamHelpTool", () => {
 
     expect(result).toEqual({
       status: "requested",
-      visitorMessage:
-        "This is already with an engineer and they'll continue the follow-up there.",
+      requestState: "already_pending",
+      agentLabel: "an engineer",
+      avgResponseTime: null,
     });
     expect(harness.ownershipClaims).toBe(1);
     expect(harness.teamRequestNotifications).toBe(0);
@@ -911,8 +1020,9 @@ describe("createRequestTeamHelpTool", () => {
 
     expect(result).toEqual({
       status: "requested",
-      visitorMessage:
-        "This is already with an engineer and they'll continue the follow-up there.",
+      requestState: "already_pending",
+      agentLabel: "an engineer",
+      avgResponseTime: null,
     });
     expect(harness.ownershipClaims).toBe(0);
     expect(harness.telegramSummaries).toEqual([]);
@@ -929,8 +1039,9 @@ describe("createRequestTeamHelpTool", () => {
 
     expect(result).toEqual({
       status: "requested",
-      visitorMessage:
-        "This is already with an engineer and they'll continue the follow-up there.",
+      requestState: "already_pending",
+      agentLabel: "an engineer",
+      avgResponseTime: null,
     });
     expect(harness.teamRequestNotifications).toBe(0);
     expect(harness.reviewSummaries).toEqual([]);
@@ -951,8 +1062,9 @@ describe("createRequestTeamHelpTool", () => {
 
     expect(result).toEqual({
       status: "requested",
-      visitorMessage:
-        "I've passed this along and an engineer will follow up with you shortly.",
+      requestState: "created",
+      agentLabel: "an engineer",
+      avgResponseTime: null,
     });
     harness.failEscalationUpdate = false;
     const retry = await executePublicTool(definition, harness.context, {
@@ -1045,7 +1157,7 @@ describe("createRequestTeamHelpTool", () => {
     expect(harness.telegramSummaries).toEqual([input.summary]);
   });
 
-  test("does not repeat an external attempt after Telegram throws", async () => {
+  test("keeps repair reachable after Telegram throws", async () => {
     const { harness, definition } = createHarness({
       throwTelegramNotification: true,
     });
@@ -1056,8 +1168,8 @@ describe("createRequestTeamHelpTool", () => {
 
     expect(first.status).toBe("requested");
     expect(retry.status).toBe("requested");
-    expect(harness.telegramAttempts).toBe(1);
-    expect(harness.notificationClaims).toBe(1);
+    expect(harness.telegramAttempts).toBe(2);
+    expect(harness.notificationClaims).toBe(2);
   });
 
   test("returns contact_required when saved contact is cleared before the claim", async () => {

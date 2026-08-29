@@ -52,13 +52,15 @@ ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbo
 - **Tone of voice** -- configurable AI personality (professional, friendly, casual, formal, or custom prompt).
 - **Quick actions and quick topics** -- configurable buttons and topic suggestions shown above the chat input.
 - **Intro message** -- the first bot message visitors see when they open the widget.
-- **Live agent handoff** -- when the bot cannot answer or the visitor requests a human, the conversation is relayed to Telegram and/or Slack through `AgentChannelAdapter`. Agent replies in those messengers are synced back to the widget. When a conversation is in agent mode, the AI is completely silenced and visitor messages are forwarded to every enabled messenger. Agents use `@BotName` commands (Telegram, Slack, dashboard, or MCP) to hand back to AI (with optional instructions), close conversations, instruct the bot to respond immediately, or start a Sidechat investigate turn. `ask_maven` starts that investigate turn from MCP. The inbox Assign menu includes Maven; picking it hands the thread back. Idle takeover after four quiet hours also assigns Maven. New bookings, conversations, and contact form submissions also notify enabled messengers when configured.
+- **Live agent handoff** -- when the bot cannot answer or the visitor requests a human, one escalation fans out to every connected Telegram/Slack channel and every accepted project member with access. Maven keeps helping while review is pending. A channel or member email joins the conversation when a human first replies there. After that, visitor messages go only to the joined external clients. Dashboard and MCP replies do not create push routes. Agents use `@BotName` commands (Telegram, Slack, dashboard, or MCP) to hand back to AI (with optional instructions), close conversations, instruct the bot to respond immediately, or start a Sidechat investigate turn. `ask_maven` starts that investigate turn from MCP. The inbox Assign menu includes Maven; picking it hands the thread back. Idle takeover after four quiet hours also assigns Maven. New bookings, conversations, and contact form submissions also notify enabled messengers when configured.
 - **Canned response auto-drafting** -- after a conversation ends, the AI analyzes it and generates draft canned responses. Users approve or reject drafts from the dashboard.
 - **Customer continuity** -- anonymous widget visitor IDs can be connected to project-scoped customer profiles. Signed server-issued tokens keep exact visitor history together across devices without trusting browser-supplied email.
 
 ### Conversation runtime
 
 There is one conversation runtime, built on Cloudflare Agents. One `MavenProjectAgent` per project owns the child registry, shared project tools/MCP, and an indexed conversation directory that serves the dashboard inbox in a single query. Each public transcript (`pub_<conversationId>`) and each private Sidechat (`sc_<conversationId>`) is an isolated child instance of the shared `MavenChatAgent` class; every transcript lives in its child Agent's SQLite, and every public mutation is serialized by its child. The widget and dashboard both use native Agent chat sessions. Retention deletes child Agents and conversation-scoped R2 attachments. D1 keeps product/business data only; the frozen legacy `conversations`/`messages` tables remain solely as the one-time import source (`worker/conversations/legacy-conversation-reader.ts` plus the backfill admin endpoints) until the final cleanup migration drops them.
+
+Sidechat exposes a fixed provider-neutral tool set. `search_knowledge` and `present_reply_draft` are direct first-party tools. External MCP and custom HTTP tools use `search_project_tools`, `describe_project_tool`, and `call_project_tool`. Raw external schemas stay inside `MavenProjectAgent`; the model receives bounded summaries and argument guides. A versioned `toolRef` binds each call and approval to the exact connection, tool, catalog fingerprint, safety, and access policy. Manual-write arguments are encrypted in the project Agent until the exact approved call consumes them once; only redacted arguments enter the private transcript.
 
 ---
 
@@ -775,7 +777,7 @@ Resource ingestion:
 
 ### Live agent handoff (Telegram and Slack)
 
-Messenger transport sits behind `AgentChannelAdapter` (`worker/services/agent-channel.ts`). Telegram and Slack share one inbound handler (`runAgentChannelInbound`) and one outbound fan-out (`forwardVisitorThroughAgentChannels`). Dashboard and MCP ordinary replies do not go through the adapters. Adapters do not interpret `@BotName` or start Sidechat.
+Messenger transport sits behind `AgentChannelAdapter` (`worker/services/agent-channel.ts`). Telegram and Slack share one inbound handler (`runAgentChannelInbound`). Initial escalation fans out through all enabled adapters. Later visitor messages use `forwardVisitorToJoinedHumans` to reach only joined external clients. Dashboard and MCP ordinary replies do not go through the adapters. Adapters do not interpret `@BotName` or start Sidechat.
 
 1. The owner saves a Telegram bot token or Slack bot token plus signing secret in Tools. `botName` can be set once, then it is locked. Tokens are encrypted at rest. Telegram uses `ENCRYPTION_KEY` (`worker/services/telegram-secrets.ts`). Slack uses its own derived secrets (`worker/services/slack-secrets.ts`).
 2. Telegram: saving registers the webhook with a per-project `secret_token`. The chat id is learned from the first verified update. Slack: Events API at `/api/slack/events/:projectId`. The first trusted `event.channel` binds once.
@@ -783,19 +785,23 @@ Messenger transport sits behind `AgentChannelAdapter` (`worker/services/agent-ch
    - Conversation status changes to `waiting_agent`
    - Enabled adapters send an escalation (`notifyEscalation`) with recent messages, a dashboard link, and `@BotName` command hints
    - Thread ids are stored on `channelThreads` (`telegram` and/or `slack`). `telegramThreadId` remains `channelThreads.telegram ?? null`
-4. While in agent mode (`waiting_agent` / `agent_replied`):
-   - AI is completely silenced
-   - Visitor messages are forwarded through every enabled adapter
-   - The widget endpoint returns `{ ok: true, agentMode: true }` JSON instead of SSE
-5. Agent replies in Telegram or Slack (not prefixed with `@BotName`) are stored as agent messages. Status becomes `agent_replied`.
-6. Agent types `@BotName` commands in Telegram, Slack, the dashboard composer, or MCP. Bare `@BotName` hands the thread back to AI, assigns Maven, and writes `{name} assigned {botName}`. Any other text is read as ordinary language by `interpretBotNameCommand()` and applied as one decision: keep or hand off ownership, store or clear instructions, speak now or stay silent, investigate now, close, or ban. Speak-now uses `generateDirectedResponse()`. Investigate-now starts a private Sidechat turn via `startSidechatTurn` and does not speak to the visitor. MCP `ask_maven` starts the same investigate path. `get_sidechat_status` returns `{ status, hasDraft, waitingApproval }` only. Drafts stay in the dashboard until a human sends them. There is no keyword list. Dashboard and MCP commands are not stored as visitor-visible agent rows. Idle takeover writes `{botName} self-assigned because the human seemed away`.
+4. While review is pending (`waiting_agent`):
+   - Maven remains active in `assist_until_agent`, but `request_team_help` is hidden
+   - Later visitor messages stay in the conversation and are not pushed externally
+5. After a human replies (`agent_replied`):
+   - AI is silenced in `human_only`
+   - Telegram, Slack, and member email routes join as human replies arrive there. Email routes store only the authorized member identity because inbound providers do not preserve a reliable RFC reply id.
+   - Later visitor messages go only to the joined external routes; dashboard and MCP remain transcript-only clients
+   - Joined routes clear when Maven receives ownership again
+6. Agent replies in Telegram or Slack (not prefixed with `@BotName`) are stored as agent messages. Status becomes `agent_replied`.
+7. Agent types `@BotName` commands in Telegram, Slack, the dashboard composer, or MCP. Bare `@BotName` hands the thread back to AI, assigns Maven, and writes `{name} assigned {botName}`. Any other text is read as ordinary language by `interpretBotNameCommand()` and applied as one decision: keep or hand off ownership, store or clear instructions, speak now or stay silent, investigate now, close, or ban. Speak-now uses `generateDirectedResponse()`. Investigate-now starts a private Sidechat turn via `startSidechatTurn` and does not speak to the visitor. MCP `ask_maven` starts the same investigate path. `get_sidechat_status` returns `{ status, hasDraft, waitingApproval }` only. Drafts stay in the dashboard until a human sends them. There is no keyword list. Dashboard and MCP commands are not stored as visitor-visible agent rows. Idle takeover writes `{botName} self-assigned because the human seemed away`.
 
 #### Messenger methods
 
 | Method | Trigger | Content |
 |--------|---------|---------|
 | `notifyEscalation` | AI handoff or visitor requests human | Recent messages, summary, dashboard link, command hints |
-| `forwardVisitorMessage` | Visitor sends a message while in agent mode | Visitor name + message content, threaded reply |
+| `forwardVisitorMessage` | Visitor sends a message after this channel joins | Visitor name + message content, threaded reply |
 | `confirm` | Command result or Sidechat status ping | Short confirmation text |
 
 ### Page Context API

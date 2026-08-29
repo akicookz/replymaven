@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { getMcpPreset, listMcpPresets } from "./mcp-presets";
+import {
+  buildSidechatMcpToolSource,
+  getMcpPreset,
+  listMcpPresets,
+} from "./mcp-presets";
 
 describe("Sidechat MCP presets", () => {
   test("exposes only the five verified presentation presets", () => {
@@ -52,6 +56,25 @@ describe("Sidechat MCP presets", () => {
     expect(preset).not.toHaveProperty("reducer");
     expect(preset).not.toHaveProperty("identityMapping");
     expect(getMcpPreset("unknown")).toBeNull();
+  });
+
+  test("builds Sidechat source from the connection name and preset icon", () => {
+    expect(buildSidechatMcpToolSource({
+      name: "PostHog",
+      presetKey: "posthog",
+    })).toEqual({
+      kind: "mcp",
+      name: "PostHog",
+      icon: "/integrations/posthog.svg",
+    });
+    expect(buildSidechatMcpToolSource({
+      name: "Warehouse",
+      presetKey: null,
+    })).toEqual({
+      kind: "mcp",
+      name: "Warehouse",
+      icon: null,
+    });
   });
 
   test("keeps PostHog OAuth in regular-tools read-only mode", () => {

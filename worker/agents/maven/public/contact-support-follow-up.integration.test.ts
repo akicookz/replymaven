@@ -147,7 +147,7 @@ describe("contact support follow-up", () => {
     expect(botMessage?.content).toContain("Hi Aki,");
     expect(botMessage?.content).toContain("I've flagged this for the team.");
     expect(botMessage?.content).toContain(
-      "The team should get back to you as soon as possible.",
+      "Response time can vary.",
     );
   }, 60_000);
 

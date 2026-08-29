@@ -8,7 +8,10 @@ import {
 } from "react";
 import { ArrowDown } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { ChatPerspective } from "@/lib/inbox/sidechat";
+import {
+  shouldShowSidechatSenderTimestamp,
+  type ChatPerspective,
+} from "@/lib/inbox/sidechat";
 import { parseSystemKind } from "@/lib/inbox/system-events";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import { cn } from "@/lib/utils";
@@ -42,6 +45,8 @@ interface ChatThreadProps {
   /** Optional controls/status rendered inside the same transcript flow. */
   head?: ReactNode;
   tail?: ReactNode;
+  /** Hide Maven · time on the in-flight Sidechat reply until the turn settles. */
+  inFlightBotMessageId?: string | null;
 }
 
 // Placeholder bubbles shown while the conversation detail loads. Mirrors the
@@ -126,6 +131,7 @@ export default function ChatThread({
   contentClassName,
   head,
   tail,
+  inFlightBotMessageId = null,
 }: ChatThreadProps) {
   const threadRef = useRef<HTMLDivElement>(null);
   const previousConversationIdRef = useRef(conversation.id);
@@ -339,7 +345,17 @@ export default function ChatThread({
                   isMatch={isMatch}
                   isActiveMatch={isActiveMatch}
                   groupedWithPrev={groupedWithPrev}
-                  showMetadata={!groupedWithNext}
+                  showMetadata={
+                    !groupedWithNext &&
+                    shouldShowSidechatSenderTimestamp({
+                      perspective,
+                      role: message.role,
+                      messageId: message.id,
+                      turnInFlight: inFlightBotMessageId !== null,
+                      inFlightBotMessageId,
+                      toolPending: false,
+                    })
+                  }
                   perspective={perspective}
                   onAddToReply={onAddToReply}
                   onApprovalAction={onApprovalAction}

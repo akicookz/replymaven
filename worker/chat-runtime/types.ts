@@ -142,6 +142,16 @@ export type ChatOwnershipEvent =
   | "human_joined"
   | "ai_handed_back";
 
+export type ActiveHumanRoute =
+  | {
+      kind: "agent_channel";
+      channel: "telegram" | "slack";
+    }
+  | {
+      kind: "email";
+      userId: string;
+    };
+
 export interface ChatOwnershipSnapshot {
   status: string;
   chatState: string | null;
@@ -243,6 +253,7 @@ export interface ConversationChatState {
   state: ConversationChatStateName;
   aiParticipation: AiParticipation;
   ownershipRevision: number;
+  activeHumanRoutes: ActiveHumanRoute[];
   askedClarifications: string[];
   clarificationAttempts: number;
   lastBotQuestion: string | null;
@@ -262,6 +273,7 @@ export function createInitialChatState(): ConversationChatState {
     state: "active",
     aiParticipation: "continuous",
     ownershipRevision: 0,
+    activeHumanRoutes: [],
     askedClarifications: [],
     clarificationAttempts: 0,
     lastBotQuestion: null,
@@ -301,6 +313,7 @@ export function applyChatOwnershipEvent(
       state: "active",
       aiParticipation: "continuous",
       ownershipRevision: chatState.ownershipRevision + 1,
+      activeHumanRoutes: [],
     };
   }
 
@@ -310,7 +323,103 @@ export function applyChatOwnershipEvent(
     state: "escalating",
     aiParticipation: "assist_until_agent",
     ownershipRevision: chatState.ownershipRevision + 1,
+    activeHumanRoutes: [],
   };
+}
+
+interface HumanRouteMessage {
+  id: string;
+  author?: string;
+  origin?: string | null;
+  userId?: string | null;
+  externalReplyTo?: string | null;
+  createdAt?: number;
+}
+
+export function activeHumanRouteFromMessage(
+  message: HumanRouteMessage,
+): ActiveHumanRoute | null {
+  if (message.origin === "telegram" || message.origin === "slack") {
+    return {
+      kind: "agent_channel",
+      channel: message.origin,
+    };
+  }
+  if (
+    message.origin === "email" &&
+    typeof message.userId === "string" &&
+    message.userId.trim()
+  ) {
+    return {
+      kind: "email",
+      userId: message.userId,
+    };
+  }
+  return null;
+}
+
+function activeHumanRouteKey(route: ActiveHumanRoute): string {
+  if (route.kind === "agent_channel") {
+    return `agent_channel:${route.channel}`;
+  }
+  return `email:${route.userId}`;
+}
+
+export function joinActiveHumanRoute(
+  routes: ActiveHumanRoute[],
+  route: ActiveHumanRoute | null,
+): ActiveHumanRoute[] {
+  if (!route) return routes;
+  const key = activeHumanRouteKey(route);
+  const existingIndex = routes.findIndex(
+    (candidate) => activeHumanRouteKey(candidate) === key,
+  );
+  if (existingIndex < 0) return [...routes, route];
+  return routes;
+}
+
+export function inferLegacyActiveHumanRoutes(
+  messages: HumanRouteMessage[],
+  escalatedAt: number | null,
+): ActiveHumanRoute[] {
+  if (escalatedAt === null) return [];
+  let routes: ActiveHumanRoute[] = [];
+  for (const message of messages) {
+    if (
+      message.author !== "agent" ||
+      typeof message.createdAt !== "number" ||
+      message.createdAt < escalatedAt
+    ) {
+      continue;
+    }
+    routes = joinActiveHumanRoute(
+      routes,
+      activeHumanRouteFromMessage(message),
+    );
+  }
+  return routes;
+}
+
+function parseActiveHumanRoute(value: unknown): ActiveHumanRoute | null {
+  if (!value || typeof value !== "object") return null;
+  const route = value as Record<string, unknown>;
+  if (
+    route.kind === "agent_channel" &&
+    (route.channel === "telegram" || route.channel === "slack")
+  ) {
+    return { kind: "agent_channel", channel: route.channel };
+  }
+  if (
+    route.kind === "email" &&
+    typeof route.userId === "string" &&
+    route.userId.trim()
+  ) {
+    return {
+      kind: "email",
+      userId: route.userId,
+    };
+  }
+  return null;
 }
 
 export function mergeChatStateForPersistence(
@@ -323,6 +432,7 @@ export function mergeChatStateForPersistence(
       state: "agent_mode",
       aiParticipation: "human_only",
       ownershipRevision: currentState.ownershipRevision,
+      activeHumanRoutes: currentState.activeHumanRoutes,
     };
   }
   if (currentState.aiParticipation !== incomingState.aiParticipation) {
@@ -331,6 +441,7 @@ export function mergeChatStateForPersistence(
       state: currentState.state,
       aiParticipation: currentState.aiParticipation,
       ownershipRevision: currentState.ownershipRevision,
+      activeHumanRoutes: currentState.activeHumanRoutes,
     };
   }
   return {
@@ -375,6 +486,13 @@ export function parseChatState(
         Number.isFinite(chat.ownershipRevision)
           ? Math.max(0, Math.floor(chat.ownershipRevision))
           : 0,
+      activeHumanRoutes: Array.isArray(chat.activeHumanRoutes)
+        ? chat.activeHumanRoutes.reduce<ActiveHumanRoute[]>(
+            (routes, value) =>
+              joinActiveHumanRoute(routes, parseActiveHumanRoute(value)),
+            [],
+          )
+        : [],
       askedClarifications: Array.isArray(chat.askedClarifications)
         ? chat.askedClarifications.filter((q): q is string => typeof q === "string")
         : [],

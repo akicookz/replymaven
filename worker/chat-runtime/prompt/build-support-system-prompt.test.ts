@@ -52,12 +52,52 @@ test("makes request_team_help the only public handoff path", () => {
   expect(prompt).toContain(
     "ask only for the returned requiredFields as an ordinary conversational follow-up",
   );
-  expect(prompt).toContain("use the returned visitorMessage exactly");
+  expect(prompt).toContain("Reply naturally in the visitor's language");
+  expect(prompt).not.toContain("use the returned visitorMessage exactly");
   expect(prompt).not.toContain("Runtime decides whether handoff/contact collection is needed");
   expect(prompt).not.toContain("The runtime handles forwarding silently");
   expect(missingGroundingPrompt).not.toContain(
     "Runtime owns escalation state",
   );
+});
+
+test("states trusted pending-review facts and a configured response window", () => {
+  const prompt = buildSupportSystemPrompt(
+    {
+      ...settings,
+      avgResponseTime: "2 to 4 business hours",
+      workingHours: null,
+    },
+    "Acme",
+    "",
+    "",
+    { aiParticipation: "assist_until_agent" },
+  );
+
+  expect(prompt).toContain("<team-review-state>");
+  expect(prompt).toContain("The request has already been sent to an engineer.");
+  expect(prompt).toContain("2 to 4 business hours");
+  expect(prompt).toContain("Never invent urgency, priority, or an ETA");
+  expect(prompt).toContain("visitor's language");
+  expect(prompt).not.toContain("call request_team_help");
+});
+
+test("uses a truthful variable-response fallback when no window is configured", () => {
+  const prompt = buildSupportSystemPrompt(
+    {
+      ...settings,
+      avgResponseTime: null,
+      workingHours: null,
+    },
+    "Acme",
+    "",
+    "",
+    { aiParticipation: "assist_until_agent" },
+  );
+
+  expect(prompt).toContain("Response time can vary.");
+  expect(prompt).not.toContain("shortly");
+  expect(prompt).not.toContain("soon");
 });
 
 test("adds the trusted Maven channel contract to the common prompt", () => {

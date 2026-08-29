@@ -538,7 +538,6 @@ ${msg.body}
     projectName: string;
     conversationId: string;
     messageId: string;
-    inReplyToMessageId: string;
     visitorDisplayName: string;
     messageContent: string;
     dashboardUrl: string;
@@ -550,7 +549,6 @@ ${msg.body}
       projectName,
       conversationId,
       messageId,
-      inReplyToMessageId,
       visitorDisplayName,
       messageContent,
       dashboardUrl,
@@ -563,7 +561,6 @@ ${msg.body}
       .join("");
 
     const styles = buildAccentStyles(accentColor);
-    const ref = buildEmailMessageId(inReplyToMessageId);
 
     await this.send({
       from: `${projectName} <${projectSlug}@${EMAIL_DOMAIN}>`,
@@ -574,8 +571,6 @@ ${msg.body}
         "X-Conversation-Id": conversationId,
         "X-Project-Slug": projectSlug,
         "Message-ID": buildEmailMessageId(messageId),
-        "In-Reply-To": ref,
-        "References": ref,
         "Auto-Submitted": "auto-generated",
         "Precedence": "bulk",
       },

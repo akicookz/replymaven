@@ -84,8 +84,8 @@ export default function MessageBubble({
   const showContent = shouldShowMessageContent(message.content);
   const showSidechatTrace =
     perspective === "sidechat" && Boolean(message.sidechatTrace?.length);
-  // While a tool runs or waits for approval, the trace row is the whole
-  // story; sender and time under a message still in flight are noise.
+  // While a tool runs, waits for approval, or the turn is still open,
+  // sender and time under a message still in flight are noise.
   const sidechatToolPending =
     perspective === "sidechat" &&
     message.sidechatTrace?.some(

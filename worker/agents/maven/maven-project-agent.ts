@@ -43,6 +43,7 @@ import type {
 import { ProjectService } from "../../services/project-service";
 import { TeamService } from "../../services/team-service";
 import { ToolService } from "../../services/tool-service";
+import { decrypt, encrypt } from "../../services/encryption-service";
 import { type AppEnv } from "../../types";
 import { createSearchKnowledgeTool } from "../../chat-runtime/tools/internal/search-knowledge";
 import { executeHttpToolRequest } from "../../chat-runtime/tools/http-tool-executor";
@@ -62,7 +63,11 @@ import type {
   ProjectMcpAuthMode,
   ProjectMcpPolicyInput,
 } from "../sidechat/mcp-types";
-import { getMcpPreset, type McpPresetKey } from "../sidechat/mcp-presets";
+import {
+  buildSidechatMcpToolSource,
+  getMcpPreset,
+  type McpPresetKey,
+} from "../sidechat/mcp-presets";
 import {
   normalizeMcpCatalog,
   normalizeMcpToolResult,
@@ -72,10 +77,30 @@ import {
 import { ReadOnlyMcpOAuthClientProvider } from "../sidechat/mcp-oauth-provider";
 import { buildSidechatContext } from "../sidechat/sidechat-context";
 import {
+  buildSidechatHttpToolDescriptor,
+  buildSidechatKnowledgeDescriptor,
   buildSidechatToolDescriptors,
   executeSidechatProjectTool,
   persistSidechatActionAudit,
 } from "../sidechat/project-tool-proxy";
+import {
+  decodeSidechatToolRef,
+  describeSidechatGatewayTool,
+  descriptorMatchesToolBinding,
+  parseSidechatToolArgumentsJson,
+  resolvedGatewayTool,
+  searchSidechatGatewayCatalog,
+  type ExecuteSidechatGatewayToolRequest,
+  type ExecuteSidechatKnowledgeRequest,
+  type SidechatArgumentGuide,
+  type SidechatGatewayContext,
+  type SidechatGatewayResolvedTool,
+  type SidechatGatewaySearchResult,
+} from "../sidechat/project-tool-gateway";
+import {
+  normalizeProjectToolInputSchema,
+  validateProjectToolInput,
+} from "../sidechat/project-tool-schema";
 import {
   ConversationDirectory,
   type ConversationDirectorySql,
@@ -103,6 +128,27 @@ interface McpConnectionMetadataRow {
   preset_key: string | null;
   url: string;
   auth_mode: string;
+}
+
+interface StagedToolApprovalRow {
+  child_name: string;
+  conversation_id: string;
+  actor_user_id: string;
+  tool_call_id: string;
+  tool_ref: string;
+  ciphertext: string;
+  created_at: number;
+  expires_at: number;
+}
+
+interface StagedToolApprovalEnvelope {
+  v: 1;
+  childName: string;
+  conversationId: string;
+  actorUserId: string;
+  toolCallId: string;
+  toolRef: string;
+  argumentsJson: string;
 }
 
 interface McpToolPolicyRow {
@@ -145,6 +191,22 @@ type AddMcpServerResult =
   | { id: string; state: "ready" };
 
 const MCP_TOOL_TIMEOUT_MS = 30_000;
+const STAGED_TOOL_APPROVAL_TTL_MS = 24 * 60 * 60 * 1_000;
+
+function stagedToolApprovalMatches(
+  left: StagedToolApprovalEnvelope | null,
+  right: StagedToolApprovalEnvelope,
+): boolean {
+  return Boolean(
+    left &&
+    left.childName === right.childName &&
+    left.conversationId === right.conversationId &&
+    left.actorUserId === right.actorUserId &&
+    left.toolCallId === right.toolCallId &&
+    left.toolRef === right.toolRef &&
+    left.argumentsJson === right.argumentsJson,
+  );
+}
 const PUBLIC_ARCHIVE_RETENTION_MS = 60 * 24 * 60 * 60 * 1_000;
 
 async function runWithExternalActionLease<T>(
@@ -206,17 +268,17 @@ function parseMcpToolPolicy(row: McpToolPolicyRow): SidechatToolDescriptor | nul
     return null;
   }
   try {
-    const inputSchema = JSON.parse(row.input_schema) as unknown;
-    if (!inputSchema || typeof inputSchema !== "object" || Array.isArray(inputSchema)) {
-      return null;
-    }
+    const inputSchema = normalizeProjectToolInputSchema(
+      JSON.parse(row.input_schema) as unknown,
+    );
+    if (!inputSchema.ok) return null;
     return {
       connectionId: row.connection_id,
       toolName: row.tool_name,
       exposedName: row.exposed_name,
       displayName: row.display_name,
       description: row.description,
-      inputSchema,
+      inputSchema: inputSchema.schema,
       catalogFingerprint: row.catalog_fingerprint,
       audience: "sidechat",
       safety,
@@ -1197,7 +1259,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     });
   }
 
-  async getSidechatToolDescriptors(
+  private async loadSidechatToolDescriptors(
     childName: string,
     conversationId: string,
   ): Promise<SidechatToolDescriptor[]> {
@@ -1217,6 +1279,359 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       ...httpDescriptors,
       ...mcpConnections.flatMap((connection) => connection.tools),
     ].map((descriptor) => this.withAlwaysAllowState(descriptor));
+  }
+
+  private async canUseSidechatGateway(
+    input: SidechatGatewayContext,
+  ): Promise<boolean> {
+    try {
+      this.assertRegisteredSidechat(input.childName, input.conversationId);
+    } catch {
+      return false;
+    }
+    const conversation = this.conversationDirectory().getConversation(
+      input.conversationId,
+    );
+    if (!conversation || conversation.archivedAt !== null) return false;
+    return this.canActorAccessProject(drizzle(this.env.DB), input.actorUserId);
+  }
+
+  private async resolveSidechatToolDescriptor(
+    toolRef: string,
+  ): Promise<SidechatToolDescriptor | null> {
+    const binding = decodeSidechatToolRef(toolRef);
+    if (!binding) return null;
+    let descriptor: SidechatToolDescriptor | null = null;
+    if (binding.connectionId.startsWith("mcp-")) {
+      descriptor = this.getMcpToolPolicy(
+        binding.connectionId,
+        binding.toolName,
+      );
+    } else if (binding.connectionId.startsWith("http:")) {
+      const toolId = binding.connectionId.slice("http:".length);
+      const tool = await new ToolService(drizzle(this.env.DB))
+        .getAuthoritativeTool(this.name, toolId);
+      descriptor = tool ? await buildSidechatHttpToolDescriptor(tool) : null;
+      if (descriptor) descriptor = this.withAlwaysAllowState(descriptor);
+    }
+    return descriptor && descriptorMatchesToolBinding(descriptor, binding)
+      ? descriptor
+      : null;
+  }
+
+  async searchSidechatProjectTools(
+    input: SidechatGatewayContext & {
+      query: string;
+      cursor: string | null;
+      limit: number;
+    },
+  ): Promise<SidechatGatewaySearchResult> {
+    if (!await this.canUseSidechatGateway(input)) {
+      return { tools: [], nextCursor: null };
+    }
+    const descriptors = await this.loadSidechatToolDescriptors(
+      input.childName,
+      input.conversationId,
+    );
+    return searchSidechatGatewayCatalog(descriptors, input);
+  }
+
+  async describeSidechatProjectTool(
+    input: SidechatGatewayContext & {
+      toolRef: string;
+      cursor: string | null;
+      limit: number;
+    },
+  ): Promise<SidechatArgumentGuide | null> {
+    if (!await this.canUseSidechatGateway(input)) return null;
+    const descriptor = await this.resolveSidechatToolDescriptor(input.toolRef);
+    return descriptor ? describeSidechatGatewayTool(descriptor, input) : null;
+  }
+
+  async resolveSidechatProjectTool(
+    input: SidechatGatewayContext & { toolRef: string },
+  ): Promise<SidechatGatewayResolvedTool | null> {
+    if (!await this.canUseSidechatGateway(input)) return null;
+    const descriptor = await this.resolveSidechatToolDescriptor(input.toolRef);
+    return descriptor ? resolvedGatewayTool(descriptor) : null;
+  }
+
+  async executeProjectTool(
+    request: ExecuteSidechatGatewayToolRequest,
+  ): Promise<ExecuteProjectToolResult> {
+    const binding = decodeSidechatToolRef(request.toolRef);
+    if (!binding) {
+      return {
+        status: "denied",
+        safeActivity: "Tool unavailable",
+        errorCode: "tool_unavailable",
+      };
+    }
+    const descriptor = await this.resolveSidechatToolDescriptor(
+      request.toolRef,
+    );
+    if (!descriptor) {
+      return {
+        status: "denied",
+        safeActivity: "Tool unavailable",
+        errorCode: "tool_authority_changed",
+      };
+    }
+    let argumentsJson = request.argumentsJson;
+    if (request.approvalMode === "once") {
+      if (!request.approvedOnce) {
+        return {
+          status: "denied",
+          safeActivity: "Tool unavailable",
+          errorCode: "approval_required",
+        };
+      }
+      const staged = await this.consumeProjectToolApproval(request);
+      if (!staged) {
+        return {
+          status: "denied",
+          safeActivity: "Tool unavailable",
+          errorCode: "approval_payload_unavailable",
+        };
+      }
+      argumentsJson = staged;
+    }
+    const parsedArguments = parseSidechatToolArgumentsJson(argumentsJson);
+    const normalized = normalizeProjectToolInputSchema(descriptor.inputSchema);
+    if (!parsedArguments || !normalized.ok) {
+      return {
+        status: "denied",
+        safeActivity: "Tool unavailable",
+        errorCode: "invalid_tool_input",
+      };
+    }
+    const validation = validateProjectToolInput(
+      normalized.schema,
+      parsedArguments,
+    );
+    if (!validation.ok) {
+      return {
+        status: "denied",
+        safeActivity: "Tool unavailable",
+        errorCode: validation.errorCode,
+      };
+    }
+    return this.executeResolvedProjectTool({
+      childName: request.childName,
+      conversationId: request.conversationId,
+      actorUserId: request.actorUserId,
+      connectionId: binding.connectionId,
+      toolName: binding.toolName,
+      catalogFingerprint: binding.catalogFingerprint,
+      safety: binding.safety,
+      access: binding.access,
+      approvalMode: request.approvalMode,
+      input: validation.value,
+    });
+  }
+
+  async stageProjectToolApproval(
+    request: SidechatGatewayContext & {
+      toolCallId: string;
+      toolRef: string;
+      argumentsJson: string;
+    },
+  ): Promise<boolean> {
+    if (
+      !this.env.ENCRYPTION_KEY ||
+      !await this.canUseSidechatGateway(request)
+    ) {
+      return false;
+    }
+    const descriptor = await this.resolveSidechatToolDescriptor(
+      request.toolRef,
+    );
+    const parsedArguments = parseSidechatToolArgumentsJson(
+      request.argumentsJson,
+    );
+    if (!descriptor || descriptor.access !== "write" || !parsedArguments) {
+      return false;
+    }
+    const normalized = normalizeProjectToolInputSchema(descriptor.inputSchema);
+    if (
+      !normalized.ok ||
+      !validateProjectToolInput(normalized.schema, parsedArguments).ok
+    ) {
+      return false;
+    }
+
+    this.ensureMcpApplicationSchema();
+    const now = Date.now();
+    void this.sql`
+      DELETE FROM sidechat_tool_approval_payloads
+      WHERE expires_at <= ${now}
+    `;
+    const envelope: StagedToolApprovalEnvelope = {
+      v: 1,
+      childName: request.childName,
+      conversationId: request.conversationId,
+      actorUserId: request.actorUserId,
+      toolCallId: request.toolCallId,
+      toolRef: request.toolRef,
+      argumentsJson: request.argumentsJson,
+    };
+    const existing = this.sql<StagedToolApprovalRow>`
+      SELECT child_name, conversation_id, actor_user_id, tool_call_id,
+             tool_ref, ciphertext, created_at, expires_at
+      FROM sidechat_tool_approval_payloads
+      WHERE tool_call_id = ${request.toolCallId}
+      LIMIT 1
+    `[0];
+    if (existing) {
+      const current = await this.decryptStagedToolApproval(existing);
+      return stagedToolApprovalMatches(current, envelope);
+    }
+    const ciphertext = await encrypt(
+      JSON.stringify(envelope),
+      this.env.ENCRYPTION_KEY,
+    );
+    const inserted = this.sql<{ tool_call_id: string }>`
+      INSERT OR IGNORE INTO sidechat_tool_approval_payloads (
+        child_name, conversation_id, actor_user_id, tool_call_id, tool_ref,
+        ciphertext, created_at, expires_at
+      ) VALUES (
+        ${request.childName}, ${request.conversationId}, ${request.actorUserId},
+        ${request.toolCallId}, ${request.toolRef}, ${ciphertext}, ${now},
+        ${now + STAGED_TOOL_APPROVAL_TTL_MS}
+      )
+      RETURNING tool_call_id
+    `;
+    if (inserted.length === 1) return true;
+    const raced = this.sql<StagedToolApprovalRow>`
+      SELECT child_name, conversation_id, actor_user_id, tool_call_id,
+             tool_ref, ciphertext, created_at, expires_at
+      FROM sidechat_tool_approval_payloads
+      WHERE tool_call_id = ${request.toolCallId}
+      LIMIT 1
+    `[0];
+    if (!raced) return false;
+    return stagedToolApprovalMatches(
+      await this.decryptStagedToolApproval(raced),
+      envelope,
+    );
+  }
+
+  private async hasStagedProjectToolApproval(input: {
+    childName: string;
+    conversationId: string;
+    actorUserId: string;
+    toolCallId: string;
+    toolRef: string;
+  }): Promise<boolean> {
+    if (!this.env.ENCRYPTION_KEY) return false;
+    this.ensureMcpApplicationSchema();
+    const row = this.sql<StagedToolApprovalRow>`
+      SELECT child_name, conversation_id, actor_user_id, tool_call_id,
+             tool_ref, ciphertext, created_at, expires_at
+      FROM sidechat_tool_approval_payloads
+      WHERE child_name = ${input.childName}
+        AND conversation_id = ${input.conversationId}
+        AND actor_user_id = ${input.actorUserId}
+        AND tool_call_id = ${input.toolCallId}
+        AND tool_ref = ${input.toolRef}
+        AND expires_at > ${Date.now()}
+      LIMIT 1
+    `[0];
+    if (!row) return false;
+    const envelope = await this.decryptStagedToolApproval(row);
+    return Boolean(
+      envelope &&
+      envelope.childName === input.childName &&
+      envelope.conversationId === input.conversationId &&
+      envelope.actorUserId === input.actorUserId &&
+      envelope.toolCallId === input.toolCallId &&
+      envelope.toolRef === input.toolRef,
+    );
+  }
+
+  private async consumeProjectToolApproval(
+    request: ExecuteSidechatGatewayToolRequest,
+  ): Promise<string | null> {
+    if (!this.env.ENCRYPTION_KEY) return null;
+    this.ensureMcpApplicationSchema();
+    const rows = this.sql<StagedToolApprovalRow>`
+      DELETE FROM sidechat_tool_approval_payloads
+      WHERE child_name = ${request.childName}
+        AND conversation_id = ${request.conversationId}
+        AND actor_user_id = ${request.actorUserId}
+        AND tool_call_id = ${request.toolCallId}
+        AND tool_ref = ${request.toolRef}
+        AND expires_at > ${Date.now()}
+      RETURNING child_name, conversation_id, actor_user_id, tool_call_id,
+                tool_ref, ciphertext, created_at, expires_at
+    `;
+    const row = rows[0];
+    if (!row) return null;
+    const envelope = await this.decryptStagedToolApproval(row);
+    if (
+      !envelope ||
+      envelope.childName !== request.childName ||
+      envelope.conversationId !== request.conversationId ||
+      envelope.actorUserId !== request.actorUserId ||
+      envelope.toolCallId !== request.toolCallId ||
+      envelope.toolRef !== request.toolRef
+    ) {
+      return null;
+    }
+    return envelope.argumentsJson;
+  }
+
+  private async decryptStagedToolApproval(
+    row: StagedToolApprovalRow,
+  ): Promise<StagedToolApprovalEnvelope | null> {
+    try {
+      const plaintext = await decrypt(row.ciphertext, this.env.ENCRYPTION_KEY);
+      const value: unknown = JSON.parse(plaintext);
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return null;
+      }
+      const envelope = value as Record<string, unknown>;
+      if (
+        envelope.v !== 1 ||
+        typeof envelope.childName !== "string" ||
+        typeof envelope.conversationId !== "string" ||
+        typeof envelope.actorUserId !== "string" ||
+        typeof envelope.toolCallId !== "string" ||
+        typeof envelope.toolRef !== "string" ||
+        typeof envelope.argumentsJson !== "string"
+      ) {
+        return null;
+      }
+      return {
+        v: 1,
+        childName: envelope.childName,
+        conversationId: envelope.conversationId,
+        actorUserId: envelope.actorUserId,
+        toolCallId: envelope.toolCallId,
+        toolRef: envelope.toolRef,
+        argumentsJson: envelope.argumentsJson,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  async executeSidechatKnowledge(
+    request: ExecuteSidechatKnowledgeRequest,
+  ): Promise<ExecuteProjectToolResult> {
+    const descriptor = buildSidechatKnowledgeDescriptor();
+    return this.executeResolvedProjectTool({
+      childName: request.childName,
+      conversationId: request.conversationId,
+      actorUserId: request.actorUserId,
+      connectionId: descriptor.connectionId,
+      toolName: descriptor.toolName,
+      catalogFingerprint: descriptor.catalogFingerprint,
+      safety: descriptor.safety ?? "read",
+      access: descriptor.access,
+      approvalMode: "none",
+      input: request.input,
+    });
   }
 
   async grantAlwaysForPendingApproval(
@@ -1243,10 +1658,18 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       toolCallId,
     ) as PendingSidechatApprovalScope | null;
     if (!pending) return false;
-    const descriptor = (await this.getSidechatToolDescriptors(
+    if (!await this.hasStagedProjectToolApproval({
       childName,
       conversationId,
-    )).find((candidate) => candidate.exposedName === pending.exposedName);
+      actorUserId,
+      toolCallId,
+      toolRef: pending.toolRef,
+    })) {
+      return false;
+    }
+    const descriptor = await this.resolveSidechatToolDescriptor(
+      pending.toolRef,
+    );
     if (!descriptor || descriptor.access !== "write" || !descriptor.enabled) {
       return false;
     }
@@ -1513,7 +1936,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     return true;
   }
 
-  async executeProjectTool(
+  private async executeResolvedProjectTool(
     request: ExecuteProjectToolRequest,
   ): Promise<ExecuteProjectToolResult> {
     const db = drizzle(this.env.DB);
@@ -1681,6 +2104,18 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
         PRIMARY KEY (connection_id, tool_name)
       )
     `;
+    void this.sql`
+      CREATE TABLE IF NOT EXISTS sidechat_tool_approval_payloads (
+        child_name TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        actor_user_id TEXT NOT NULL,
+        tool_call_id TEXT PRIMARY KEY,
+        tool_ref TEXT NOT NULL,
+        ciphertext TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      )
+    `;
   }
 
   private async runExclusiveMcpOperation<T>(
@@ -1740,7 +2175,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     `
       .map(parseMcpToolPolicy)
       .filter((tool): tool is SidechatToolDescriptor => tool !== null)
-      .map((tool) => this.withAlwaysAllowState(tool));
+      .map((tool) => this.withAlwaysAllowState(this.withMcpToolSource(tool)));
   }
 
   private getMcpToolPolicy(
@@ -1759,7 +2194,9 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       LIMIT 1
     `;
     const descriptor = rows[0] ? parseMcpToolPolicy(rows[0]) : null;
-    return descriptor ? this.withAlwaysAllowState(descriptor) : null;
+    return descriptor
+      ? this.withAlwaysAllowState(this.withMcpToolSource(descriptor))
+      : null;
   }
 
   private readAlwaysAllowGrant(
@@ -1774,6 +2211,20 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       LIMIT 1
     `;
     return rows[0] ?? null;
+  }
+
+  private withMcpToolSource(
+    descriptor: SidechatToolDescriptor,
+  ): SidechatToolDescriptor {
+    const metadata = this.readMcpConnectionMetadata(descriptor.connectionId);
+    if (!metadata) return descriptor;
+    return {
+      ...descriptor,
+      source: buildSidechatMcpToolSource({
+        name: metadata.name,
+        presetKey: metadata.preset_key,
+      }),
+    };
   }
 
   private withAlwaysAllowState(
@@ -1925,7 +2376,6 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     const authMode = metadata ? readMcpAuthMode(metadata.auth_mode) : null;
     if (!metadata || !authMode) return null;
     const presetKey = readMcpPresetKey(metadata.preset_key);
-    const preset = presetKey ? getMcpPreset(presetKey) : null;
     const native = this.getMcpServers().servers[connectionId] as
       | NativeMcpServer
       | undefined;
@@ -1942,14 +2392,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       ...(native?.state === "connected"
         ? { issue: "tool_discovery_failed" as const }
         : {}),
-      tools: this.readMcpToolPolicies(connectionId).map((tool) => ({
-        ...tool,
-        source: {
-          kind: "mcp" as const,
-          name: metadata.name,
-          icon: preset?.icon ?? null,
-        },
-      })),
+      tools: this.readMcpToolPolicies(connectionId),
     };
   }
 

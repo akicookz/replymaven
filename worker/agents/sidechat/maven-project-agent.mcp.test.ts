@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { beforeAll, describe, expect, mock, test } from "bun:test";
 import type { ConnectProjectMcpInput } from "./mcp-types";
+import { encodeSidechatToolRef } from "./project-tool-gateway";
 
 class FakeAgent {
   ctx: unknown;
@@ -367,6 +368,44 @@ describe("MavenProjectAgent native MCP connections", () => {
       safety: "read",
       access: "write",
       enabled: true,
+    });
+  });
+
+  test("resolve keeps the connection name and preset icon", async () => {
+    const fixture = createAgent({
+      tools: [{
+        ...readTool,
+        name: "query-run",
+        title: "Execute SQL query",
+        annotations: undefined,
+      }],
+    });
+    const connection = await fixture.agent.connectMcp(connectInput({
+      name: "PostHog",
+      presetKey: "posthog",
+      url: "https://mcp.posthog.com/mcp?readonly=true&mode=tools",
+      authMode: "oauth",
+      bearerToken: undefined,
+    }));
+    const tool = connection.tools[0]!;
+    Object.assign(fixture.agent, {
+      canUseSidechatGateway: mock(async () => true),
+    });
+
+    const resolved = await fixture.agent.resolveSidechatProjectTool({
+      childName: "sc_conversation-1",
+      conversationId: "conversation-1",
+      actorUserId: "user-1",
+      toolRef: encodeSidechatToolRef(tool),
+    });
+
+    expect(resolved?.presentation).toEqual({
+      displayName: "Execute SQL query",
+      source: {
+        kind: "mcp",
+        name: "PostHog",
+        icon: "/integrations/posthog.svg",
+      },
     });
   });
 

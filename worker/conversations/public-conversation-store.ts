@@ -382,6 +382,7 @@ export interface PublicConversationStore {
   claimTeamRequest(input: PublicTeamRequestClaimInput): Promise<PublicTeamRequestClaimResult>;
   getTeamRequestAcceptance(projectId: string, conversationId: string, acceptanceToken: string): Promise<PublicTeamRequestAcceptance | null>;
   claimTeamRequestNotification(projectId: string, conversationId: string, acceptanceToken: string): Promise<boolean>;
+  releaseTeamRequestNotification(projectId: string, conversationId: string, acceptanceToken: string): Promise<boolean>;
   addTeamRequestSummary(projectId: string, conversationId: string, acceptanceToken: string): Promise<PublicMessageRecord | null>;
   completeTeamRequestSummary(input: PublicTeamRequestSummaryInput): Promise<boolean>;
   updateLegacyEscalationMetadata(projectId: string, conversationId: string, update: PublicLegacyEscalationMetadataUpdate): Promise<PublicConversationRecord | null>;

@@ -1,3 +1,5 @@
+import type { SidechatToolSource } from "../../../shared/sidechat-agent";
+
 export type McpPresetKey =
   | "posthog"
   | "stripe"
@@ -61,4 +63,16 @@ export function listMcpPresets(): readonly McpPreset[] {
 
 export function getMcpPreset(key: string): McpPreset | null {
   return MCP_PRESETS.find((preset) => preset.key === key) ?? null;
+}
+
+export function buildSidechatMcpToolSource(input: {
+  name: string;
+  presetKey: string | null;
+}): SidechatToolSource {
+  const preset = input.presetKey ? getMcpPreset(input.presetKey) : null;
+  return {
+    kind: "mcp",
+    name: input.name,
+    icon: preset?.icon ?? null,
+  };
 }

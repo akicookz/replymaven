@@ -1,6 +1,7 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import type {
   PublicConversationRecord,
+  PublicMessageRecord,
   PublicSourceReference,
 } from "../../../shared/maven-conversation";
 import { type PublicConversationStore } from "../../conversations/public-conversation-store";
@@ -47,6 +48,7 @@ export interface ContactSupportFollowUpOptions {
   formMessage: string;
   isFirstVisitorTurn: boolean;
   isReturningVisitor: boolean;
+  mode?: "contact_support" | "pending_review_email";
 }
 
 function getMetadataString(
@@ -76,8 +78,9 @@ async function collectVisibleText(
 // a connected widget receives it over its live agent session.
 export async function runContactSupportFollowUp(
   options: ContactSupportFollowUpOptions,
-): Promise<void> {
+): Promise<PublicMessageRecord | null> {
   const { db, env, conversation, project, settings } = options;
+  const mode = options.mode ?? "contact_support";
   const logContext = {
     projectId: project.id,
     conversationId: conversation.id,
@@ -89,7 +92,7 @@ export async function runContactSupportFollowUp(
     chatState: JSON.stringify(conversation.chatState),
   };
   const turnContext = {
-    kind: "contact_support",
+    kind: mode === "contact_support" ? "contact_support" : "standard",
     isFirstVisitorTurn: options.isFirstVisitorTurn,
     isReturningVisitor: options.isReturningVisitor,
   } as const;
@@ -103,11 +106,15 @@ export async function runContactSupportFollowUp(
     openaiApiKey: env.OPENAI_API_KEY || null,
   });
 
-  const baseOpening = buildSupportTurnOpening(turnContext, visitorInfo);
-  let timingMessage = fallbackRenderContactTimingMessage();
-  if (settings?.avgResponseTime?.trim()) {
+  let responseOpening = "";
+  if (mode === "contact_support") {
+    const baseOpening = buildSupportTurnOpening(turnContext, visitorInfo);
+    const timingMessage = fallbackRenderContactTimingMessage();
+    responseOpening = `${baseOpening}${timingMessage}\n\n`;
+  }
+  if (mode === "contact_support" && settings?.avgResponseTime?.trim()) {
     try {
-      timingMessage = await runWithModelFallback({
+      const timingMessage = await runWithModelFallback({
         runtime: modelRuntime,
         stage: "render_contact_timing",
         operation: (config) =>
@@ -126,6 +133,8 @@ export async function runContactSupportFollowUp(
           }, { throwOnModelError: true }),
         logContext,
       });
+      const baseOpening = buildSupportTurnOpening(turnContext, visitorInfo);
+      responseOpening = `${baseOpening}${timingMessage}\n\n`;
     } catch (error) {
       logWarn("contact_follow_up.timing_fallback", {
         ...logContext,
@@ -133,9 +142,8 @@ export async function runContactSupportFollowUp(
       });
     }
   }
-  const responseOpening = `${baseOpening}${timingMessage}\n\n`;
 
-  let content: string;
+  let content: string | null;
   let sources: PublicSourceReference[] = [];
   try {
     const rawHistory = (
@@ -212,18 +220,25 @@ export async function runContactSupportFollowUp(
       url: source.url ?? null,
       type: source.type,
     }));
-    content = visibleText
-      ? `${responseOpening}${visibleText}`
-      : buildContactFallbackMessage(responseOpening);
+    if (visibleText) {
+      content = `${responseOpening}${visibleText}`;
+    } else if (mode === "contact_support") {
+      content = buildContactFallbackMessage(responseOpening);
+    } else {
+      content = null;
+    }
     if (!visibleText) sources = [];
   } catch (error) {
     logWarn("contact_follow_up.turn_failed", {
       ...logContext,
       error: error instanceof Error ? error.message : String(error),
     });
-    content = buildContactFallbackMessage(responseOpening);
+    content = mode === "contact_support"
+      ? buildContactFallbackMessage(responseOpening)
+      : null;
     sources = [];
   }
+  if (!content) return null;
 
   const botMessage = await options.chatService
     .addPublicBotMessageIfOwnershipMatches(
@@ -240,7 +255,7 @@ export async function runContactSupportFollowUp(
     );
   if (!botMessage) {
     logWarn("contact_follow_up.skipped_ownership_changed", logContext);
-    return;
+    return null;
   }
 
   const billingService = new BillingService(db, env);
@@ -252,4 +267,5 @@ export async function runContactSupportFollowUp(
     project.userId,
     subscription,
   );
+  return botMessage;
 }

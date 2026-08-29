@@ -18,16 +18,54 @@ interface ToolChunkLike {
 }
 
 const SAFE_STREAM_TOOL_NAME = "present_reply_draft";
+const GATEWAY_CALL_TOOL_NAME = "call_project_tool";
+const MODEL_SAFE_TOOL_NAMES = new Set([
+  SAFE_STREAM_TOOL_NAME,
+  GATEWAY_CALL_TOOL_NAME,
+  "search_knowledge",
+  "search_project_tools",
+  "describe_project_tool",
+]);
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function redactGatewayInput(value: unknown): unknown {
+  if (!isRecord(value) || typeof value.argumentsJson !== "string") return value;
+  try {
+    const parsed: unknown = JSON.parse(value.argumentsJson);
+    if (!isRecord(parsed)) {
+      return {
+        ...value,
+        argumentsJson: redactPrivateToolText(value.argumentsJson),
+      };
+    }
+    return {
+      ...value,
+      argumentsJson: JSON.stringify(redactPrivateToolPayload(parsed)),
+    };
+  } catch {
+    return {
+      ...value,
+      argumentsJson: redactPrivateToolText(value.argumentsJson),
+    };
+  }
+}
+
 function redactToolChunk(chunk: ToolChunkLike): ToolChunkLike {
   const redacted: Record<string, unknown> = { ...chunk };
-  if ("input" in chunk) redacted.input = redactPrivateToolPayload(chunk.input);
+  if ("input" in chunk) {
+    const input = chunk.toolName === GATEWAY_CALL_TOOL_NAME
+      ? redactGatewayInput(chunk.input)
+      : chunk.input;
+    redacted.input = redactPrivateToolPayload(input);
+  }
   if ("output" in chunk) redacted.output = redactPrivateToolPayload(chunk.output);
   if ("rawInput" in chunk) {
-    redacted.rawInput = redactPrivateToolPayload(chunk.rawInput);
+    const rawInput = chunk.toolName === GATEWAY_CALL_TOOL_NAME
+      ? redactGatewayInput(chunk.rawInput)
+      : chunk.rawInput;
+    redacted.rawInput = redactPrivateToolPayload(rawInput);
   }
   if (typeof chunk.errorText === "string") {
     redacted.errorText = redactPrivateToolText(chunk.errorText);
@@ -85,19 +123,21 @@ export function createPrivateToolChunkProjector(
   contextByToolName: ReadonlyMap<string, SidechatToolApprovalContext>,
   now: () => number = Date.now,
   seedToolCalls: ReadonlyMap<string, string> = new Map(),
-): (chunk: unknown) => unknown[] {
+  resolveContextByToolCallId: (
+    toolCallId: string,
+    toolName: string | null,
+    input: unknown,
+  ) => SidechatToolApprovalContext | null |
+    Promise<SidechatToolApprovalContext | null> = () => null,
+): (chunk: unknown) => Promise<unknown[]> {
   const shouldForward = createPrivateToolChunkFilter(
-    new Set(contextByToolName.keys()),
+    new Set([...contextByToolName.keys(), GATEWAY_CALL_TOOL_NAME]),
     seedToolCalls,
   );
   const contextByToolCallId = new Map<string, SidechatToolApprovalContext>();
   const startedAtByToolCallId = new Map<string, number>();
-  for (const [toolCallId, toolName] of seedToolCalls) {
-    const context = contextByToolName.get(toolName);
-    if (context) contextByToolCallId.set(toolCallId, context);
-  }
 
-  return function projectPrivateToolChunk(chunk: unknown): unknown[] {
+  return async function projectPrivateToolChunk(chunk: unknown): Promise<unknown[]> {
     if (!isRecord(chunk) || typeof chunk.type !== "string") return [];
     const value = chunk as ToolChunkLike;
     const projected: unknown[] = [];
@@ -107,7 +147,12 @@ export function createPrivateToolChunkProjector(
       typeof value.toolCallId === "string" &&
       typeof value.toolName === "string"
     ) {
-      const context = contextByToolName.get(value.toolName);
+      const context = contextByToolName.get(value.toolName) ??
+        await resolveContextByToolCallId(
+          value.toolCallId,
+          value.toolName,
+          value.input,
+        );
       if (context && !contextByToolCallId.has(value.toolCallId)) {
         contextByToolCallId.set(value.toolCallId, context);
         const startedAt = now();
@@ -131,7 +176,8 @@ export function createPrivateToolChunkProjector(
       typeof value.toolCallId === "string" &&
       typeof value.approvalId === "string"
     ) {
-      const context = contextByToolCallId.get(value.toolCallId);
+      const context = contextByToolCallId.get(value.toolCallId) ??
+        await resolveContextByToolCallId(value.toolCallId, null, undefined);
       if (!context) return projected;
       projected.push(
         {
@@ -154,6 +200,14 @@ export function createPrivateToolChunkProjector(
         value.type === "tool-output-denied") &&
       typeof value.toolCallId === "string"
     ) {
+      if (!contextByToolCallId.has(value.toolCallId)) {
+        const context = await resolveContextByToolCallId(
+          value.toolCallId,
+          null,
+          undefined,
+        );
+        if (context) contextByToolCallId.set(value.toolCallId, context);
+      }
       const startedAt = startedAtByToolCallId.get(value.toolCallId);
       if (startedAt !== undefined) {
         projected.push({
@@ -241,6 +295,21 @@ export function removeAbandonedApprovalParts(
         (
           messageIndex === preservedMessageIndex &&
           partIndex >= preservedFromPartIndex
+        )
+      ),
+    }))
+    .filter((message) => message.parts.length > 0);
+}
+
+export function removeLegacyProjectToolParts(
+  messages: UIMessage[],
+): UIMessage[] {
+  return messages
+    .map((message) => ({
+      ...message,
+      parts: message.parts.filter((part) =>
+        !isToolUIPart(part) || MODEL_SAFE_TOOL_NAMES.has(
+          part.type === "dynamic-tool" ? part.toolName : part.type.slice(5),
         )
       ),
     }))

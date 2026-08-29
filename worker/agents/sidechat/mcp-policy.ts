@@ -1,12 +1,11 @@
 import type { JSONSchema7 } from "json-schema";
 import type { SidechatToolDescriptor } from "../../../shared/sidechat-agent";
 import { isReservedMavenToolName } from "../../validation";
+import { normalizeProjectToolInputSchema } from "./project-tool-schema";
 
 const MAX_NAME_LENGTH = 200;
 const MAX_DESCRIPTION_LENGTH = 500;
 const MAX_SCHEMA_CHARS = 100_000;
-const MAX_SCHEMA_DEPTH = 32;
-const MAX_SCHEMA_NODES = 5_000;
 const RESERVED_SIDECHAT_TOOL_NAMES = new Set([
   "present_reply_draft",
   "request_team_help",
@@ -255,44 +254,6 @@ export async function fingerprintMcpTool(
   ).join("");
 }
 
-function safeInputSchema(inputSchema: JSONSchema7): JSONSchema7 | null {
-  if (
-    inputSchema === null ||
-    typeof inputSchema !== "object" ||
-    Array.isArray(inputSchema)
-  ) {
-    return null;
-  }
-  const seen = new WeakSet<object>();
-  const stack: Array<{ value: unknown; depth: number }> = [
-    { value: inputSchema, depth: 0 },
-  ];
-  let nodes = 0;
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (!current) break;
-    nodes += 1;
-    if (nodes > MAX_SCHEMA_NODES || current.depth > MAX_SCHEMA_DEPTH) {
-      return null;
-    }
-    if (!current.value || typeof current.value !== "object") continue;
-    if (seen.has(current.value)) return null;
-    seen.add(current.value);
-    for (const child of Array.isArray(current.value)
-      ? current.value
-      : Object.values(current.value)) {
-      stack.push({ value: child, depth: current.depth + 1 });
-    }
-  }
-  try {
-    return JSON.stringify(inputSchema).length <= MAX_SCHEMA_CHARS
-      ? inputSchema
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 function safeText(value: string | undefined, fallback: string, max: number): string {
   const trimmed = value?.trim();
   return (trimmed || fallback).slice(0, max);
@@ -319,8 +280,9 @@ export async function normalizeMcpCatalog(
       continue;
     }
 
-    const inputSchema = safeInputSchema(tool.inputSchema);
-    if (!inputSchema) continue;
+    const normalizedSchema = normalizeProjectToolInputSchema(tool.inputSchema);
+    if (!normalizedSchema.ok) continue;
+    const inputSchema = normalizedSchema.schema;
     const description = safeText(
       tool.description,
       `Use ${tool.name} through the connected MCP server.`,

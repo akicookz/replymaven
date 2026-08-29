@@ -28,7 +28,10 @@ import {
   type SafeToolActivity,
 } from "../tools/build-maven-tool-registry";
 import { createHttpToolDefinition } from "../tools/http-tool-executor";
-import { createRequestTeamHelpTool } from "../tools/internal/request-team-help";
+import {
+  createRequestTeamHelpTool,
+  repairAcceptedTeamRequest,
+} from "../tools/internal/request-team-help";
 import { createSearchKnowledgeTool } from "../tools/internal/search-knowledge";
 
 const MAX_COLLECTED_SOURCES = 5;
@@ -212,10 +215,29 @@ export async function runMavenTurn(options: {
     }),
     ...httpDefinitions,
   ];
-  definitions.splice(
-    1,
-    0,
-    createRequestTeamHelpTool({
+  const aiParticipation =
+    options.dependencies.promptOptions?.aiParticipation ?? "continuous";
+  if (aiParticipation === "assist_until_agent") {
+    publicDependencies.executionCtx.waitUntil(
+      repairAcceptedTeamRequest({
+        context: options.context,
+        chatService: publicDependencies.chatService,
+        projectService: publicDependencies.projectService,
+        telegramService: publicDependencies.telegramService,
+        slackService: publicDependencies.slackService,
+        env: {
+          BETTER_AUTH_URL: options.dependencies.env.BETTER_AUTH_URL,
+          RESEND_API_KEY: options.dependencies.env.RESEND_API_KEY,
+        },
+        executionCtx: publicDependencies.executionCtx,
+      }),
+    );
+  }
+  if (aiParticipation === "continuous") {
+    definitions.splice(
+      1,
+      0,
+      createRequestTeamHelpTool({
       context: options.context,
       chatService: publicDependencies.chatService,
       projectService: publicDependencies.projectService,
@@ -227,8 +249,9 @@ export async function runMavenTurn(options: {
       },
       executionCtx: publicDependencies.executionCtx,
       onTeamRequested: publicDependencies.onTeamRequested,
-    }),
-  );
+      }),
+    );
+  }
   const registry = buildMavenToolRegistry({
     context: options.context,
     definitions,

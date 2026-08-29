@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   projects,
   projectSettings,
@@ -12,6 +12,7 @@ import {
 } from "../db";
 import { RESERVED_INBOUND_LOCAL_PARTS } from "./email-service";
 import { encrypt } from "./encryption-service";
+import { TeamService } from "./team-service";
 
 export interface HelpPresentationSettings {
   helpCustomUrl: string | null;
@@ -29,6 +30,45 @@ export interface PublicHelpProject {
   project: ProjectRow;
   settings: HelpPresentationSettings | null;
   widgetConfig: WidgetConfigRow | null;
+}
+
+interface EscalationMember {
+  id: string;
+  userId: string | null;
+  email: string;
+  role: string;
+  accessAllProjects: boolean;
+}
+
+export function selectProjectEscalationRecipientEmails(input: {
+  ownerEmail: string | null;
+  projectId: string;
+  members: EscalationMember[];
+  projectMap: Record<string, string[]>;
+  currentUserEmails: Record<string, string>;
+}): string[] {
+  const recipients: string[] = [];
+  const seen = new Set<string>();
+
+  function add(email: string | null | undefined): void {
+    const value = email?.trim();
+    if (!value) return;
+    const key = value.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    recipients.push(value);
+  }
+
+  add(input.ownerEmail);
+  for (const member of input.members) {
+    const hasAccess =
+      member.role === "admin" ||
+      member.accessAllProjects ||
+      (input.projectMap[member.id] ?? []).includes(input.projectId);
+    if (!hasAccess || !member.userId) continue;
+    add(input.currentUserEmails[member.userId]);
+  }
+  return recipients;
 }
 
 function encodeBase64Url(bytes: Uint8Array): string {
@@ -288,5 +328,35 @@ export class ProjectService {
       .where(eq(projects.id, projectId))
       .limit(1);
     return rows[0]?.email ?? null;
+  }
+
+  async getEscalationRecipientEmails(projectId: string): Promise<string[]> {
+    const project = await this.getProjectById(projectId);
+    if (!project) return [];
+    const teamService = new TeamService(this.db);
+    const [ownerEmail, members, projectMap] = await Promise.all([
+      this.getOwnerEmail(projectId),
+      teamService.getTeamMembers(project.userId),
+      teamService.getMemberProjectMap(project.userId),
+    ]);
+    const userIds = members.flatMap((member) =>
+      member.userId ? [member.userId] : []
+    );
+    const memberUsers = userIds.length > 0
+      ? await this.db
+          .select({ id: users.id, email: users.email })
+          .from(users)
+          .where(inArray(users.id, userIds))
+      : [];
+    const currentUserEmails = Object.fromEntries(
+      memberUsers.map((user) => [user.id, user.email]),
+    );
+    return selectProjectEscalationRecipientEmails({
+      ownerEmail,
+      projectId,
+      members,
+      projectMap,
+      currentUserEmails,
+    });
   }
 }

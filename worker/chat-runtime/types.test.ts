@@ -1,10 +1,13 @@
 import { expect, test } from "bun:test";
 import {
+  activeHumanRouteFromMessage,
   applyChatOwnershipEvent,
   canPersistAiOutput,
   createInitialChatState,
   fallbackAiParticipationForStatus,
+  inferLegacyActiveHumanRoutes,
   isChatOwnershipSnapshotCurrent,
+  joinActiveHumanRoute,
   mergeChatStateForPersistence,
   parseChatState,
   toPublicSdkConversationMessages,
@@ -72,8 +75,117 @@ test("ownership transition regression: AI resumes after a human takeover before 
   expect(handedBack).toMatchObject({
     state: "active",
     aiParticipation: "continuous",
+    activeHumanRoutes: [],
     ownershipRevision: humanOwned.ownershipRevision + 1,
   });
+});
+
+test("joins and deduplicates external human routes by client identity", () => {
+  const telegram = activeHumanRouteFromMessage({
+    origin: "telegram",
+    userId: null,
+    id: "telegram-message",
+  });
+  const firstEmail = activeHumanRouteFromMessage({
+    origin: "email",
+    userId: "user-1",
+    id: "email-message-1",
+  });
+  const newerEmail = activeHumanRouteFromMessage({
+    origin: "email",
+    userId: "user-1",
+    id: "email-message-2",
+    externalReplyTo: "agent-thread-message-2",
+  });
+
+  let routes = joinActiveHumanRoute([], telegram);
+  routes = joinActiveHumanRoute(routes, firstEmail);
+  routes = joinActiveHumanRoute(routes, telegram);
+  routes = joinActiveHumanRoute(routes, newerEmail);
+
+  expect(routes).toEqual([
+    { kind: "agent_channel", channel: "telegram" },
+    {
+      kind: "email",
+      userId: "user-1",
+    },
+  ]);
+  expect(activeHumanRouteFromMessage({
+    origin: "dashboard",
+    userId: "user-1",
+    id: "dashboard-message",
+  })).toBeNull();
+  expect(activeHumanRouteFromMessage({
+    origin: "mcp",
+    userId: "user-1",
+    id: "mcp-message",
+  })).toBeNull();
+});
+
+test("parses valid joined routes and drops malformed stored entries", () => {
+  const parsed = parseChatState(JSON.stringify({
+    aiParticipation: "human_only",
+    activeHumanRoutes: [
+      { kind: "agent_channel", channel: "slack" },
+      { kind: "agent_channel", channel: "unknown" },
+      {
+        kind: "email",
+        userId: "user-1",
+        replyToMessageId: "message-1",
+      },
+      { kind: "email", userId: "", replyToMessageId: "message-2" },
+    ],
+  }));
+
+  expect(parsed.activeHumanRoutes).toEqual([
+    { kind: "agent_channel", channel: "slack" },
+    {
+      kind: "email",
+      userId: "user-1",
+    },
+  ]);
+});
+
+test("infers only reliably tagged legacy routes after escalation", () => {
+  const routes = inferLegacyActiveHumanRoutes([
+    {
+      id: "before",
+      author: "agent",
+      origin: "telegram",
+      userId: null,
+      createdAt: 99,
+    },
+    {
+      id: "telegram",
+      author: "agent",
+      origin: "telegram",
+      userId: null,
+      createdAt: 101,
+    },
+    {
+      id: "email",
+      author: "agent",
+      origin: "email",
+      userId: "user-1",
+      createdAt: 102,
+    },
+    {
+      id: "untagged",
+      author: "agent",
+      origin: null,
+      userId: "user-2",
+      createdAt: 103,
+    },
+  ], 100);
+
+  expect(routes).toEqual([
+    { kind: "agent_channel", channel: "telegram" },
+    {
+      kind: "email",
+      userId: "user-1",
+    },
+  ]);
+  expect(inferLegacyActiveHumanRoutes([], null)).toEqual([]);
 });
 
 test.each([
@@ -105,6 +217,7 @@ test("persistence race regression: stale AI state overwrites a newer takeover or
   expect(mergeChatStateForPersistence(humanOwned, staleAi)).toMatchObject({
     state: "agent_mode",
     aiParticipation: "human_only",
+    activeHumanRoutes: humanOwned.activeHumanRoutes,
     ownershipRevision: humanOwned.ownershipRevision,
   });
   expect(mergeChatStateForPersistence(handedBack, humanOwned)).toMatchObject({

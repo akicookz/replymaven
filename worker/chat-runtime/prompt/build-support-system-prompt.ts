@@ -28,6 +28,42 @@ Your final text is visible directly to the website visitor. Never expose interna
 `;
 }
 
+function buildTeamReviewState(
+  settings: SupportPromptSettings,
+  options?: SupportPromptOptions,
+): string {
+  if (options?.aiParticipation !== "assist_until_agent") return "";
+  const agentLabel = settings.agentName?.trim() || "the team";
+  const responseTime = settings.avgResponseTime?.trim()
+    ? `Configured response time: ${settings.avgResponseTime.trim()}`
+    : "Response time can vary.";
+  return `<team-review-state>
+The request has already been sent to ${agentLabel}.
+${responseTime}
+This state is trusted. Continue helping while human review is pending. If asked about escalation, confirm it already happened. Reply naturally in the visitor's language. Never invent urgency, priority, or an ETA.
+</team-review-state>
+
+`;
+}
+
+function buildTeamHelpRules(options?: SupportPromptOptions): string {
+  if (options?.aiParticipation === "assist_until_agent") {
+    return `Team review pending:
+- The request is already pending as stated in <team-review-state>. Do not offer or attempt another handoff.
+- Continue answering questions and collecting useful diagnostic details.
+- If asked where or when the team will reply, use only the configured response time in <team-review-state>. When none is configured, say that response time can vary.
+`;
+  }
+  return `Team help:
+- request_team_help is the only way to change a public conversation's ownership or notify the human support team. Never claim that a request was forwarded without a successful tool result.
+- If the visitor explicitly asks for a person and enough issue context is available, or confirms an earlier offer of team follow-up, call request_team_help with a concise factual summary.
+- If issue context is still missing, ask one normal conversational question for that issue detail before calling the tool.
+- When request_team_help returns contact_required, ask only for the returned requiredFields as an ordinary conversational follow-up. Do not claim that ownership changed or the team was notified.
+- When request_team_help returns requested, use its structured facts to confirm the handoff once. Reply naturally in the visitor's language and continue helping.
+- When request_team_help returns unavailable, say naturally in the visitor's language that the notification could not be sent. Do not claim that ownership changed.
+`;
+}
+
 export function buildSupportSystemPrompt(
   settings: SupportPromptSettings,
   projectName: string,
@@ -80,6 +116,7 @@ If the visitor asks for dangerous, illegal, or harmful instructions, refuse brie
   });
   prompt += buildGuidelinesSection(projectName, options?.guidelines);
   prompt += buildSupportTurnSection(options?.turnContext);
+  prompt += buildTeamReviewState(settings, options);
 
   prompt += `<response-rules>
 Answering questions:
@@ -128,12 +165,7 @@ When information is not found anywhere:
 - When referring to where information comes from, always say "the documentation" or "my knowledge base" - never mention SOPs, FAQs, guidelines, or tier-1 sources to the visitor
 - The ONLY exception: Information explicitly stated in SOPs or FAQs always takes precedence (but don't mention this distinction to visitors)
 
-Team help:
-- request_team_help is the only way to change a public conversation's ownership or notify the human support team. Never claim that a request was forwarded without a successful tool result.
-- If the visitor explicitly asks for a person and enough issue context is available, or confirms an earlier offer of team follow-up, call request_team_help with a concise factual summary.
-- If issue context is still missing, ask one normal conversational question for that issue detail before calling the tool.
-- When request_team_help returns contact_required, ask only for the returned requiredFields as an ordinary conversational follow-up. Do not claim that ownership changed or the team was notified.
-- When request_team_help returns requested or unavailable, use the returned visitorMessage exactly. Do not paraphrase it or add a second handoff promise.
+${buildTeamHelpRules(options)}
 
 Anti-loop rules (CRITICAL):
 - Never ask the same clarifying question twice. If you have already asked the visitor to clarify their question once in this conversation, do NOT ask another clarifying question — instead, offer to hand off to a team member or attempt your best-effort answer with the information you have.

@@ -785,6 +785,105 @@ describe("runMavenTurn", () => {
     expect("artifact" in turn).toBe(false);
   });
 
+  test("schedules accepted team-request repair without exposing its model tool", async () => {
+    const fake = createFakeModel([createTextStep("I can keep helping here.")]);
+    const dependencies = createDependencies({
+      model: fake.model,
+      calls: fake.calls,
+      httpTool: null,
+    });
+    const scheduled: Promise<unknown>[] = [];
+    let acceptanceReads = 0;
+    let releaseRepair = (): void => undefined;
+    const repairGate = new Promise<void>((resolve) => {
+      releaseRepair = resolve;
+    });
+    dependencies.publicToolDependencies.executionCtx = {
+      waitUntil(promise) {
+        scheduled.push(promise);
+      },
+    } as ExecutionContext;
+    dependencies.publicToolDependencies.projectService = {
+      async getProjectById() {
+        return {
+          id: "project-1",
+          name: "Acme",
+          slug: "acme",
+        };
+      },
+      async getSettings() {
+        return null;
+      },
+    } as ProjectService;
+    dependencies.publicToolDependencies.chatService = {
+      async getOperational() {
+        return {
+          id: "conversation-1",
+          visitorId: "visitor-1",
+          visitorName: "Alice",
+          visitorEmail: "alice@example.com",
+          telegramThreadId: null,
+          channelThreads: {},
+          status: "waiting_agent",
+          chatState: {
+            aiParticipation: "assist_until_agent",
+          },
+          metadata: {
+            teamRequestSummary: "Visitor needs account help.",
+            escalatedAt: new Date(0).toISOString(),
+            reviewSummaryMessageId: "summary-1",
+            teamRequestSummaryPending: false,
+            teamRequestNotificationState: "pending",
+            mavenTeamRequestAcceptedAt: new Date(0).toISOString(),
+            mavenTeamRequestAcceptanceToken: "acceptance-1",
+          },
+        };
+      },
+      async getTeamRequestAcceptance() {
+        acceptanceReads += 1;
+        await repairGate;
+        return {
+          acceptanceToken: "acceptance-1",
+          acceptedAt: new Date(0).toISOString(),
+          notificationState: "pending",
+          summary: "Visitor needs account help.",
+          summaryMessageId: "summary-1",
+          summaryPending: false,
+        };
+      },
+    } as unknown as PublicConversationStore;
+    dependencies.promptOptions = {
+      ...dependencies.promptOptions,
+      aiParticipation: "assist_until_agent",
+    };
+
+    const turn = await runMavenTurn({
+      context: {
+        ...createContext(),
+        ownership: {
+          status: "waiting_agent",
+          chatState: JSON.stringify({
+            aiParticipation: "assist_until_agent",
+          }),
+        },
+      },
+      dependencies,
+      conversationHistory: [],
+      currentMessage: "This is urgent. What happens next?",
+    });
+    for await (const part of turn.fullStream) {
+      void part;
+    }
+
+    const tools = JSON.stringify(fake.calls[0]?.tools);
+    expect(tools).not.toContain("request_team_help");
+    expect(tools).toContain("search_knowledge");
+    expect(scheduled).toHaveLength(1);
+    expect(acceptanceReads).toBe(1);
+    releaseRepair();
+    await Promise.all(scheduled);
+  });
+
   test("searches repeatedly, calls HTTP, and composes final text in one agent loop", async () => {
     const auditRows: Array<Record<string, unknown>> = [];
     const permitCalls: string[] = [];

@@ -1,13 +1,18 @@
-import type { Dispatch, SetStateAction } from "react";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { X } from "lucide-react";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import type { SafeSidechatDataPart } from "@/lib/inbox/sidechat-message-adapter";
 import {
   deriveConversationInteractionState,
+  deriveSidechatStartupWorkingPhase,
   deriveSidechatWorkingTail,
   isSidechatToolRunning,
   readLastCompletedSidechatToolKind,
+  readLastSidechatBotMessageId,
+  readLastSidechatHumanMessageId,
+  SIDECHAT_STARTUP_PLANNING_AFTER_MS,
   type SidechatPresentationStatus,
+  type SidechatStartupWorkingPhase,
 } from "@/lib/inbox/sidechat";
 import { cn } from "@/lib/utils";
 import ChatThread from "./ChatThread";
@@ -69,6 +74,34 @@ export default function SidechatPane({
   const busy = status === "submitted" || status === "streaming";
   const latestMessage = messages.at(-1);
   const latestTrace = latestMessage?.sidechatTrace;
+  const lastCompletedToolKind = readLastCompletedSidechatToolKind(latestTrace);
+  const startupWorkingKey = busy && lastCompletedToolKind === null
+    ? readLastSidechatHumanMessageId(messages) ?? "pending"
+    : null;
+  const [startupWorking, setStartupWorking] = useState<{
+    key: string | null;
+    phase: SidechatStartupWorkingPhase;
+  }>({ key: startupWorkingKey, phase: "thinking" });
+  if (startupWorking.key !== startupWorkingKey) {
+    setStartupWorking({ key: startupWorkingKey, phase: "thinking" });
+  }
+
+  useEffect(() => {
+    if (startupWorkingKey === null) return;
+    const timer = window.setTimeout(() => {
+      setStartupWorking((current) => {
+        if (current.key !== startupWorkingKey) return current;
+        return {
+          key: startupWorkingKey,
+          phase: deriveSidechatStartupWorkingPhase(
+            SIDECHAT_STARTUP_PLANNING_AFTER_MS,
+          ),
+        };
+      });
+    }, SIDECHAT_STARTUP_PLANNING_AFTER_MS);
+    return () => window.clearTimeout(timer);
+  }, [startupWorkingKey]);
+
   const hasRunningTool = latestTrace?.some(
     (item) => item.type === "tool" && isSidechatToolRunning(item.state),
   ) === true;
@@ -86,7 +119,8 @@ export default function SidechatPane({
     hasRunningTool,
     hasStreamingReasoning,
     hasVisibleAnswer,
-    lastCompletedToolKind: readLastCompletedSidechatToolKind(latestTrace),
+    lastCompletedToolKind,
+    startupPhase: startupWorking.phase,
   });
 
   function handleApprovalAction(
@@ -151,6 +185,9 @@ export default function SidechatPane({
           readOnly={!interaction.showMessageActions}
           onAddToReply={onAddToReply}
           onApprovalAction={handleApprovalAction}
+          inFlightBotMessageId={
+            busy ? readLastSidechatBotMessageId(messages) : null
+          }
           contentClassName="!px-4 !pt-3 !pb-3"
           tail={!loading && (
             <div className="my-3 min-h-10 text-pretty text-[12px] leading-normal text-ink-6">

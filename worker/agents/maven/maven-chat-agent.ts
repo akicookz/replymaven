@@ -22,13 +22,12 @@ import {
   type UIMessage,
 } from "ai";
 import type {
-  ExecuteProjectToolRequest,
   ExecuteProjectToolResult,
   MavenConversationSummary,
   PendingSidechatApprovalScope,
   SidechatCustomerContext,
   SidechatStatus,
-  SidechatToolDescriptor,
+  SidechatToolApprovalContext,
   SidechatToolPresentation,
 } from "../../../shared/sidechat-agent";
 import {
@@ -74,9 +73,12 @@ import {
   preserveReservedPublicMetadata,
 } from "../../services/bot-name-decision";
 import {
+  activeHumanRouteFromMessage,
   applyChatOwnershipEvent,
   fallbackAiParticipationForStatus,
+  inferLegacyActiveHumanRoutes,
   isReturningVisitorGap,
+  joinActiveHumanRoute,
   mergeChatStateForPersistence,
   parseChatState,
   type ChatOwnershipEvent,
@@ -89,6 +91,7 @@ import {
 import { MavenProjectAgent } from "./maven-project-agent";
 import {
   createPrivateToolChunkProjector,
+  removeLegacyProjectToolParts,
   removeAbandonedApprovalParts,
   sanitizePrivateMessageForPersistence,
 } from "../sidechat/private-tool-payload";
@@ -103,10 +106,14 @@ import {
   summarizeStreamFinish,
 } from "../sidechat/sidechat-turn-outcome";
 import {
-  buildSidechatDynamicTools,
-  resolveSidechatToolSafety,
-  sidechatToolPresentation,
-} from "../sidechat/project-tool-proxy";
+  buildSidechatGatewayTools,
+  type ExecuteSidechatGatewayToolRequest,
+  type ExecuteSidechatKnowledgeRequest,
+  type SidechatArgumentGuide,
+  type SidechatGatewayContext,
+  type SidechatGatewayResolvedTool,
+  type SidechatGatewaySearchResult,
+} from "../sidechat/project-tool-gateway";
 import {
   PublicConversationStateStore,
   type PublicConversationStateSql,
@@ -149,7 +156,8 @@ import { ProjectService } from "../../services/project-service";
 import { TelegramService } from "../../services/telegram-service";
 import { SlackService } from "../../services/slack-service";
 import { listEnabledAgentChannels } from "../../services/enabled-agent-channels";
-import { forwardVisitorThroughAgentChannels } from "../../services/run-agent-channel-outbound";
+import { forwardVisitorToJoinedHumans } from "../../services/run-agent-channel-outbound";
+import { EmailService } from "../../services/email-service";
 import { ToolService } from "../../services/tool-service";
 import { VisitorBanService } from "../../services/visitor-ban-service";
 import { MAVEN_ASSIGNEE_ID } from "../../../shared/maven-assignee";
@@ -222,12 +230,35 @@ interface SidechatTurnParent extends SidechatStatusUpdater {
     childName: string,
     conversationId: string,
   ): Promise<SidechatCustomerContext>;
-  getSidechatToolDescriptors(
-    childName: string,
-    conversationId: string,
-  ): Promise<SidechatToolDescriptor[]>;
+  searchSidechatProjectTools(
+    input: SidechatGatewayContext & {
+      query: string;
+      cursor: string | null;
+      limit: number;
+    },
+  ): Promise<SidechatGatewaySearchResult>;
+  describeSidechatProjectTool(
+    input: SidechatGatewayContext & {
+      toolRef: string;
+      cursor: string | null;
+      limit: number;
+    },
+  ): Promise<SidechatArgumentGuide | null>;
+  resolveSidechatProjectTool(
+    input: SidechatGatewayContext & { toolRef: string },
+  ): Promise<SidechatGatewayResolvedTool | null>;
   executeProjectTool(
-    request: ExecuteProjectToolRequest,
+    request: ExecuteSidechatGatewayToolRequest,
+  ): Promise<ExecuteProjectToolResult>;
+  stageProjectToolApproval(
+    request: SidechatGatewayContext & {
+      toolCallId: string;
+      toolRef: string;
+      argumentsJson: string;
+    },
+  ): Promise<boolean>;
+  executeSidechatKnowledge(
+    request: ExecuteSidechatKnowledgeRequest,
   ): Promise<ExecuteProjectToolResult>;
 }
 
@@ -272,28 +303,59 @@ async function executeSidechatTurn(input: {
       input.writer.write(buildTurnAcceptedPart(input.submittedMessageId));
     }
     await input.parent.updateSidechatSummary(input.conversationId, "working");
-    const [context, descriptors] = await Promise.all([
-      input.parent.getSidechatContext(input.agent.name, input.conversationId),
-      input.parent.getSidechatToolDescriptors(
-        input.agent.name,
-        input.conversationId,
-      ),
-    ]);
+    const context = await input.parent.getSidechatContext(
+      input.agent.name,
+      input.conversationId,
+    );
     if (context.archivedAt !== null) {
       await discardArchivedSubmission(input.agent, input.submittedMessageId);
       throw new Error("Sidechat conversation is archived");
     }
     const model = input.agent.createSidechatLanguageModel();
+    const gatewayContext: SidechatGatewayContext = {
+      childName: input.agent.name,
+      conversationId: input.conversationId,
+      actorUserId: input.actorUserId,
+    };
+    const contextByToolCallId = new Map<string, SidechatToolApprovalContext>();
+    const approvedToolCallIds = approvedSidechatToolCallIds(
+      input.agent.messages,
+    );
     const tools: ToolSet = {
       present_reply_draft: createReplyDraftTool(),
-      ...buildSidechatDynamicTools({
-        descriptors,
-        childName: input.agent.name,
-        conversationId: input.conversationId,
-        actorUserId: input.actorUserId,
-        execute: (request) => input.parent.executeProjectTool(request),
+      ...buildSidechatGatewayTools({
+        search: (request) => input.parent.searchSidechatProjectTools({
+          ...gatewayContext,
+          ...request,
+        }),
+        describe: (request) => input.parent.describeSidechatProjectTool({
+          ...gatewayContext,
+          ...request,
+        }),
+        resolve: (toolRef) => input.parent.resolveSidechatProjectTool({
+          ...gatewayContext,
+          toolRef,
+        }),
+        execute: (request) => input.parent.executeProjectTool({
+          ...gatewayContext,
+          ...request,
+        }),
+        stageApproval: (request) =>
+          input.parent.stageProjectToolApproval({
+            ...gatewayContext,
+            ...request,
+          }),
+        approvedToolCallIds,
+        executeKnowledge: (knowledgeInput) =>
+          input.parent.executeSidechatKnowledge({
+            ...gatewayContext,
+            input: knowledgeInput,
+          }),
         emitActivity(part) {
           input.writer.write(part);
+        },
+        rememberToolContext(toolCallId, toolContext) {
+          contextByToolCallId.set(toolCallId, toolContext);
         },
       }),
     };
@@ -325,27 +387,67 @@ async function executeSidechatTurn(input: {
       },
     });
     const seedToolCalls = new Map<string, string>();
+    const gatewayToolRefByCallId = new Map<string, string>();
     for (const message of input.agent.messages) {
       if (message.role !== "assistant") continue;
       for (const part of message.parts) {
         if (isToolUIPart(part)) {
           seedToolCalls.set(part.toolCallId, getToolName(part));
+          if (
+            getToolName(part) === "call_project_tool" &&
+            part.input &&
+            typeof part.input === "object" &&
+            !Array.isArray(part.input)
+          ) {
+            const toolRef = (part.input as Record<string, unknown>).toolRef;
+            if (typeof toolRef === "string") {
+              gatewayToolRefByCallId.set(part.toolCallId, toolRef);
+            }
+          }
         }
       }
     }
     const projectChunk = createPrivateToolChunkProjector(
-      new Map(
-        descriptors
-          .map((descriptor) => [
-            descriptor.exposedName,
-            {
-              safety: resolveSidechatToolSafety(descriptor),
-              tool: sidechatToolPresentation(descriptor),
-            },
-          ] as const),
-      ),
+      new Map([[
+        "search_knowledge",
+        {
+          safety: "read",
+          tool: {
+            displayName: "Search",
+            source: { kind: "http", name: "Docs", icon: null },
+          },
+        },
+      ]]),
       Date.now,
       seedToolCalls,
+      async (toolCallId, toolName, toolInput) => {
+        const cached = contextByToolCallId.get(toolCallId);
+        if (cached) return cached;
+        if (
+          toolName === "call_project_tool" &&
+          toolInput &&
+          typeof toolInput === "object" &&
+          !Array.isArray(toolInput)
+        ) {
+          const toolRef = (toolInput as Record<string, unknown>).toolRef;
+          if (typeof toolRef === "string") {
+            gatewayToolRefByCallId.set(toolCallId, toolRef);
+          }
+        }
+        const toolRef = gatewayToolRefByCallId.get(toolCallId);
+        if (!toolRef) return null;
+        const tool = await input.parent.resolveSidechatProjectTool({
+          ...gatewayContext,
+          toolRef,
+        });
+        if (!tool) return null;
+        const resolvedContext: SidechatToolApprovalContext = {
+          safety: tool.safety,
+          tool: tool.presentation,
+        };
+        contextByToolCallId.set(toolCallId, resolvedContext);
+        return resolvedContext;
+      },
     );
     input.writer.merge(
       result
@@ -354,8 +456,8 @@ async function executeSidechatTurn(input: {
         })
         .pipeThrough(
           new TransformStream({
-            transform(chunk, controller) {
-              for (const projected of projectChunk(chunk)) {
+            async transform(chunk, controller) {
+              for (const projected of await projectChunk(chunk)) {
                 controller.enqueue(projected as typeof chunk);
               }
             },
@@ -424,7 +526,10 @@ export function selectSidechatModelMessages(
   messages: UIMessage[],
   continuation = false,
 ): UIMessage[] {
-  const eligible = removeAbandonedApprovalParts(messages, continuation);
+  const eligible = removeAbandonedApprovalParts(
+    removeLegacyProjectToolParts(messages),
+    continuation,
+  );
   if (eligible.length <= MAX_PRIVATE_MODEL_MESSAGES) return eligible;
   const bounded = eligible.slice(-MAX_PRIVATE_MODEL_MESSAGES);
   const firstUserIndex = bounded.findIndex((message) => message.role === "user");
@@ -453,17 +558,50 @@ export function readPendingApprovalScope(
       seenToolCalls.add(part.toolCallId);
       if (part.toolCallId !== toolCallId) continue;
       if (
+        getToolName(part) !== "call_project_tool" ||
         part.state !== "approval-requested" ||
         part.approval.id !== approvalId
+      ) return null;
+      const toolRef = (
+        part.input &&
+        typeof part.input === "object" &&
+        !Array.isArray(part.input)
+      )
+        ? (part.input as Record<string, unknown>).toolRef
+        : null;
+      if (
+        typeof toolRef !== "string" ||
+        toolRef.length === 0 ||
+        toolRef.length > 1_500
       ) return null;
       return {
         approvalId,
         toolCallId,
-        exposedName: getToolName(part),
+        toolRef,
       };
     }
   }
   return null;
+}
+
+export function approvedSidechatToolCallIds(
+  messages: UIMessage[],
+): ReadonlySet<string> {
+  const approved = new Set<string>();
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    for (const part of message.parts) {
+      if (
+        isToolUIPart(part) &&
+        getToolName(part) === "call_project_tool" &&
+        part.state === "approval-responded" &&
+        part.approval.approved
+      ) {
+        approved.add(part.toolCallId);
+      }
+    }
+  }
+  return approved;
 }
 
 export function hasPendingSidechatApproval(messages: UIMessage[]): boolean {
@@ -476,7 +614,10 @@ export function hasPendingSidechatApproval(messages: UIMessage[]): boolean {
       if (!part || !isToolUIPart(part)) continue;
       if (seenToolCalls.has(part.toolCallId)) continue;
       seenToolCalls.add(part.toolCallId);
-      if (part.state === "approval-requested") return true;
+      if (
+        getToolName(part) === "call_project_tool" &&
+        part.state === "approval-requested"
+      ) return true;
     }
   }
   return false;
@@ -1032,25 +1173,37 @@ export class MavenChatAgent extends AIChatAgent<
             }
           : null,
       });
-      if (channels.length > 0 && currentState.status !== "closed") {
+      if (
+        currentChatState.activeHumanRoutes.length > 0 &&
+        currentState.status !== "closed"
+      ) {
         this.ctx.waitUntil((async () => {
-          const lease = await this.acquireExternalAction({
-            projectId,
+          await forwardVisitorToJoinedHumans({
+            channels,
+            activeHumanRoutes: currentChatState.activeHumanRoutes,
             conversationId: currentState.id,
+            visitorName: currentState.visitorName,
+            content: submitted.content,
+            channelThreads: currentState.channelThreads,
+            telegramThreadId: currentState.telegramThreadId,
+            email: this.env.RESEND_API_KEY && project
+              ? {
+                  db,
+                  service: new EmailService(this.env.RESEND_API_KEY),
+                  projectId: project.id,
+                  projectSlug: project.slug,
+                  projectName: project.name,
+                  messageId: submitted.id,
+                  visitorDisplayName:
+                    currentState.visitorName?.trim() ||
+                    currentState.visitorEmail?.trim() ||
+                    "Visitor",
+                  dashboardUrl:
+                    `${this.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${currentState.id}`,
+                  accentColor: null,
+                }
+              : undefined,
           });
-          if (!lease) return;
-          try {
-            await forwardVisitorThroughAgentChannels({
-              channels,
-              conversationId: currentState.id,
-              visitorName: currentState.visitorName,
-              content: submitted.content,
-              channelThreads: currentState.channelThreads,
-              telegramThreadId: currentState.telegramThreadId,
-            });
-          } finally {
-            await this.releaseExternalAction(lease);
-          }
         })());
       }
       return new Response(null, { status: 204 });
@@ -1730,6 +1883,10 @@ export class MavenChatAgent extends AIChatAgent<
         this.parseStoredChatState(state),
         "human_joined",
       );
+      nextChatState.activeHumanRoutes = joinActiveHumanRoute(
+        nextChatState.activeHumanRoutes,
+        activeHumanRouteFromMessage(message),
+      );
       await this.persistPublicRecords(updated);
       const saved = this.saveNextPublicState(state, {
         status: "agent_replied",
@@ -2371,6 +2528,33 @@ export class MavenChatAgent extends AIChatAgent<
     });
   }
 
+  async releaseTeamRequestNotification(
+    projectId: string,
+    conversationId: string,
+    acceptanceToken: string,
+  ): Promise<boolean> {
+    return this.runExclusivePublicMutation(async () => {
+      this.assertPublicInput(projectId, conversationId);
+      const state = this.requirePublicState();
+      const acceptance = this.readTeamRequestAcceptance(
+        state,
+        acceptanceToken,
+      );
+      if (!acceptance || acceptance.notificationState !== "attempted") {
+        return false;
+      }
+      const saved = this.saveNextPublicState(state, {
+        metadata: {
+          ...state.metadata,
+          teamRequestNotificationState: "pending",
+          teamRequestNotificationAttemptedAt: null,
+        },
+      });
+      await this.publishPublicProjection(saved, this.readPublicMessages());
+      return true;
+    });
+  }
+
   async addTeamRequestSummary(
     projectId: string,
     conversationId: string,
@@ -2914,9 +3098,26 @@ export class MavenChatAgent extends AIChatAgent<
   private parseStoredChatState(
     state: StoredPublicConversationState,
   ): ConversationChatState {
-    return parseChatState(JSON.stringify(state.chatState), {
+    const chatState = parseChatState(JSON.stringify(state.chatState), {
       fallbackAiParticipation: fallbackAiParticipationForStatus(state.status),
     });
+    if (
+      chatState.aiParticipation !== "human_only" ||
+      chatState.activeHumanRoutes.length > 0
+    ) {
+      return chatState;
+    }
+    const escalatedAt = typeof state.metadata.escalatedAt === "string"
+      ? Date.parse(state.metadata.escalatedAt)
+      : Number.NaN;
+    if (!Number.isFinite(escalatedAt)) return chatState;
+    return {
+      ...chatState,
+      activeHumanRoutes: inferLegacyActiveHumanRoutes(
+        this.readPublicMessages(),
+        escalatedAt,
+      ),
+    };
   }
 
   private readTeamRequestAcceptance(

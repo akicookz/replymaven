@@ -9,8 +9,45 @@ import { logError, logInfo } from "../../observability";
 import { buildConversationDeepLink } from "../../lib/deep-links";
 import type { PublicChannelThreads } from "../../../shared/maven-conversation";
 
-export function buildTeamHelpUnavailableMessage(): string {
-  return "I couldn't forward that to the team just now. I can keep helping here, or you can try again in a moment.";
+interface EscalationEmailSender {
+  sendEscalationNotification(input: {
+    ownerEmail: string;
+    projectName: string;
+    projectSlug: string;
+    visitorName?: string | null;
+    visitorEmail?: string | null;
+    visitorId?: string | null;
+    summary: string;
+    conversationUrl: string;
+    accentColor?: string | null;
+  }): Promise<void>;
+}
+
+export async function sendEscalationEmails(
+  emailService: EscalationEmailSender,
+  recipientEmails: string[],
+  input: Omit<
+    Parameters<EscalationEmailSender["sendEscalationNotification"]>[0],
+    "ownerEmail"
+  >,
+): Promise<void> {
+  const seen = new Set<string>();
+  const errors: unknown[] = [];
+  for (const email of recipientEmails) {
+    const recipient = email.trim();
+    const key = recipient.toLowerCase();
+    if (!recipient || seen.has(key)) continue;
+    seen.add(key);
+    try {
+      await emailService.sendEscalationNotification({
+        ...input,
+        ownerEmail: recipient,
+      });
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length > 0) throw errors[0];
 }
 
 export function parseTelegramThreadId(
@@ -78,6 +115,7 @@ export async function createEscalation(params: {
   acceptedTeamRequestToken?: string;
   notifyExternalActions?: boolean;
   claimExternalNotificationAttempt?: () => Promise<boolean>;
+  releaseExternalNotificationAttempt?: () => Promise<void>;
   persistTelegramThreadId?: (threadId: string) => Promise<boolean>;
   persistChannelThread?: (
     channel: AgentChannelAdapter["channel"],
@@ -243,32 +281,34 @@ export async function createEscalation(params: {
   const isUpdate = !created;
 
   const agentChannels = params.agentChannels ?? [];
-  const hasMessenger = agentChannels.length > 0;
   const notificationsEnabled = params.notifyExternalActions !== false;
-  let externalActionsClaimed = false;
+  const recipientEmails =
+    notificationsEnabled && params.env.RESEND_API_KEY
+      ? await params.projectService.getEscalationRecipientEmails(
+          params.project.id,
+        )
+      : [];
+  const hasExternalDestinations =
+    agentChannels.length > 0 || recipientEmails.length > 0;
 
   let telegramThreadId: string | undefined;
-  if (notificationsEnabled && hasMessenger) {
+  if (notificationsEnabled && hasExternalDestinations) {
     try {
       const notification = await runWithExternalActionLease(
           params.chatService,
           params.project.id,
           params.conversation.id,
           async () => {
-            externalActionsClaimed = params.claimExternalNotificationAttempt
+            const claimed = params.claimExternalNotificationAttempt
               ? await params.claimExternalNotificationAttempt()
               : true;
-            if (!externalActionsClaimed) {
+            if (!claimed) {
               return { claimed: false, persisted: [] as Array<{
                 channel: AgentChannelAdapter["channel"];
                 threadId: string;
-              }> };
+              }>, failed: false };
             }
-            const persisted: Array<{
-              channel: AgentChannelAdapter["channel"];
-              threadId: string;
-            }> = [];
-            for (const adapter of agentChannels) {
+            const channelDeliveries = agentChannels.map(async (adapter) => {
               const threadId = await adapter.notifyEscalation({
                 conversationId: params.conversation.id,
                 visitorName: params.conversation.visitorName,
@@ -280,11 +320,51 @@ export async function createEscalation(params: {
                   ? readChannelThreadId(params.conversation, adapter.channel)
                   : null,
               });
-              if (threadId) {
-                persisted.push({ channel: adapter.channel, threadId });
-              }
+              return threadId
+                ? { channel: adapter.channel, threadId }
+                : null;
+            });
+            const emailDeliveries = recipientEmails.length > 0 &&
+                params.env.RESEND_API_KEY
+              ? [sendEscalationEmails(
+                  new EmailService(params.env.RESEND_API_KEY),
+                  recipientEmails,
+                  {
+                    projectName:
+                      params.settings?.companyName ?? params.project.name,
+                    projectSlug: params.project.slug,
+                    visitorName: params.conversation.visitorName,
+                    visitorEmail: params.conversation.visitorEmail,
+                    visitorId: params.conversation.visitorId,
+                    summary,
+                    conversationUrl,
+                    accentColor: null,
+                  },
+                ).then(() => null)]
+              : [];
+            const results = await Promise.allSettled([
+              ...channelDeliveries,
+              ...emailDeliveries,
+            ]);
+            const persisted = results.flatMap((result) =>
+              result.status === "fulfilled" && result.value
+                ? [result.value]
+                : []
+            );
+            for (const [index, result] of results.entries()) {
+              if (result.status !== "rejected") continue;
+              const channel = agentChannels[index]?.channel ?? "email";
+              logError("escalation.delivery_failed", result.reason, {
+                projectId: params.project.id,
+                conversationId: params.conversation.id,
+                channel,
+              });
             }
-            return { claimed: true, persisted };
+            return {
+              claimed: true,
+              persisted,
+              failed: results.some((result) => result.status === "rejected"),
+            };
           },
         );
       if (!notification.executed) {
@@ -292,6 +372,12 @@ export async function createEscalation(params: {
       }
       if (!notification.value?.claimed) {
         return { summary, summaryMessageId, created, accepted: true };
+      }
+      if (
+        notification.value.failed &&
+        params.releaseExternalNotificationAttempt
+      ) {
+        await params.releaseExternalNotificationAttempt();
       }
       for (const item of notification.value.persisted) {
         if (item.channel === "telegram") {
@@ -331,7 +417,7 @@ export async function createEscalation(params: {
           }
         }
       }
-      logInfo("escalation.telegram_notified", {
+      logInfo("escalation.channels_notified", {
         projectId: params.project.id,
         conversationId: params.conversation.id,
         telegramThreadId: telegramThreadId ?? null,
@@ -341,57 +427,10 @@ export async function createEscalation(params: {
           : null,
       });
     } catch (error) {
-      logError("escalation.telegram_failed", error, {
+      logError("escalation.delivery_failed", error, {
         projectId: params.project.id,
         conversationId: params.conversation.id,
       });
-    }
-  }
-
-  if (notificationsEnabled && params.env.RESEND_API_KEY) {
-    const emailService = new EmailService(params.env.RESEND_API_KEY);
-    const ownerEmail = await params.projectService.getOwnerEmail(
-      params.project.id,
-    );
-    if (ownerEmail) {
-      const projectName = params.settings?.companyName ?? params.project.name;
-      logInfo("escalation.email_queued", {
-        projectId: params.project.id,
-        conversationId: params.conversation.id,
-        isUpdate,
-      });
-      params.executionCtx.waitUntil(
-        runWithExternalActionLease(
-            params.chatService,
-            params.project.id,
-            params.conversation.id,
-            async () => {
-              if (!hasMessenger) {
-                externalActionsClaimed =
-                  params.claimExternalNotificationAttempt
-                    ? await params.claimExternalNotificationAttempt()
-                    : true;
-              }
-              if (!externalActionsClaimed) return;
-              await emailService.sendEscalationNotification({
-                ownerEmail,
-                projectName,
-                projectSlug: params.project.slug,
-                visitorName: params.conversation.visitorName,
-                visitorEmail: params.conversation.visitorEmail,
-                visitorId: params.conversation.visitorId,
-                summary,
-                conversationUrl,
-                accentColor: null,
-              });
-            },
-          ).catch((err: unknown) => {
-            logError("escalation.email_failed", err, {
-              projectId: params.project.id,
-              conversationId: params.conversation.id,
-            });
-          }),
-      );
     }
   }
 

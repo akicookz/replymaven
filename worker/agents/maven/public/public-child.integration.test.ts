@@ -198,6 +198,7 @@ describe("native public MavenChatAgent child", () => {
       {
         id: "private-1",
         role: "user",
+        metadata: { createdAt: expect.any(Number) },
         parts: [{ type: "text", text: "private-1" }],
       },
     ]);
@@ -671,6 +672,80 @@ describe("native public MavenChatAgent child", () => {
       },
       messages: [{ id: "human-1", author: "agent" }],
       revision: 1,
+    });
+  });
+
+  nativeTest("joins external human clients and clears them on AI handback", async () => {
+    const [
+      { env },
+      { getSubAgentByName },
+      { MavenChatAgent },
+    ] = await Promise.all([
+      import("cloudflare:workers"),
+      import("agents"),
+      import("../maven-chat-agent"),
+    ]);
+    const projectId = "public-child-route-clients";
+    const conversationId = "conversation-route-clients";
+    const parent = env.MAVEN_PROJECT_AGENT.get(
+      env.MAVEN_PROJECT_AGENT.idFromName(projectId),
+    );
+    await parent.registerPublicConversation(conversationId);
+    const child = await getSubAgentByName(
+      parent,
+      MavenChatAgent,
+      `pub_${conversationId}`,
+    );
+    const record = conversation(conversationId);
+    record.projectId = projectId;
+    await child.importLegacyPublicConversation({
+      conversation: record,
+      messages: [],
+      checksum: "checksum-route-clients",
+    });
+
+    for (const message of [
+      {
+        ...publicMessage("telegram-1", "agent", "Telegram joined."),
+        conversationId,
+        origin: "telegram" as const,
+      },
+      {
+        ...publicMessage("slack-1", "agent", "Slack joined."),
+        conversationId,
+        origin: "slack" as const,
+      },
+      {
+        ...publicMessage("email-1", "agent", "Email joined."),
+        conversationId,
+        origin: "email" as const,
+        userId: "member-1",
+      },
+      {
+        ...publicMessage("dashboard-1", "agent", "Dashboard joined."),
+        conversationId,
+        origin: "dashboard" as const,
+        userId: "member-2",
+      },
+    ]) {
+      await child.appendHumanMessage(message);
+    }
+
+    await expect(child.getPublicChatState()).resolves.toMatchObject({
+      aiParticipation: "human_only",
+      activeHumanRoutes: [
+        { kind: "agent_channel", channel: "telegram" },
+        { kind: "agent_channel", channel: "slack" },
+        {
+          kind: "email",
+          userId: "member-1",
+        },
+      ],
+    });
+    await child.transitionPublicOwnership("ai_handed_back");
+    await expect(child.getPublicChatState()).resolves.toMatchObject({
+      aiParticipation: "continuous",
+      activeHumanRoutes: [],
     });
   });
 

@@ -6,7 +6,6 @@ import type {
   SidechatToolDescriptor,
 } from "../../../shared/sidechat-agent";
 import {
-  buildSidechatDynamicTools,
   buildSidechatToolDescriptors,
   executeSidechatProjectTool,
   persistSidechatActionAudit,
@@ -121,6 +120,33 @@ describe("Sidechat project tool descriptors", () => {
     });
   });
 
+  test("presents a resolved MCP tool with its connection name and icon", () => {
+    expect(sidechatToolPresentation({
+      connectionId: "mcp-posthog",
+      toolName: "query-run",
+      exposedName: "query-run",
+      displayName: "Execute SQL query",
+      description: "Run SQL",
+      inputSchema: { type: "object" },
+      catalogFingerprint: "a".repeat(64),
+      audience: "sidechat",
+      access: "read",
+      enabled: true,
+      source: {
+        kind: "mcp",
+        name: "PostHog",
+        icon: "/integrations/posthog.svg",
+      },
+    })).toEqual({
+      displayName: "Execute SQL query",
+      source: {
+        kind: "mcp",
+        name: "PostHog",
+        icon: "/integrations/posthog.svg",
+      },
+    });
+  });
+
   test("includes knowledge and only safe serializable Sidechat HTTP descriptors", async () => {
     const descriptors = await buildSidechatToolDescriptors("project-1", [
       toolRow(),
@@ -157,155 +183,6 @@ describe("Sidechat project tool descriptors", () => {
     });
   });
 
-  test("builds dynamic child tools that execute only through the parent proxy", async () => {
-    const descriptors = await buildSidechatToolDescriptors("project-1", [toolRow()]);
-    const execute = mock(async () => ({
-      status: "completed" as const,
-      output: { found: true },
-      safeActivity: "Look up customer · Done",
-    }));
-    const activities: unknown[] = [];
-    const tools = buildSidechatDynamicTools({
-      descriptors,
-      childName: "sc_conversation-1",
-      conversationId: "conversation-1",
-      actorUserId: "user-1",
-      execute,
-      emitActivity(part) {
-        activities.push(part);
-      },
-    });
-
-    expect(Object.keys(tools)).toEqual(["search_knowledge", "lookup_customer"]);
-    expect(tools.request_team_help).toBeUndefined();
-    const output = await tools.lookup_customer?.execute?.(
-      { customerId: "customer-1" },
-      {
-        toolCallId: "call-1",
-        messages: [],
-        abortSignal: undefined,
-      },
-    );
-    expect(output).toEqual({ found: true });
-    expect(execute).toHaveBeenCalledWith({
-      childName: "sc_conversation-1",
-      conversationId: "conversation-1",
-      actorUserId: "user-1",
-      connectionId: "http:tool-1",
-      toolName: "lookup_customer",
-      catalogFingerprint: descriptors[1]?.catalogFingerprint,
-      safety: "read",
-      access: "read",
-      approvalMode: "none",
-      input: { customerId: "customer-1" },
-    });
-    expect(activities).toEqual([
-      {
-        type: "data-safe-activity",
-        data: {
-          label: "Look up customer",
-          status: "started",
-          tool: {
-            displayName: "Look up customer",
-            source: { kind: "http", name: "Custom tool", icon: null },
-          },
-        },
-        transient: true,
-      },
-      {
-        type: "data-safe-activity",
-        data: {
-          label: "Look up customer · Done",
-          status: "success",
-          tool: {
-            displayName: "Look up customer",
-            source: { kind: "http", name: "Custom tool", icon: null },
-          },
-        },
-        transient: true,
-      },
-    ]);
-  });
-
-  test("uses native approval only for writes without an exact persistent grant", async () => {
-    const read = mcpDescriptor({ exposedName: "read_tool" });
-    const write = mcpDescriptor({
-      toolName: "write_customer",
-      exposedName: "write_tool",
-      access: "write",
-    });
-    const allowedWrite = mcpDescriptor({
-      toolName: "allowed_write_customer",
-      exposedName: "allowed_write_tool",
-      access: "write",
-      alwaysAllowed: true,
-    });
-    const execute = mock(async () => ({
-      status: "completed" as const,
-      output: { ok: true },
-      safeActivity: "Done",
-    }));
-    const tools = buildSidechatDynamicTools({
-      descriptors: [read, write, allowedWrite],
-      childName: "sc_conversation-1",
-      conversationId: "conversation-1",
-      actorUserId: "user-1",
-      execute,
-      emitActivity() {},
-    });
-
-    expect(tools.read_tool?.needsApproval).toBe(false);
-    expect(tools.write_tool?.needsApproval).toBe(true);
-    expect(tools.allowed_write_tool?.needsApproval).toBe(false);
-
-    await tools.write_tool?.execute?.({}, {
-      toolCallId: "write-call",
-      messages: [],
-      abortSignal: undefined,
-    });
-    await tools.allowed_write_tool?.execute?.({}, {
-      toolCallId: "always-call",
-      messages: [],
-      abortSignal: undefined,
-    });
-    expect(execute.mock.calls.map((call) => call[0].approvalMode)).toEqual([
-      "once",
-      "always",
-    ]);
-  });
-
-  test("keeps an asked read classified as read when it reaches the parent", async () => {
-    const askedRead = mcpDescriptor({
-      exposedName: "asked_read_tool",
-      safety: "read",
-      access: "write",
-    });
-    const execute = mock(async () => ({
-      status: "completed" as const,
-      output: { ok: true },
-      safeActivity: "Done",
-    }));
-    const tools = buildSidechatDynamicTools({
-      descriptors: [askedRead],
-      childName: "sc_conversation-1",
-      conversationId: "conversation-1",
-      actorUserId: "user-1",
-      execute,
-      emitActivity() {},
-    });
-
-    expect(tools.asked_read_tool?.needsApproval).toBe(true);
-    await tools.asked_read_tool?.execute?.({ email: "customer@example.com" }, {
-      toolCallId: "asked-read-call",
-      messages: [],
-      abortSignal: undefined,
-    });
-    expect(execute).toHaveBeenCalledWith(expect.objectContaining({
-      access: "write",
-      safety: "read",
-      approvalMode: "once",
-    }));
-  });
 });
 
 describe("Sidechat project tool execution", () => {
@@ -338,6 +215,25 @@ describe("Sidechat project tool execution", () => {
       "find_customer",
       { externalId: "cus_1" },
     );
+  });
+
+  test("binds MCP authority without treating exposedName as identity", async () => {
+    const descriptor = mcpDescriptor({
+      exposedName: "presentation-name-can-change",
+    });
+    const executeMcpTool = mock(async () => ({ content: [] }));
+
+    const result = await executeSidechatProjectTool({
+      projectId: "project-1",
+      request: executionRequest(descriptor),
+      dependencies: executionDependencies({
+        getAuthoritativeMcpTool: mock(async () => descriptor),
+        executeMcpTool,
+      }),
+    });
+
+    expect(result.status).toBe("completed");
+    expect(executeMcpTool).toHaveBeenCalledTimes(1);
   });
 
   test("executes approved MCP writes once but rejects unapproved and stale authority", async () => {
@@ -380,6 +276,54 @@ describe("Sidechat project tool execution", () => {
       errorCode: "tool_authority_changed",
     });
     expect(executeMcpTool).toHaveBeenCalledTimes(1);
+  });
+
+  test("validates MCP input against the authoritative normalized schema", async () => {
+    const descriptor = mcpDescriptor({
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["customer"],
+        properties: {
+          customer: { $ref: "#/$defs/customer" },
+        },
+        $defs: {
+          customer: {
+            type: "object",
+            additionalProperties: false,
+            required: ["tier"],
+            properties: {
+              tier: { type: "string", enum: ["pro", "free"] },
+            },
+          },
+        },
+      },
+    });
+    const executeMcpTool = mock(async () => ({ content: [] }));
+    const dependencies = executionDependencies({
+      getAuthoritativeMcpTool: mock(async () => descriptor),
+      executeMcpTool,
+    });
+
+    const result = await executeSidechatProjectTool({
+      projectId: "project-1",
+      request: executionRequest(descriptor, {
+        input: {
+          customer: {
+            tier: "secret-invalid-value",
+            extra: true,
+          },
+        },
+      }),
+      dependencies,
+    });
+
+    expect(result).toMatchObject({
+      status: "denied",
+      errorCode: "tool_authority_changed",
+    });
+    expect(executeMcpTool).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain("secret-invalid-value");
   });
 
   test("requires an exact current grant for always-approved writes", async () => {

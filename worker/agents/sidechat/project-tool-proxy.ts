@@ -1,5 +1,4 @@
 import type { JSONSchema7 } from "json-schema";
-import { dynamicTool, jsonSchema, type ToolSet } from "ai";
 import type {
   ExecuteProjectToolRequest,
   ExecuteProjectToolResult,
@@ -15,27 +14,14 @@ import {
   toolAudienceSchema,
 } from "../../validation";
 import { fingerprintHttpToolContract } from "../../chat-runtime/tools/tool-capability";
+import {
+  normalizeProjectToolInputSchema,
+  validateProjectToolInput,
+} from "./project-tool-schema";
 
 export const INTERNAL_KNOWLEDGE_CONNECTION_ID = "internal:replymaven";
 const INTERNAL_KNOWLEDGE_FINGERPRINT = "internal-search-knowledge-v1";
 const MAX_SAFE_ACTIVITY_CHARS = 240;
-
-interface SidechatDynamicToolOptions {
-  descriptors: SidechatToolDescriptor[];
-  childName: string;
-  conversationId: string;
-  actorUserId: string;
-  execute(request: ExecuteProjectToolRequest): Promise<ExecuteProjectToolResult>;
-  emitActivity(part: {
-    type: "data-safe-activity";
-    data: {
-      label: string;
-      status: "started" | "success" | "error";
-      tool?: SidechatToolPresentation;
-    };
-    transient: true;
-  }): void;
-}
 
 interface SidechatProjectToolDependencies {
   isRegisteredSidechat(
@@ -108,7 +94,7 @@ export function sidechatToolPresentation(
   };
 }
 
-function knowledgeDescriptor(): SidechatToolDescriptor {
+export function buildSidechatKnowledgeDescriptor(): SidechatToolDescriptor {
   return {
     connectionId: INTERNAL_KNOWLEDGE_CONNECTION_ID,
     toolName: "search_knowledge",
@@ -199,32 +185,7 @@ function httpInputSchema(
   };
 }
 
-function validateHttpInput(
-  parameters: NonNullable<ReturnType<typeof readHttpContract>>["parameters"],
-  input: unknown,
-): Record<string, unknown> | null {
-  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
-  const values = input as Record<string, unknown>;
-  const allowedNames = new Set(parameters.map((parameter) => parameter.name));
-  if (Object.keys(values).some((name) => !allowedNames.has(name))) return null;
-  for (const parameter of parameters) {
-    const value = values[parameter.name];
-    if (value === undefined) {
-      if (parameter.required) return null;
-      continue;
-    }
-    if (typeof value !== parameter.type) return null;
-    if (
-      parameter.enum?.length &&
-      (typeof value !== "string" || !parameter.enum.includes(value))
-    ) {
-      return null;
-    }
-  }
-  return values;
-}
-
-async function httpDescriptor(
+export async function buildSidechatHttpToolDescriptor(
   tool: ToolRow,
 ): Promise<SidechatToolDescriptor | null> {
   if (!isSidechatHttpTool(tool)) return null;
@@ -282,8 +243,6 @@ function mcpDescriptorMatchesRequest(
     descriptor.audience === "sidechat" &&
     descriptor.connectionId === request.connectionId &&
     descriptor.toolName === request.toolName &&
-    descriptor.exposedName ===
-      `tool_${request.connectionId.replace(/-/gu, "")}_${request.toolName}` &&
     descriptor.catalogFingerprint === request.catalogFingerprint &&
     resolveSidechatToolSafety(descriptor) === request.safety &&
     descriptor.access === request.access,
@@ -294,93 +253,15 @@ export async function buildSidechatToolDescriptors(
   projectId: string,
   tools: ToolRow[],
 ): Promise<SidechatToolDescriptor[]> {
-  const descriptors: SidechatToolDescriptor[] = [knowledgeDescriptor()];
+  const descriptors: SidechatToolDescriptor[] = [
+    buildSidechatKnowledgeDescriptor(),
+  ];
   for (const tool of tools) {
     if (tool.projectId !== projectId) continue;
-    const descriptor = await httpDescriptor(tool);
+    const descriptor = await buildSidechatHttpToolDescriptor(tool);
     if (descriptor) descriptors.push(descriptor);
   }
   return descriptors;
-}
-
-function activityPart(
-  descriptor: SidechatToolDescriptor,
-  status: "started" | "success" | "error",
-  label: string,
-) {
-  return {
-    type: "data-safe-activity" as const,
-    data: {
-      label: label.slice(0, MAX_SAFE_ACTIVITY_CHARS),
-      status,
-      tool: sidechatToolPresentation(descriptor),
-    },
-    transient: true as const,
-  };
-}
-
-export function buildSidechatDynamicTools(
-  options: SidechatDynamicToolOptions,
-): ToolSet {
-  const tools: ToolSet = {};
-  for (const descriptor of options.descriptors) {
-    if (
-      !descriptor.enabled ||
-      descriptor.audience !== "sidechat" ||
-      descriptor.exposedName === "request_team_help" ||
-      (isReservedMavenToolName(descriptor.exposedName) &&
-        descriptor.exposedName !== "search_knowledge")
-    ) {
-      continue;
-    }
-    tools[descriptor.exposedName] = dynamicTool({
-      title: descriptor.displayName,
-      description: descriptor.description,
-      inputSchema: jsonSchema(descriptor.inputSchema),
-      needsApproval:
-        descriptor.access === "write" && descriptor.alwaysAllowed !== true,
-      async execute(input) {
-        options.emitActivity(
-          activityPart(descriptor, "started", descriptor.displayName),
-        );
-        try {
-          const result = await options.execute({
-            childName: options.childName,
-            conversationId: options.conversationId,
-            actorUserId: options.actorUserId,
-            connectionId: descriptor.connectionId,
-            toolName: descriptor.toolName,
-            catalogFingerprint: descriptor.catalogFingerprint,
-            safety: resolveSidechatToolSafety(descriptor),
-            access: descriptor.access,
-            approvalMode: descriptor.access === "read"
-              ? "none"
-              : descriptor.alwaysAllowed === true
-                ? "always"
-                : "once",
-            input,
-          });
-          const completed = result.status === "completed";
-          options.emitActivity(
-            activityPart(
-              descriptor,
-              completed ? "success" : "error",
-              completed ? result.safeActivity : descriptor.displayName,
-            ),
-          );
-          return completed
-            ? result.output
-            : { error: result.errorCode ?? "tool_unavailable" };
-        } catch {
-          options.emitActivity(
-            activityPart(descriptor, "error", descriptor.displayName),
-          );
-          return { error: "tool_unavailable" };
-        }
-      },
-    });
-  }
-  return tools;
 }
 
 function deniedResult(errorCode: string): ExecuteProjectToolResult {
@@ -547,6 +428,11 @@ async function executeAuthorizedMcpTool(
   if (!mcpDescriptorMatchesRequest(descriptor, request)) {
     return deniedResult("tool_authority_changed");
   }
+  const normalized = normalizeProjectToolInputSchema(descriptor.inputSchema);
+  const validated = normalized.ok
+    ? validateProjectToolInput(normalized.schema, request.input)
+    : { ok: false as const, errorCode: "invalid_tool_input" as const };
+  if (!validated.ok) return deniedResult("tool_authority_changed");
   const leased = await dependencies.runExternalAction(async () => {
     const [actorAllowed, currentDescriptor, grantCurrent] = await Promise.all([
       dependencies.canActorAccessProject(request.actorUserId),
@@ -565,10 +451,17 @@ async function executeAuthorizedMcpTool(
     ) {
       return { kind: "denied" as const };
     }
+    const currentNormalized = normalizeProjectToolInputSchema(
+      currentDescriptor.inputSchema,
+    );
+    const currentValidation = currentNormalized.ok
+      ? validateProjectToolInput(currentNormalized.schema, request.input)
+      : { ok: false as const, errorCode: "invalid_tool_input" as const };
+    if (!currentValidation.ok) return { kind: "denied" as const };
     const value = await dependencies.executeMcpTool(
       request.connectionId,
       request.toolName,
-      request.input,
+      currentValidation.value,
     );
     return transportValue(value, request, currentDescriptor.displayName);
   });
@@ -584,16 +477,16 @@ async function executeAuthorizedHttpTool(
   const toolId = request.connectionId.slice("http:".length);
   const authoritativeTool = await dependencies.getAuthoritativeHttpTool(toolId);
   const descriptor = authoritativeTool
-    ? await httpDescriptor(authoritativeTool)
+    ? await buildSidechatHttpToolDescriptor(authoritativeTool)
     : null;
-  const contract = authoritativeTool
-    ? readHttpContract(authoritativeTool)
+  const normalized = descriptor
+    ? normalizeProjectToolInputSchema(descriptor.inputSchema)
     : null;
-  const validatedInput = contract
-    ? validateHttpInput(contract.parameters, request.input)
+  const validatedInput = normalized?.ok
+    ? validateProjectToolInput(normalized.schema, request.input)
     : null;
   if (
-    !validatedInput ||
+    !validatedInput?.ok ||
     !descriptorMatchesRequest(
       descriptor,
       authoritativeTool,
@@ -612,16 +505,18 @@ async function executeAuthorizedHttpTool(
         : true,
     ]);
     const currentDescriptor = currentTool
-      ? await httpDescriptor(currentTool)
+      ? await buildSidechatHttpToolDescriptor(currentTool)
       : null;
-    const currentContract = currentTool ? readHttpContract(currentTool) : null;
-    const currentInput = currentContract
-      ? validateHttpInput(currentContract.parameters, request.input)
+    const currentNormalized = currentDescriptor
+      ? normalizeProjectToolInputSchema(currentDescriptor.inputSchema)
+      : null;
+    const currentInput = currentNormalized?.ok
+      ? validateProjectToolInput(currentNormalized.schema, request.input)
       : null;
     if (
       !actorAllowed ||
       !currentTool ||
-      !currentInput ||
+      !currentInput?.ok ||
       !grantCurrent ||
       !descriptorMatchesRequest(
         currentDescriptor,
@@ -632,7 +527,10 @@ async function executeAuthorizedHttpTool(
     ) {
       return { kind: "denied" as const };
     }
-    const value = await dependencies.executeHttpTool(currentTool, currentInput);
+    const value = await dependencies.executeHttpTool(
+      currentTool,
+      currentInput.value,
+    );
     return transportValue(value, request, currentDescriptor.displayName);
   });
   return resultFromLease(leased);

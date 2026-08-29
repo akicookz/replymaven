@@ -204,7 +204,7 @@ describe("Sidechat native message protocol adapter", () => {
     expect(JSON.stringify(message)).not.toContain("private-output");
   });
 
-  test("attaches a pending approval to its exact tool trace", () => {
+  test("attaches a current gateway approval to its exact tool trace", () => {
     const [message] = adaptSidechatMessages([
       uiMessage("maven-approval", "assistant", [
         {
@@ -221,10 +221,13 @@ describe("Sidechat native message protocol adapter", () => {
         },
         {
           type: "dynamic-tool",
-          toolName: "tool_linear_create_issue",
+          toolName: "call_project_tool",
           toolCallId: "call-1",
           state: "approval-requested",
-          input: { title: "Checkout is broken" },
+          input: {
+            toolRef: "sct1.current",
+            argumentsJson: '{"title":"Checkout is broken"}',
+          },
           approval: { id: "approval-1" },
         },
       ] as UIMessage["parts"]),
@@ -288,5 +291,97 @@ describe("Sidechat native message protocol adapter", () => {
     });
     expect(messages[0]).not.toHaveProperty("presentationAction");
     expect(messages[0]).not.toHaveProperty("sidechatTrace");
+  });
+
+  test("shows selected gateway identity and nested arguments only", () => {
+    const [message] = adaptSidechatMessages([
+      uiMessage("maven-gateway", "assistant", [
+        {
+          type: "data-tool-trace",
+          id: "gateway-1:trace",
+          data: {
+            toolCallId: "gateway-1",
+            startedAt: 1_000,
+            safety: "write",
+            tool: {
+              displayName: "Create issue",
+              source: {
+                kind: "mcp",
+                name: "Linear",
+                icon: "/integrations/linear.svg",
+              },
+            },
+          },
+        },
+        {
+          type: "dynamic-tool",
+          toolName: "call_project_tool",
+          toolCallId: "gateway-1",
+          title: "Use connected tool",
+          state: "approval-requested",
+          input: {
+            toolRef: "sct1.opaque-reference",
+            argumentsJson:
+              '{"title":"Checkout failed","token":"private-token"}',
+          },
+          approval: { id: "approval-1" },
+        },
+      ] as UIMessage["parts"]),
+    ], { canAlwaysAllow: true });
+
+    expect(message.sidechatTrace).toEqual([
+      expect.objectContaining({
+        type: "tool",
+        tool: {
+          displayName: "Create issue",
+          source: {
+            kind: "mcp",
+            name: "Linear",
+            icon: "/integrations/linear.svg",
+          },
+          safety: "write",
+        },
+        input: {
+          title: "Checkout failed",
+          token: "[REDACTED]",
+        },
+      }),
+    ]);
+    expect(JSON.stringify(message)).not.toContain("call_project_tool");
+    expect(JSON.stringify(message)).not.toContain("sct1.opaque-reference");
+    expect(JSON.stringify(message)).not.toContain("private-token");
+  });
+
+  test("hides discovery plumbing and expires unsafe legacy approvals", () => {
+    const [message] = adaptSidechatMessages([
+      uiMessage("maven-mixed", "assistant", [
+        {
+          type: "dynamic-tool",
+          toolName: "search_project_tools",
+          toolCallId: "search-1",
+          state: "output-available",
+          input: { query: "issues" },
+          output: { tools: [] },
+        },
+        {
+          type: "dynamic-tool",
+          toolName: "tool_linear_create_issue",
+          toolCallId: "legacy-1",
+          state: "approval-requested",
+          input: { title: "Checkout failed" },
+          approval: { id: "legacy-approval" },
+        },
+      ] as UIMessage["parts"]),
+    ], { canAlwaysAllow: true });
+
+    expect(message.sidechatTrace).toEqual([
+      expect.objectContaining({
+        toolCallId: "legacy-1",
+        state: "output-error",
+        errorText: "This approval expired after the connected-tool upgrade. Ask Maven to retry.",
+      }),
+    ]);
+    expect(message.sidechatTrace?.[0]).not.toHaveProperty("approval");
+    expect(JSON.stringify(message)).not.toContain("search_project_tools");
   });
 });

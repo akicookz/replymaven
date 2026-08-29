@@ -77,7 +77,12 @@ describe("native Sidechat cleanup", () => {
       childName: "sc_conversation-b",
     });
     await expect(childB.getPrivateTranscriptSnapshot()).resolves.toEqual([
-      userMessage("b-1", "Keep me"),
+      {
+        ...userMessage("b-1", "Keep me"),
+        metadata: {
+          createdAt: expect.any(Number),
+        },
+      },
     ]);
     const recreated = await parent.registerSidechat("conversation-a");
     expect(recreated.created).toBe(true);

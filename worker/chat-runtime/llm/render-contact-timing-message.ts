@@ -72,7 +72,7 @@ export type RenderedContactTimingAssessment = z.infer<
 >;
 
 export function fallbackRenderContactTimingMessage(): string {
-  return "The team should get back to you as soon as possible.";
+  return "Response time can vary.";
 }
 
 export function isRenderedContactTimingMessageValid(

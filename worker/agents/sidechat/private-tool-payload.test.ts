@@ -3,6 +3,7 @@ import { convertToModelMessages, isToolUIPart, type UIMessage } from "ai";
 import {
   createPrivateToolChunkFilter,
   createPrivateToolChunkProjector,
+  removeLegacyProjectToolParts,
   removeAbandonedApprovalParts,
   sanitizePrivateMessageForPersistence,
 } from "./private-tool-payload";
@@ -53,14 +54,14 @@ describe("private Sidechat tool transcript boundary", () => {
     ]);
   });
 
-  test("projects presentation, timing, and credential-redacted business payloads", () => {
+  test("projects presentation, timing, and credential-redacted business payloads", async () => {
     const times = [1_000, 1_240];
     const project = createPrivateToolChunkProjector(
       new Map([["tool_posthog_query_events", posthogContext]]),
       () => times.shift() ?? 1_240,
     );
 
-    expect(project({
+    expect(await project({
       type: "tool-input-start",
       toolCallId: "read-1",
       toolName: "tool_posthog_query_events",
@@ -78,7 +79,7 @@ describe("private Sidechat tool transcript boundary", () => {
       expect.objectContaining({ type: "tool-input-start" }),
     ]);
 
-    expect(project({
+    expect(await project({
       type: "tool-input-available",
       toolCallId: "read-1",
       toolName: "tool_posthog_query_events",
@@ -95,7 +96,7 @@ describe("private Sidechat tool transcript boundary", () => {
       },
     })]);
 
-    expect(project({
+    expect(await project({
       type: "tool-output-available",
       toolCallId: "read-1",
       output: {
@@ -117,18 +118,18 @@ describe("private Sidechat tool transcript boundary", () => {
     ]);
   });
 
-  test("binds an approval to the same presented tool call", () => {
+  test("binds an approval to the same presented tool call", async () => {
     const project = createPrivateToolChunkProjector(
       new Map([["tool_posthog_query_events", posthogContext]]),
       () => 1_000,
     );
-    project({
+    await project({
       type: "tool-input-start",
       toolCallId: "read-1",
       toolName: "tool_posthog_query_events",
     });
 
-    expect(project({
+    expect(await project({
       type: "tool-approval-request",
       toolCallId: "read-1",
       approvalId: "approval-1",
@@ -231,14 +232,14 @@ describe("private Sidechat tool transcript boundary", () => {
     });
   });
 
-  test("forwards continuation outputs for tool calls approved in an earlier stream", () => {
+  test("forwards continuation outputs for tool calls approved in an earlier stream", async () => {
     const project = createPrivateToolChunkProjector(
       new Map([["tool_posthog_query_events", posthogContext]]),
       () => 1_000,
       new Map([["approved-1", "tool_posthog_query_events"]]),
     );
 
-    expect(project({
+    expect(await project({
       type: "tool-output-available",
       toolCallId: "approved-1",
       output: {
@@ -257,14 +258,14 @@ describe("private Sidechat tool transcript boundary", () => {
     ]);
   });
 
-  test("does not forward continuation outputs for unregistered seeded calls", () => {
+  test("does not forward continuation outputs for unregistered seeded calls", async () => {
     const project = createPrivateToolChunkProjector(
       new Map([["tool_posthog_query_events", posthogContext]]),
       () => 1_000,
       new Map([["approved-1", "tool_unknown_tool"]]),
     );
 
-    expect(project({
+    expect(await project({
       type: "tool-output-available",
       toolCallId: "approved-1",
       output: { value: true },
@@ -405,5 +406,102 @@ describe("private Sidechat tool transcript boundary", () => {
       toolCallId: "unknown-1",
       output: { value: true },
     })).toBe(false);
+  });
+
+  test("removes legacy direct tools only from the model view", () => {
+    const messages: UIMessage[] = [{
+      id: "assistant-tools",
+      role: "assistant",
+      parts: [
+        { type: "text", text: "I found the account." },
+        {
+          type: "dynamic-tool",
+          toolName: "tool_posthog_query_events",
+          toolCallId: "legacy-settled",
+          state: "output-available",
+          input: { email: "customer@example.com" },
+          output: { found: true },
+        },
+        {
+          type: "dynamic-tool",
+          toolName: "tool_linear_create_issue",
+          toolCallId: "legacy-pending",
+          state: "approval-requested",
+          input: { title: "Checkout failed" },
+          approval: { id: "legacy-approval" },
+        },
+        {
+          type: "dynamic-tool",
+          toolName: "call_project_tool",
+          toolCallId: "gateway-settled",
+          state: "output-available",
+          input: {
+            toolRef: "sct1.current",
+            argumentsJson: '{"query":"checkout"}',
+          },
+          output: { found: true },
+        },
+      ],
+    }] as UIMessage[];
+
+    const projected = removeLegacyProjectToolParts(messages);
+
+    expect(projected[0]?.parts).toEqual([
+      { type: "text", text: "I found the account." },
+      expect.objectContaining({
+        type: "dynamic-tool",
+        toolName: "call_project_tool",
+        toolCallId: "gateway-settled",
+      }),
+    ]);
+    expect(messages[0]?.parts).toHaveLength(4);
+  });
+
+  test("resolves gateway presentation by call id and hides discovery plumbing", async () => {
+    const contexts = new Map([["gateway-1", posthogContext]]);
+    const project = createPrivateToolChunkProjector(
+      new Map(),
+      () => 1_000,
+      new Map(),
+      (toolCallId) => contexts.get(toolCallId) ?? null,
+    );
+
+    expect(await project({
+      type: "tool-input-available",
+      toolCallId: "search-1",
+      toolName: "search_project_tools",
+      input: { query: "events" },
+    })).toEqual([]);
+    expect(await project({
+      type: "tool-output-available",
+      toolCallId: "search-1",
+      output: { tools: [] },
+    })).toEqual([]);
+    expect(await project({
+      type: "tool-input-available",
+      toolCallId: "gateway-1",
+      toolName: "call_project_tool",
+      input: {
+        toolRef: "sct1.private",
+        argumentsJson:
+          '{"email":"customer@example.com","authorization":"private-token"}',
+      },
+    })).toEqual([
+      expect.objectContaining({
+        type: "data-tool-trace",
+        data: expect.objectContaining({
+          toolCallId: "gateway-1",
+          ...posthogContext,
+        }),
+      }),
+      expect.objectContaining({
+        toolName: "call_project_tool",
+        input: {
+          toolRef: "sct1.private",
+          argumentsJson:
+            '{"email":"customer@example.com","authorization":"[REDACTED]"}',
+        },
+      }),
+    ]);
   });
 });

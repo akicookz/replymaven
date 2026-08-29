@@ -226,6 +226,54 @@ export function isSidechatToolRunning(state: SidechatToolTraceState): boolean {
 }
 
 export type SidechatCompletedToolKind = "docs" | "other";
+export type SidechatStartupWorkingPhase = "thinking" | "planning";
+
+export const SIDECHAT_STARTUP_PLANNING_AFTER_MS = 2_000;
+
+export function readLastSidechatHumanMessageId(
+  messages: ReadonlyArray<{ id: string; role: string }>,
+): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === "agent") return message.id;
+  }
+  return null;
+}
+
+export function readLastSidechatBotMessageId(
+  messages: ReadonlyArray<{ id: string; role: string }>,
+): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === "bot") return message.id;
+  }
+  return null;
+}
+
+export function shouldShowSidechatSenderTimestamp(input: {
+  perspective: ChatPerspective;
+  role: string;
+  messageId: string;
+  turnInFlight: boolean;
+  inFlightBotMessageId: string | null;
+  toolPending: boolean;
+}): boolean {
+  if (input.perspective !== "sidechat") return true;
+  if (input.toolPending) return false;
+  return !(
+    input.role === "bot" &&
+    input.turnInFlight &&
+    input.messageId === input.inFlightBotMessageId
+  );
+}
+
+export function deriveSidechatStartupWorkingPhase(
+  elapsedMs: number,
+): SidechatStartupWorkingPhase {
+  return elapsedMs >= SIDECHAT_STARTUP_PLANNING_AFTER_MS
+    ? "planning"
+    : "thinking";
+}
 
 export function readLastCompletedSidechatToolKind(
   trace: SidechatTraceItem[] | undefined,
@@ -260,6 +308,7 @@ interface SidechatWorkingTailInput {
   hasStreamingReasoning: boolean;
   hasVisibleAnswer: boolean;
   lastCompletedToolKind: SidechatCompletedToolKind | null;
+  startupPhase?: SidechatStartupWorkingPhase;
 }
 
 interface SidechatWorkingTail {
@@ -270,15 +319,17 @@ interface SidechatWorkingTail {
 
 function sidechatWorkingLabel(
   lastCompletedToolKind: SidechatCompletedToolKind | null,
+  startupPhase: SidechatStartupWorkingPhase,
 ): string {
-  if (lastCompletedToolKind === "docs") return "Reading the docs…";
-  if (lastCompletedToolKind === "other") return "Reading the results…";
-  return "Reading the conversation…";
+  if (lastCompletedToolKind !== null || startupPhase === "planning") {
+    return "Planning next moves…";
+  }
+  return "Thinking…";
 }
 
 // A completed tool row is not the same as a finished turn. Keep a plain
 // phase line after a tool returns until reasoning, text, a draft, or an
-// error arrives. Never repeat the tool row (icon + source · name).
+// error arrives. Never show Maven · time in that gap.
 export function deriveSidechatWorkingTail(
   input: SidechatWorkingTailInput,
 ): SidechatWorkingTail {
@@ -291,7 +342,10 @@ export function deriveSidechatWorkingTail(
   return {
     showWorking,
     showError,
-    workingLabel: sidechatWorkingLabel(input.lastCompletedToolKind),
+    workingLabel: sidechatWorkingLabel(
+      input.lastCompletedToolKind,
+      input.startupPhase ?? "thinking",
+    ),
   };
 }
 

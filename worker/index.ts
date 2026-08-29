@@ -64,7 +64,7 @@ import {
   matchesSlackRequestSignature,
   resolveSlackSecret,
 } from "./services/slack-secrets";
-import { forwardVisitorThroughAgentChannels } from "./services/run-agent-channel-outbound";
+import { forwardVisitorToJoinedHumans } from "./services/run-agent-channel-outbound";
 import {
   canHandConversationToMaven,
   recordMavenAssignment,
@@ -2275,7 +2275,6 @@ const app = new Hono<HonoAppContext>()
     let conversation = null as Awaited<
       ReturnType<typeof chatService.getRecentConversationByVisitorEmail>
     > | null;
-    let referencedAgentUserId: string | null = null;
     if (referencedMessageId) {
       const sourceMessage = await chatService.getPublicMessageById(
         referencedMessageId,
@@ -2289,7 +2288,6 @@ const app = new Hono<HonoAppContext>()
         if (conv?.archivedAt) return c.json({ ok: true });
         if (conv) {
           conversation = conv;
-          referencedAgentUserId = sourceMessage.userId ?? null;
         }
       }
     }
@@ -2377,7 +2375,17 @@ const app = new Hono<HonoAppContext>()
             candidate.id,
             project.userId,
           );
-          hasAccess = membership !== null;
+          hasAccess = Boolean(
+            membership &&
+            (
+              membership.role === "admin" ||
+              membership.accessAllProjects ||
+              await teamService.memberHasProjectAccess(
+                membership.id,
+                project.id,
+              )
+            ),
+          );
         }
         if (hasAccess) {
           agentUser = {
@@ -2447,9 +2455,13 @@ const app = new Hono<HonoAppContext>()
       );
       if (!stillOperational) return c.json({ ok: true });
 
+      const chatState = await chatService.getChatState(
+        project.id,
+        conversation.id,
+      );
       if (
-        conversation.status === "waiting_agent" ||
-        conversation.status === "agent_replied"
+        chatState.aiParticipation === "human_only" &&
+        chatState.activeHumanRoutes.length > 0
       ) {
         try {
           const telegramService = new TelegramService(db, c.env.ENCRYPTION_KEY);
@@ -2474,77 +2486,90 @@ const app = new Hono<HonoAppContext>()
                 }
               : null,
           });
-          if (channels.length > 0) {
-            await runWithConversationExternalAction(
-              chatService,
-              project.id,
-              conversation.id,
-              () => forwardVisitorThroughAgentChannels({
-                channels,
-                conversationId: conversation.id,
-                visitorName: conversation.visitorName ?? senderEmail,
-                content: `[via email] ${cleanedText}`,
-                channelThreads: conversation.channelThreads,
-                telegramThreadId: conversation.telegramThreadId,
-              }),
-            );
-          }
-        } catch (err) {
-          console.error("[InboundEmail] Telegram forward failed:", err);
-        }
-      }
-
-      // Notify the agent who originated the email thread, if any.
-      let recipientUserId = referencedAgentUserId;
-      if (!recipientUserId) {
-        const fallback =
-          await chatService.getLatestEmailedPublicAgentMessage(
-            conversation.id,
-            project.id,
-          );
-        recipientUserId = fallback?.userId ?? null;
-      }
-      if (recipientUserId && c.env.RESEND_API_KEY) {
-        const agentRows = await db
-          .select({ email: users.email })
-          .from(users)
-          .where(eq(users.id, recipientUserId))
-          .limit(1);
-        const agentEmail = agentRows[0]?.email;
-        if (agentEmail) {
-          const emailService = new EmailService(c.env.RESEND_API_KEY);
-          const visitorDisplayName =
-            conversation.visitorName?.trim() ||
-            conversation.visitorEmail?.trim() ||
-            "Visitor";
-          const dashboardUrl = `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${conversation.id}`;
-          c.executionCtx.waitUntil(
-            runWithConversationExternalAction(
-                chatService,
-                project.id,
-                conversation.id,
-                () => emailService.sendVisitorReplyToAgentEmail({
-                  to: agentEmail,
+          await forwardVisitorToJoinedHumans({
+            channels,
+            activeHumanRoutes: chatState.activeHumanRoutes,
+            conversationId: conversation.id,
+            visitorName: conversation.visitorName ?? senderEmail,
+            content: `[via email] ${cleanedText}`,
+            channelThreads: conversation.channelThreads,
+            telegramThreadId: conversation.telegramThreadId,
+            email: c.env.RESEND_API_KEY
+              ? {
+                  db,
+                  service: new EmailService(c.env.RESEND_API_KEY),
+                  projectId: project.id,
                   projectSlug: project.slug,
                   projectName: project.name,
-                  conversationId: conversation.id,
                   messageId: inboundEmailMessage.id,
-                  inReplyToMessageId:
-                    referencedMessageId ?? inboundEmailMessage.id,
-                  visitorDisplayName,
+                  visitorDisplayName:
+                    conversation.visitorName?.trim() ||
+                    conversation.visitorEmail?.trim() ||
+                    "Visitor",
                   messageContent: cleanedText,
-                  dashboardUrl,
+                  dashboardUrl:
+                    `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${conversation.id}`,
                   accentColor: widgetCfgForReply?.primaryColor ?? null,
-                }),
-              )
-              .catch((err: unknown) => {
-                console.error(
-                  "[InboundEmail] Visitor-reply notification failed:",
-                  err,
-                );
-              }),
-          );
+                }
+              : undefined,
+          });
+        } catch (err) {
+          console.error("[InboundEmail] Joined-route forward failed:", err);
         }
+      } else if (chatState.aiParticipation === "assist_until_agent") {
+        const settings = await projectService.getSettings(project.id);
+        c.executionCtx.waitUntil((async () => {
+          const botMessage = await runContactSupportFollowUp({
+            db,
+            env: c.env,
+            executionCtx: c.executionCtx,
+            chatService,
+            projectService,
+            project: {
+              id: project.id,
+              userId: project.userId,
+              name: project.name,
+            },
+            settings,
+            conversation: stillOperational,
+            formMessage: cleanedText,
+            isFirstVisitorTurn: false,
+            isReturningVisitor: false,
+            mode: "pending_review_email",
+          });
+          if (
+            !botMessage ||
+            !conversation.visitorEmail ||
+            !c.env.RESEND_API_KEY
+          ) {
+            return;
+          }
+          await new EmailService(c.env.RESEND_API_KEY).sendAgentMessageEmail({
+            to: conversation.visitorEmail,
+            projectSlug: project.slug,
+            projectName: project.name,
+            conversationId: conversation.id,
+            messageId: botMessage.id,
+            agentName: settings?.botName?.trim() || "Maven",
+            agentAvatar: null,
+            messageContent: botMessage.content,
+            dashboardUrl:
+              `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${conversation.id}`,
+            accentColor: widgetCfgForReply?.primaryColor ?? null,
+            inReplyToMessageId: referencedMessageId,
+            autoSubmitted: true,
+          });
+          await chatService.markPublicMessageAsEmailed(
+            conversation.id,
+            botMessage.id,
+            project.id,
+          );
+        })().catch((error: unknown) => {
+          logError("inbound_email.assist_follow_up_failed", error, {
+            projectId: project.id,
+            conversationId: conversation.id,
+          });
+        }));
       }
     } else if (agentUser) {
       // ─── Agent reply branch (round-trip from agent's inbox) ───────────

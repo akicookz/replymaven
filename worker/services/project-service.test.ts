@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { isBotNameLocked, ProjectService } from "./project-service";
+import {
+  isBotNameLocked,
+  ProjectService,
+  selectProjectEscalationRecipientEmails,
+} from "./project-service";
 import { RESERVED_INBOUND_LOCAL_PARTS } from "./email-service";
 import { decrypt } from "./encryption-service";
 
@@ -23,6 +27,59 @@ describe("generateUniqueSlug", () => {
     const service = serviceWithExistingSlugs(new Set(["support-2", "support-3"]));
     expect(await service.generateUniqueSlug("u1", "support")).toBe("support-4");
   });
+});
+
+test("selects the owner and accepted members with project access", () => {
+  const recipients = selectProjectEscalationRecipientEmails({
+    ownerEmail: "Owner@example.com",
+    projectId: "project-1",
+    members: [
+      {
+        id: "admin",
+        userId: "user-admin",
+        email: "stale-admin@example.com",
+        role: "admin",
+        accessAllProjects: false,
+      },
+      {
+        id: "all",
+        userId: "user-all",
+        email: "stale-all@example.com",
+        role: "member",
+        accessAllProjects: true,
+      },
+      {
+        id: "scoped",
+        userId: "user-scoped",
+        email: "stale-scoped@example.com",
+        role: "member",
+        accessAllProjects: false,
+      },
+      {
+        id: "denied",
+        userId: "user-denied",
+        email: "denied@example.com",
+        role: "member",
+        accessAllProjects: false,
+      },
+    ],
+    projectMap: {
+      scoped: ["project-1"],
+      denied: ["project-2"],
+    },
+    currentUserEmails: {
+      "user-admin": "admin@example.com",
+      "user-all": "all@example.com",
+      "user-scoped": "OWNER@example.com",
+      "user-denied": "denied@example.com",
+    },
+  });
+
+  expect(recipients).toEqual([
+    "Owner@example.com",
+    "admin@example.com",
+    "all@example.com",
+  ]);
 });
 
 describe("customer identity secret rotation", () => {
