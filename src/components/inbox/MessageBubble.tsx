@@ -16,6 +16,7 @@ import {
   shouldShowMessageContent,
 } from "../../../shared/message-images";
 import MessageImages from "./MessageImages";
+import SidechatReplyDraftCard from "./SidechatReplyDraftCard";
 import SidechatExecutionTrace from "./SidechatExecutionTrace";
 
 interface MessageBubbleProps {
@@ -34,6 +35,9 @@ interface MessageBubbleProps {
   showMetadata?: boolean;
   perspective?: ChatPerspective;
   onAddToReply?: (draft: string) => void;
+  onSendAsMaven?: (sourceMessageId: string) => void;
+  sendingAsMaven?: boolean;
+  disableSendAsMaven?: boolean;
   onApprovalAction?: (
     approvalId: string,
     toolCallId: string,
@@ -60,6 +64,9 @@ export default function MessageBubble({
   showMetadata = true,
   perspective = "public",
   onAddToReply,
+  onSendAsMaven,
+  sendingAsMaven = false,
+  disableSendAsMaven = false,
   onApprovalAction,
 }: MessageBubbleProps) {
   const presentation = deriveMessagePresentation(
@@ -180,24 +187,6 @@ export default function MessageBubble({
   }
 
   function renderMessageActions() {
-    const draft = message.presentationAction?.type === "add_to_reply"
-      ? message.presentationAction.draft
-      : message.content;
-    if (actions.addToReply && onAddToReply) {
-      return (
-        <div className="mt-1 flex min-h-10 items-center">
-          <button
-            type="button"
-            className="group flex min-h-10 shrink-0 items-center whitespace-nowrap text-[12px] font-medium motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:active:scale-[0.97]"
-            onClick={() => onAddToReply(draft)}
-          >
-            <span className="rounded-full bg-brand/15 px-3 py-1 text-brand-label ring-1 ring-inset ring-brand/25 group-hover:bg-brand/25 motion-safe:transition-colors motion-safe:duration-150">
-              Add to reply
-            </span>
-          </button>
-        </div>
-      );
-    }
     if (actions.approveOnce && onApprovalAction) {
       return (
         <div className="mt-1 flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1">
@@ -325,6 +314,18 @@ export default function MessageBubble({
               <Trash2 size={14} />
             </button>
           )}
+        </div>
+      )}
+      {perspective === "sidechat" && message.replyDraft && (
+        <div className={cn("w-full max-w-[94%]", showBubble && "mt-3")}>
+          <SidechatReplyDraftCard
+            draft={message.replyDraft}
+            readOnly={readOnly}
+            sending={sendingAsMaven}
+            sendDisabled={disableSendAsMaven}
+            onAddToReply={onAddToReply}
+            onSendAsMaven={onSendAsMaven}
+          />
         </div>
       )}
       {renderMetadata()}

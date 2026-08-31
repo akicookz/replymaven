@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { Outlet, Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -67,6 +67,7 @@ function Layout() {
   const { data: subData } = useSubscription();
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [mobileOpen, setMobileOpen] = useState(false);
   const [forceProfileSetup, setForceProfileSetup] = useState(false);
 
@@ -201,19 +202,62 @@ function Layout() {
   type NavItem = {
     label: string;
     href: string;
-    icon: React.ComponentType<{ className?: string }>;
+    icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
     badge?: number;
     exact?: boolean;
     filter?: string;
     count?: number;
   };
 
-  function SectionHeader({ label }: { label: string }) {
+  function isSectionOpen(id: string) {
+    return collapsed || !collapsedSections[id];
+  }
+
+  function toggleSection(id: string) {
+    setCollapsedSections((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
+
+  function SectionHeader({ id, label }: { id: string; label: string }) {
     if (collapsed) return null;
+    const open = isSectionOpen(id);
     return (
-      <p className="px-3 pt-4 pb-1 text-[11px] font-semibold text-ink-7 uppercase tracking-wider">
+      <button
+        type="button"
+        onClick={() => toggleSection(id)}
+        aria-expanded={open}
+        aria-controls={`nav-section-${id}`}
+        className="flex w-full items-center gap-0.5 px-2 pt-3.5 pb-1 text-[11px] font-medium text-ink-6 hover:text-ink-4"
+      >
         {label}
-      </p>
+        <ChevronDown
+          className={cn(
+            "size-3 shrink-0 transition-transform",
+            !open && "-rotate-90",
+          )}
+          strokeWidth={1.5}
+        />
+      </button>
+    );
+  }
+
+  function NavSection({
+    id,
+    label,
+    children,
+  }: {
+    id: string;
+    label: string;
+    children: ReactNode;
+  }) {
+    return (
+      <div>
+        <SectionHeader id={id} label={label} />
+        {isSectionOpen(id) && (
+          <div id={`nav-section-${id}`} className="space-y-1">
+            {children}
+          </div>
+        )}
+      </div>
     );
   }
 
@@ -227,7 +271,8 @@ function Layout() {
         to={item.href}
         title={collapsed ? item.label : undefined}
         className={cn(
-          "flex min-h-10 items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors",
+          "flex h-8 items-center gap-2 rounded-md text-[13px] font-medium transition-colors",
+          collapsed ? "justify-center px-0" : "px-2",
           active
             ? "bg-glass-raised text-ink-1"
             : "text-ink-4 hover:bg-glass-button hover:text-ink-1",
@@ -235,16 +280,17 @@ function Layout() {
       >
         <item.icon
           className={cn(
-            "w-[18px] h-[18px] shrink-0",
-            active ? "text-brand" : "text-ink-5",
+            "size-4 shrink-0",
+            active ? "text-ink-2" : "text-ink-5",
           )}
+          strokeWidth={1.5}
         />
         {!collapsed && item.label}
         {!collapsed && item.filter != null && (
           <span
             className={cn(
               "ml-auto text-[11px] font-medium tabular-nums",
-              active ? "text-brand" : "text-ink-7",
+              active ? "text-ink-5" : "text-ink-7",
             )}
           >
             {item.count ?? 0}
@@ -296,60 +342,27 @@ function Layout() {
             : "fixed inset-y-0 left-0 z-50 -translate-x-full md:translate-x-0 md:relative",
         )}
       >
-        {/* Brand wordmark + sidebar toggle. When collapsed the wordmark hides and
-            the toggle becomes the top-left icon (the only way to re-expand), kept
-            aligned with the nav icons below it. */}
+        {/* Workspace name + sidebar toggle. When the rail is collapsed the
+            name hides and the toggle is the only way to re-expand. */}
         <div
           className={cn(
-            "flex items-center h-12",
-            collapsed ? "justify-center px-0" : "justify-between px-4",
+            "flex items-center gap-1",
+            collapsed ? "h-10 justify-center px-0" : "h-10 px-2",
           )}
         >
-          {!collapsed && (
-            <Link to="/app" className="text-[14px] font-semibold text-ink-1">
-              ReplyMaven
-            </Link>
-          )}
-          {/* Mobile close button — same icon as the desktop collapse toggle */}
-          <button
-            onClick={closeMobile}
-            className="p-1 rounded-md hover:bg-glass-button text-ink-5 transition-colors md:hidden"
-            aria-label="Close menu"
-          >
-            <PanelLeftClose className="w-4 h-4" />
-          </button>
-          {/* Desktop collapse / expand toggle */}
-          <button
-            onClick={() => setCollapsed((c) => !c)}
-            className={cn(
-              "hidden md:flex items-center justify-center rounded-md hover:bg-glass-button text-ink-5 transition-colors",
-              collapsed ? "w-9 h-9" : "p-1",
-            )}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {collapsed ? (
-              <PanelLeftOpen className="w-[18px] h-[18px]" />
-            ) : (
-              <PanelLeftClose className="w-4 h-4" />
-            )}
-          </button>
-        </div>
-
-        {/* Project Selector */}
-        {currentProject && projects && !collapsed && (
-          <div className="px-3 pb-3">
+          {currentProject && projects && !collapsed && (
             <Popover open={selectorOpen} onOpenChange={setSelectorOpen}>
               <PopoverTrigger asChild>
-                <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-glass-button text-sm hover:bg-glass-raised transition-colors">
-                  <span className="truncate font-medium flex-1 text-left text-ink-2 text-[13px]">
+                <button className="min-w-0 flex-1 flex h-8 items-center gap-1 rounded-md px-2 text-[13px] hover:bg-glass-button transition-colors">
+                  <span className="truncate font-semibold flex-1 text-left text-ink-1">
                     {currentProject.name}
                   </span>
                   <ChevronDown
                     className={cn(
-                      "w-3.5 h-3.5 shrink-0 text-ink-5 transition-transform",
+                      "size-3 shrink-0 text-ink-5 transition-transform",
                       selectorOpen && "rotate-180",
                     )}
+                    strokeWidth={1.5}
                   />
                 </button>
               </PopoverTrigger>
@@ -385,68 +398,76 @@ function Layout() {
                 )}
               </PopoverContent>
             </Popover>
-          </div>
-        )}
+          )}
+          {/* Mobile close button — same icon as the desktop collapse toggle */}
+          <button
+            onClick={closeMobile}
+            className="flex size-8 shrink-0 items-center justify-center rounded-md hover:bg-glass-button text-ink-5 transition-colors md:hidden"
+            aria-label="Close menu"
+          >
+            <PanelLeftClose className="size-4" strokeWidth={1.5} />
+          </button>
+          {/* Desktop collapse / expand toggle */}
+          <button
+            onClick={() => setCollapsed((c) => !c)}
+            className="hidden md:flex size-8 shrink-0 items-center justify-center rounded-md hover:bg-glass-button text-ink-5 transition-colors"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? (
+              <PanelLeftOpen className="size-4" strokeWidth={1.5} />
+            ) : (
+              <PanelLeftClose className="size-4" strokeWidth={1.5} />
+            )}
+          </button>
+        </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto px-3">
-          {/* Inbox */}
+        <nav className="flex-1 overflow-y-auto px-2">
           {inboxNav.length > 0 && (
-            <div>
-              <SectionHeader label="Inbox" />
-              <div className="space-y-0.5">
-                {inboxNav.map((item) => (
-                  <NavLink
-                    key={item.href}
-                    item={{ ...item, count: inboxCounts?.[item.filter] ?? 0 }}
-                  />
-                ))}
-              </div>
-            </div>
+            <NavSection id="inbox" label="Inbox">
+              {inboxNav.map((item) => (
+                <NavLink
+                  key={item.href}
+                  item={{ ...item, count: inboxCounts?.[item.filter] ?? 0 }}
+                />
+              ))}
+            </NavSection>
           )}
 
-          {/* Knowledgebase */}
           {knowledgebaseNav.length > 0 && (
-            <div>
-              <SectionHeader label="Knowledgebase" />
-              <div className="space-y-0.5">
-                {knowledgebaseNav.map((item) => (
-                  <NavLink key={item.href} item={item} />
-                ))}
-              </div>
-            </div>
+            <NavSection id="knowledgebase" label="Knowledgebase">
+              {knowledgebaseNav.map((item) => (
+                <NavLink key={item.href} item={item} />
+              ))}
+            </NavSection>
           )}
 
-          {/* Support Chat */}
           {supportChatNav.length > 0 && (
-            <div>
-              <SectionHeader label="Support Chat" />
-              <div className="space-y-0.5">
-                {supportChatNav.map((item) => (
-                  <NavLink key={item.href} item={item} />
-                ))}
-              </div>
-            </div>
+            <NavSection id="support-chat" label="Support Chat">
+              {supportChatNav.map((item) => (
+                <NavLink key={item.href} item={item} />
+              ))}
+            </NavSection>
           )}
 
-          {/* Workspace */}
           {workspaceNav.length > 0 && (
-            <div>
-              <SectionHeader label="Workspace" />
-              <div className="space-y-0.5">
-                {workspaceNav.map((item) => (
-                  <NavLink key={item.href} item={item} />
-                ))}
-              </div>
-            </div>
+            <NavSection id="workspace" label="Workspace">
+              {workspaceNav.map((item) => (
+                <NavLink key={item.href} item={item} />
+              ))}
+            </NavSection>
           )}
 
           {!currentProject && canCreateProjects(subData?.role) && (
             <Link
               to="/app/onboarding"
-              className="flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] text-ink-4 hover:bg-glass-button hover:text-ink-1"
+              className={cn(
+                "flex h-8 items-center gap-2 rounded-md text-[13px] font-medium text-ink-4 hover:bg-glass-button hover:text-ink-1",
+                collapsed ? "justify-center px-0" : "px-2",
+              )}
             >
-              <Plus className="w-[18px] h-[18px]" />
+              <Plus className="size-4" strokeWidth={1.5} />
               {!collapsed && "Create Project"}
             </Link>
           )}
@@ -455,10 +476,10 @@ function Layout() {
         {/* Usage — bare bar + count above the user button; links to billing.
             Trial and past-due states surface as a quiet suffix on the count. */}
         {subData?.subscription && subData.limits && !collapsed && (
-          <div className="px-3">
+          <div className="px-2">
             <Link
               to={currentProject ? `/app/projects/${currentProject.id}/settings?tab=billing` : "/app/account/billing"}
-              className="group block rounded-md px-2 py-1.5"
+              className="group block rounded-md px-2 py-1"
             >
               <div className="h-1.5 rounded-full bg-muted overflow-hidden">
                 <div
@@ -486,11 +507,11 @@ function Layout() {
         )}
 
         {/* User */}
-        <div className="px-3 pb-3 pt-2">
+        <div className="px-2 pb-2 pt-1">
           <Popover>
             <PopoverTrigger asChild>
-              <button className="w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-glass-button transition-colors">
-                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary shrink-0">
+              <button className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-glass-button transition-colors">
+                <div className="size-6 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-semibold text-primary shrink-0">
                   {userName.charAt(0).toUpperCase()}
                 </div>
                 {!collapsed && (

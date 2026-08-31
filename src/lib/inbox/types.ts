@@ -43,15 +43,18 @@ export interface Conversation {
 }
 
 export type MessageRole = "visitor" | "bot" | "agent" | "system";
-export type MessagePresentationAction =
-  | { type: "add_to_reply"; draft: string }
-  | {
-      type: "approval";
-      approvalId: string;
-      toolCallId: string;
-      canAlwaysAllow: boolean;
-      tool?: SidechatToolPresentation & { safety: SidechatToolSafety };
-    };
+export interface MessageReplyDraft {
+  text: string;
+  sourceMessageId: string;
+}
+
+export interface MessagePresentationAction {
+  type: "approval";
+  approvalId: string;
+  toolCallId: string;
+  canAlwaysAllow: boolean;
+  tool?: SidechatToolPresentation & { safety: SidechatToolSafety };
+}
 
 export type SidechatToolTraceState =
   | "input-streaming"
@@ -92,6 +95,7 @@ export interface Message {
   // joined, …) in addition to the conversational roles.
   role: MessageRole;
   content: string;
+  replyDraft?: MessageReplyDraft;
   presentationAction?: MessagePresentationAction;
   sidechatTrace?: SidechatTraceItem[];
   imageUrl?: string | null;

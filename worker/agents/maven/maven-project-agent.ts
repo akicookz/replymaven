@@ -745,6 +745,48 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     };
   }
 
+  async sendSidechatReplyDraftAsMaven(input: {
+    conversationId: string;
+    messageId: string;
+    senderName: string | null;
+    autoCloseMinutes: number | null;
+  }): Promise<
+    | { status: "sent"; messageId: string }
+    | { status: "draft_not_found" }
+    | { status: "conversation_unavailable" }
+  > {
+    const { conversationId, messageId } = input;
+    const registration = await this.getSidechatRegistration(conversationId);
+    if (!registration) return { status: "draft_not_found" };
+    const sidechat = await this.subAgent(
+      MavenChatAgent,
+      registration.childName,
+    );
+    const draft = await sidechat.getSettledReplyDraft(messageId);
+    if (!draft) return { status: "draft_not_found" };
+
+    const summary = this.conversationDirectory().getConversation(conversationId);
+    if (
+      !summary ||
+      !this.hasSubAgent(MavenChatAgent, summary.publicChildName)
+    ) {
+      return { status: "conversation_unavailable" };
+    }
+    const publicChild = await this.subAgent(
+      MavenChatAgent,
+      summary.publicChildName,
+    );
+    const sent = await publicChild.appendSidechatDraftAsBot({
+      messageId: `sidechat-draft:${messageId}`,
+      text: draft,
+      senderName: input.senderName,
+      autoCloseMinutes: input.autoCloseMinutes,
+    });
+    return sent
+      ? { status: "sent", messageId: sent.id }
+      : { status: "conversation_unavailable" };
+  }
+
   async registerPublicConversation(
     conversationId: string,
   ): Promise<{ childName: `pub_${string}`; created: boolean }> {

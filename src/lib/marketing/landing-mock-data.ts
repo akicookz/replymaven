@@ -276,10 +276,9 @@ export const SIDECHAT_ANSWER: Message = {
       },
     },
   ],
-  presentationAction: {
-    type: "add_to_reply",
-    draft:
-      "I issued the $41 refund. Your next invoice is $49.",
+  replyDraft: {
+    text: "I issued the $41 refund. Your next invoice is $49.",
+    sourceMessageId: "s2",
   },
 };
 

@@ -42,6 +42,30 @@ function extractSettledReplyDraft(message: UIMessage): string | null {
   return null;
 }
 
+function extractPersistedReplyDraft(message: UIMessage): string | null {
+  const expectedId = `${message.id}:reply-draft`;
+  for (let index = message.parts.length - 1; index >= 0; index -= 1) {
+    const part = message.parts[index] as Record<string, unknown>;
+    if (
+      part.type !== "data-reply-draft" ||
+      part.id !== expectedId ||
+      !part.data ||
+      typeof part.data !== "object"
+    ) {
+      continue;
+    }
+    const data = part.data as Record<string, unknown>;
+    const parsed = replyDraftInputSchema.safeParse({ text: data.text });
+    if (parsed.success) return parsed.data.text;
+  }
+  return null;
+}
+
+export function readSettledReplyDraft(message: UIMessage): string | null {
+  return extractPersistedReplyDraft(message) ??
+    extractSettledReplyDraft(message);
+}
+
 function hasReplyDraftData(message: UIMessage): boolean {
   return message.parts.some(
     (part) =>

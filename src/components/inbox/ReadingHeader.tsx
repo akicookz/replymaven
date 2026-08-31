@@ -257,7 +257,11 @@ export default function ReadingHeader({
   return (
     <div className="glass-bar shrink-0">
       {/* ── Toolbar row ── */}
-      <div className="flex items-center gap-2 px-3 md:px-[22px] py-[11px]">
+      <div
+        className={cn(
+          "flex min-w-0 items-center gap-2 py-[11px] px-3 md:px-4",
+        )}
+      >
         {/* Back (mobile only) — returns to the conversation list */}
         {onBack && (
           <button
@@ -384,8 +388,10 @@ export default function ReadingHeader({
         {/* Desktop: full inline search field — highlight + jump between matches */}
         <div
           className={cn(
-            "hidden glass-button rounded-[8px] items-center gap-1.5 px-2.5 h-8 w-[210px] shrink-0",
-            compact ? "lg:flex" : "md:flex",
+            "hidden glass-button h-8 items-center gap-1.5 rounded-[8px] px-2.5",
+            compact
+              ? "lg:flex min-w-0 w-[160px] max-w-[160px]"
+              : "md:flex w-[210px] shrink-0",
           )}
         >
           <SearchIcon className="size-3.5 text-ink-7 shrink-0" />
@@ -538,11 +544,11 @@ export default function ReadingHeader({
             conversation.customerId,
             conversation.archivedAt,
           ) && (
-            <CustomerAssignmentMenu
-              onCreateCustomer={onCreateCustomer}
-              onLinkCustomer={onLinkCustomer}
-            />
-          )}
+              <CustomerAssignmentMenu
+                onCreateCustomer={onCreateCustomer}
+                onLinkCustomer={onLinkCustomer}
+              />
+            )}
           {!isArchived && (
             <>
               <div className="lg:hidden">

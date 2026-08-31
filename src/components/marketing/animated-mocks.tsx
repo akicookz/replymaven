@@ -261,6 +261,7 @@ export function SidechatMock() {
         draft={sideDraft}
         setDraft={setSideDraft}
         onAddToReply={(next) => setDraft(next)}
+        onSendAsMaven={noop}
         onClose={noop}
         status={status}
         presentationStatus={shown === 1 ? "working" : "ready"}

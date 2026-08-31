@@ -207,7 +207,8 @@ export default function ReadingPane({
 
   return (
     <div className={cn(
-      "glass-reading flex-1 min-w-0 flex flex-col h-full overflow-hidden",
+      "glass-reading h-full min-w-0 flex-1 flex flex-col overflow-hidden",
+      sidechatOpen && "rounded-tr-2xl rounded-br-2xl",
       className,
     )}>
       {/* Header: toolbar row + user bar (fixed; thread scrolls below it) */}

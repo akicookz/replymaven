@@ -578,6 +578,10 @@ export const agentReplySchema = z
     },
   );
 
+export const sendSidechatDraftAsMavenSchema = z.object({
+  messageId: z.string().min(1).max(200),
+});
+
 // ─── Send Message as Email ────────────────────────────────────────────────────
 export const sendMessageAsEmailSchema = z.object({
   messageId: z.string().min(1),

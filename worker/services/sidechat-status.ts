@@ -1,6 +1,7 @@
 import type { UIMessage } from "ai";
 import type { SidechatStatus } from "../../shared/sidechat-agent";
 import type { AppEnv } from "../types";
+import { readSettledReplyDraft } from "../agents/sidechat/reply-draft-tool";
 
 export function sidechatPingText(status: SidechatStatus): string | null {
   if (status === "working") return "Maven is looking into that.";
@@ -25,16 +26,7 @@ export function hasSettledReplyDraft(messages: UIMessage[]): boolean {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message?.role !== "assistant") continue;
-    return message.parts.some((part) => {
-      const record = part as Record<string, unknown>;
-      if (
-        record.type === "tool-present_reply_draft" &&
-        record.state === "output-available"
-      ) {
-        return true;
-      }
-      return record.type === "data-reply-draft";
-    });
+    return readSettledReplyDraft(message) !== null;
   }
   return false;
 }

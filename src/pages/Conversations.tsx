@@ -185,6 +185,9 @@ interface NativeSidechatPaneProps {
   onInitialSubmissionSkipped: (messageId: string) => void;
   onTurnAccepted: (messageId: string) => void;
   onAddToReply: (draft: string) => void;
+  onSendAsMaven: (sourceMessageId: string) => void;
+  sendingMavenDraftMessageId: string | null;
+  mavenDraftSendPending: boolean;
   onClose: () => void;
 }
 
@@ -201,6 +204,9 @@ function NativeSidechatPane({
   onInitialSubmissionSkipped,
   onTurnAccepted,
   onAddToReply,
+  onSendAsMaven,
+  sendingMavenDraftMessageId,
+  mavenDraftSendPending,
   onClose,
 }: NativeSidechatPaneProps) {
   const attemptedMessageIds = useRef(new Set<string>());
@@ -267,7 +273,7 @@ function NativeSidechatPane({
       ) === true,
   );
   const hasReplyDraft = sidechat.messages.some(
-    (message) => message.presentationAction?.type === "add_to_reply",
+    (message) => Boolean(message.replyDraft),
   );
   const sidechatUiStatus = deriveNativeSidechatUiStatus({
     status: sidechat.status,
@@ -291,6 +297,9 @@ function NativeSidechatPane({
       draft={draft}
       setDraft={setDraft}
       onAddToReply={onAddToReply}
+      onSendAsMaven={onSendAsMaven}
+      sendingMavenDraftMessageId={sendingMavenDraftMessageId}
+      mavenDraftSendPending={mavenDraftSendPending}
       onClose={onClose}
       status={presentation.status}
       presentationStatus={presentation.presentationStatus}
@@ -888,6 +897,49 @@ function Conversations() {
       queryClient.invalidateQueries({
         queryKey: ["conversations", projectId],
       });
+    },
+  });
+
+  const sendMavenDraft = useMutation({
+    mutationFn: async ({
+      conversationId,
+      sourceMessageId,
+    }: {
+      conversationId: string;
+      sourceMessageId: string;
+    }) => {
+      const res = await fetch(
+        `/api/projects/${projectId}/conversations/${conversationId}` +
+          "/sidechat/drafts/send-as-maven",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messageId: sourceMessageId }),
+        },
+      );
+      const body = (await res.json().catch(() => null)) as {
+        error?: string;
+        messageId?: string;
+      } | null;
+      if (!res.ok) {
+        if (body?.error === "draft_not_found") {
+          throw new Error("This draft is no longer available.");
+        }
+        if (body?.error === "conversation_changed") {
+          throw new Error("The conversation changed. Try again.");
+        }
+        throw new Error("Could not send the draft.");
+      }
+      return body;
+    },
+    onSuccess: (_data, variables) => {
+      toast.success("Sent as Maven.");
+      queryClient.invalidateQueries({
+        queryKey: ["conversation-detail", variables.conversationId],
+      });
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
     },
   });
 
@@ -1525,6 +1577,11 @@ function Conversations() {
   const sidechatDraft = selectedConvo
     ? sidechatDrafts[selectedConvo] ?? ""
     : "";
+  const sendingMavenDraftMessageId =
+    sendMavenDraft.isPending &&
+      sendMavenDraft.variables?.conversationId === selectedConvo
+      ? sendMavenDraft.variables.sourceMessageId
+      : null;
   const customerFirstName = (
     selectedCustomer?.name ?? selected?.visitorName ?? ""
   ).trim().split(/\s+/u)[0] || null;
@@ -1704,6 +1761,16 @@ function Conversations() {
     } else if (intent.focusPublicComposer) {
       setPublicComposerFocusRequest((request) => request + 1);
     }
+  }
+
+  function handleSendAsMaven(sourceMessageId: string): void {
+    if (!selectedConvo || selected?.archivedAt || sendMavenDraft.isPending) {
+      return;
+    }
+    sendMavenDraft.mutate({
+      conversationId: selectedConvo,
+      sourceMessageId,
+    });
   }
 
   function handleSidechatSubmissionStarted(messageId: string): void {
@@ -2023,6 +2090,7 @@ function Conversations() {
     ? matchingSidechatSession
       ? (
         <NativeSidechatPane
+          key={`${projectId}:${selected.id}`}
           open={sidechatOpen}
           conversation={selected}
           customerFirstName={customerFirstName}
@@ -2035,6 +2103,9 @@ function Conversations() {
           onInitialSubmissionSkipped={handleInitialSidechatSubmissionSkipped}
           onTurnAccepted={handleSidechatTurnAccepted}
           onAddToReply={handleAddToReply}
+          onSendAsMaven={handleSendAsMaven}
+          sendingMavenDraftMessageId={sendingMavenDraftMessageId}
+          mavenDraftSendPending={sendMavenDraft.isPending}
           onClose={handleCloseSidechat}
         />
       )
@@ -2047,6 +2118,9 @@ function Conversations() {
           draft={sidechatDraft}
           setDraft={setSelectedSidechatDraft}
           onAddToReply={handleAddToReply}
+          onSendAsMaven={handleSendAsMaven}
+          sendingMavenDraftMessageId={sendingMavenDraftMessageId}
+          mavenDraftSendPending={sendMavenDraft.isPending}
           onClose={handleCloseSidechat}
           status={sidechatSession.error ? "error" : "submitted"}
           presentationStatus={sidechatSession.error ? "failed" : "working"}

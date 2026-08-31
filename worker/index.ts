@@ -193,6 +193,7 @@ import {
 import {
   handleCreateSidechatSession,
   handleGetSidechatSummaries,
+  handleSendSidechatDraftAsMaven,
   type SidechatRouteActor,
 } from "./routes/sidechat-agent-handlers";
 import {
@@ -2835,6 +2836,21 @@ const app = new Hono<HonoAppContext>()
         secret: c.env.SIDECHAT_TOKEN_SECRET,
         projectService: new ProjectService(c.get("db")),
         chatService: createPublicConversationStore({ db: c.get("db"), env: c.env }),
+        getParent: () =>
+          getAgentByName(c.env.MAVEN_PROJECT_AGENT, projectId),
+      });
+    },
+  )
+  .post(
+    "/api/projects/:projectId/conversations/:conversationId/sidechat/drafts/send-as-maven",
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      return handleSendSidechatDraftAsMaven({
+        actor: getSidechatRouteActor(c),
+        projectId,
+        conversationId: c.req.param("conversationId"),
+        request: c.req.raw,
+        projectService: new ProjectService(c.get("db")),
         getParent: () =>
           getAgentByName(c.env.MAVEN_PROJECT_AGENT, projectId),
       });

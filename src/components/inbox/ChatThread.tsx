@@ -35,6 +35,9 @@ interface ChatThreadProps {
   highlightMessageId?: string | null;
   perspective?: ChatPerspective;
   onAddToReply?: (draft: string) => void;
+  onSendAsMaven?: (sourceMessageId: string) => void;
+  sendingMavenDraftMessageId?: string | null;
+  mavenDraftSendPending?: boolean;
   onApprovalAction?: (
     approvalId: string,
     toolCallId: string,
@@ -127,6 +130,9 @@ export default function ChatThread({
   highlightMessageId,
   perspective = "public",
   onAddToReply,
+  onSendAsMaven,
+  sendingMavenDraftMessageId = null,
+  mavenDraftSendPending = false,
   onApprovalAction,
   contentClassName,
   head,
@@ -358,6 +364,12 @@ export default function ChatThread({
                   }
                   perspective={perspective}
                   onAddToReply={onAddToReply}
+                  onSendAsMaven={onSendAsMaven}
+                  sendingAsMaven={
+                    message.replyDraft?.sourceMessageId ===
+                      sendingMavenDraftMessageId
+                  }
+                  disableSendAsMaven={mavenDraftSendPending}
                   onApprovalAction={onApprovalAction}
                 />
               )}

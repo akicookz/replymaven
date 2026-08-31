@@ -1,12 +1,17 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { useParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Paperclip, ArrowUp, X, Loader2, ImagePlus } from "lucide-react";
 import {
+  deriveComposerEnterIntent,
   deriveComposerShiftTabIntent,
   type SidechatPresentationStatus,
 } from "@/lib/inbox/sidechat";
+import { readConnectedMcpAvatars } from "@/lib/inbox/sidechat-mcp-avatars";
+import { cn } from "@/lib/utils";
+import SidechatMcpAvatars from "./SidechatMcpAvatars";
 import SidechatStatusDot from "./SidechatStatusDot";
 
 export type ComposerMode =
@@ -31,6 +36,7 @@ interface ComposerBaseProps {
   convId: string;
   /** Monotonic command used by Add to reply to focus the public caret. */
   focusRequest?: number;
+  placement?: "docked" | "centered";
 }
 
 interface PublicComposerProps extends ComposerBaseProps {
@@ -69,10 +75,34 @@ export default function Composer(props: ComposerProps) {
     mode,
     convId,
     focusRequest,
+    placement = "docked",
   } = props;
   const contract = mode.kind;
   const isPrivate = contract === "sidechat";
   const { projectId = "" } = useParams<{ projectId: string }>();
+  const mcpQuery = useQuery({
+    queryKey: ["sidechat-mcp", projectId],
+    enabled: isPrivate && projectId.length > 0,
+    queryFn: async () => {
+      const response = await fetch(
+        `/api/projects/${projectId}/sidechat/mcp/connections`,
+      );
+      if (!response.ok) throw new Error("Failed to load MCP connections");
+      return response.json() as Promise<{
+        connections: Array<{
+          id: string;
+          name: string;
+          presetKey: string | null;
+          state: string;
+        }>;
+        presets: Array<{ key: string; icon: string }>;
+      }>;
+    },
+    staleTime: 5 * 60 * 1_000,
+  });
+  const connectedMcpAvatars = isPrivate && mcpQuery.data
+    ? readConnectedMcpAvatars(mcpQuery.data)
+    : [];
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const previousFocusRequest = useRef(focusRequest);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -253,7 +283,6 @@ export default function Composer(props: ComposerProps) {
     setPendingImages([]);
   }
 
-  // Cmd/Ctrl+Enter shortcut to send.
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     const shiftTabIntent = deriveComposerShiftTabIntent({
       contract,
@@ -273,7 +302,18 @@ export default function Composer(props: ComposerProps) {
       }
       return;
     }
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+    const enterIntent = deriveComposerEnterIntent({
+      contract,
+      hasDraft: draft.trim().length > 0,
+      key: e.key,
+      shiftKey: e.shiftKey,
+      ctrlKey: e.ctrlKey,
+      metaKey: e.metaKey,
+      altKey: e.altKey,
+      isComposing: e.nativeEvent.isComposing,
+      repeat: e.repeat,
+    });
+    if (enterIntent === "send") {
       e.preventDefault();
       send();
     }
@@ -287,7 +327,14 @@ export default function Composer(props: ComposerProps) {
   const publicSidechatLabel = "Sidechat";
 
   return (
-    <div className="sticky bottom-0 z-[5] px-4 pt-3 pb-4">
+    <div
+      className={cn(
+        "w-full",
+        placement === "centered"
+          ? "px-5"
+          : "sticky bottom-0 z-[5] px-4 pt-3 pb-4",
+      )}
+    >
       <div
         className="relative rounded-[20px] border border-hairline-strong glass-bar p-[14px_14px_11px_18px] motion-safe:transition-[border-color] motion-safe:duration-150 focus-within:border-ink-6/50"
         onDragEnter={handleDragEnter}
@@ -435,7 +482,7 @@ export default function Composer(props: ComposerProps) {
               className="group flex size-10 shrink-0 items-center justify-center disabled:opacity-40 motion-safe:transition-transform motion-safe:duration-150 motion-safe:active:scale-[0.96]"
               onClick={send}
               disabled={!canSend}
-              title={isPrivate ? "Send to Maven (⌘↵)" : "Send (⌘↵)"}
+              title={isPrivate ? "Send to Maven (Enter)" : "Send (⌘↵)"}
               aria-label={isPrivate ? "Send to Maven" : "Send reply"}
             >
               <span className="flex size-8 items-center justify-center rounded-full bg-bubble-sent text-white transition-opacity group-hover:opacity-90">
@@ -445,6 +492,9 @@ export default function Composer(props: ComposerProps) {
           </div>
         </div>
       </div>
+      {isPrivate && (
+        <SidechatMcpAvatars connections={connectedMcpAvatars} />
+      )}
     </div>
   );
 }

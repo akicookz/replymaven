@@ -98,6 +98,7 @@ import {
 import {
   createReplyDraftTool,
   persistCompletedReplyDraft,
+  readSettledReplyDraft,
 } from "../sidechat/reply-draft-tool";
 import { buildSidechatSystemPrompt } from "../sidechat/sidechat-prompt";
 import {
@@ -847,6 +848,21 @@ export class MavenChatAgent extends AIChatAgent<
 
   async hasSettledReplyDraft(): Promise<boolean> {
     return hasSettledReplyDraft(this.messages);
+  }
+
+  async getSettledReplyDraft(messageId: string): Promise<string | null> {
+    if (
+      parseMavenChildName(this.name).kind !== "sidechat" ||
+      messageId.length === 0 ||
+      messageId.length > 200
+    ) {
+      return null;
+    }
+    const message = this.messages.find(
+      (candidate) =>
+        candidate.id === messageId && candidate.role === "assistant",
+    );
+    return message ? readSettledReplyDraft(message) : null;
   }
 
   async setLastSidechatTurnOrigin(
@@ -1919,6 +1935,79 @@ export class MavenChatAgent extends AIChatAgent<
       throw new Error("Bot public messages must use the bot author");
     }
     return this.appendPublicRecord(message, true);
+  }
+
+  async appendSidechatDraftAsBot(input: {
+    messageId: string;
+    text: string;
+    senderName: string | null;
+    autoCloseMinutes: number | null;
+  }): Promise<PublicMessageRecord | null> {
+    const identity = this.assertPublicChild();
+    const message = await this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      if (
+        state.archivedAt !== null ||
+        state.purgeStartedAt !== null
+      ) {
+        return null;
+      }
+      const message: PublicMessageRecord = {
+        id: input.messageId,
+        conversationId: identity.conversationId,
+        author: "bot",
+        content: input.text,
+        imageUrls: [],
+        sources: [],
+        senderName: input.senderName,
+        senderAvatar: null,
+        userId: null,
+        systemKind: null,
+        createdAt: Date.now(),
+        deliveredAt: null,
+        readAt: null,
+        emailedAt: null,
+        idempotencyKey: input.messageId,
+        origin: "dashboard",
+        externalReplyTo: null,
+      };
+      const messages = this.readPublicMessages();
+      const existing = messages.find(
+        (candidate) => candidate.id === input.messageId,
+      );
+      if (existing) {
+        return existing.author === "bot" &&
+            this.samePublicMessagePayload(existing, message)
+          ? existing
+          : null;
+      }
+
+      const chatState = this.parseStoredChatState(state);
+      let status = state.status;
+      if (status === "closed") {
+        if (chatState.aiParticipation === "human_only") {
+          status = "agent_replied";
+        } else if (chatState.aiParticipation === "assist_until_agent") {
+          status = "waiting_agent";
+        } else {
+          status = "active";
+        }
+      }
+      const updated = [...messages, structuredClone(message)];
+      await this.persistPublicRecords(updated);
+      const saved = this.saveNextPublicState(state, {
+        status,
+        closeReason: status === state.status ? state.closeReason : null,
+        lastActivityAt: Math.max(state.lastActivityAt, message.createdAt),
+        updatedAt: Math.max(state.updatedAt, message.createdAt),
+      });
+      await this.publishPublicProjection(saved, updated);
+      return structuredClone(message);
+    });
+    if (message) {
+      await this.reconcilePublicAutoClose(input.autoCloseMinutes);
+    }
+    return message;
   }
 
   async appendSystemMessage(

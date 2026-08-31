@@ -19,6 +19,7 @@ export type SidechatPresentationStatus =
 export type SidechatPaneMode = "desktop" | "compact" | "mobile";
 export type ComposerContract = ChatPerspective;
 export type ComposerShiftTabIntent = "start_sidechat";
+export type ComposerEnterIntent = "send";
 
 interface ComposerKeyboardInput {
   contract: ComposerContract;
@@ -38,7 +39,6 @@ interface MessagePresentation {
 }
 
 interface MessageActions {
-  addToReply: boolean;
   approveAlways: boolean;
   approveOnce: boolean;
 }
@@ -112,6 +112,23 @@ export function deriveComposerShiftTabIntent(
   return input.contract === "public" ? "start_sidechat" : null;
 }
 
+export function deriveComposerEnterIntent(
+  input: ComposerKeyboardInput,
+): ComposerEnterIntent | null {
+  if (
+    input.key !== "Enter" ||
+    input.altKey ||
+    input.isComposing ||
+    input.repeat
+  ) {
+    return null;
+  }
+  if (input.contract === "sidechat") {
+    return input.shiftKey || input.ctrlKey || input.metaKey ? null : "send";
+  }
+  return input.metaKey || input.ctrlKey ? "send" : null;
+}
+
 export function deriveMessageActions(
   perspective: ChatPerspective,
   action: MessagePresentationAction | undefined,
@@ -119,7 +136,6 @@ export function deriveMessageActions(
 ): MessageActions {
   const allowActions = perspective === "sidechat" && !readOnly;
   return {
-    addToReply: allowActions && action?.type === "add_to_reply",
     approveAlways:
       allowActions &&
       action?.type === "approval" &&

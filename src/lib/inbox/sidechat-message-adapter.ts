@@ -413,11 +413,11 @@ export function adaptSidechatMessages(
     const draft = nativeMessage.role === "assistant"
       ? readLatestReplyDraft(nativeMessage.id, nativeMessage.parts)
       : null;
-    const content = text || draft?.text || "";
+    const content = text;
     const sidechatTrace = nativeMessage.role === "assistant"
       ? readSidechatTrace(nativeMessage, options.canAlwaysAllow === true)
       : [];
-    if (content || sidechatTrace.length > 0) {
+    if (content || draft || sidechatTrace.length > 0) {
       rendered.push({
         id: nativeMessage.id,
         role: nativeMessage.role === "user" ? "agent" : "bot",
@@ -431,9 +431,9 @@ export function adaptSidechatMessages(
         ...(sidechatTrace.length > 0 ? { sidechatTrace } : {}),
         ...(draft
           ? {
-              presentationAction: {
-                type: "add_to_reply" as const,
-                draft: draft.text,
+              replyDraft: {
+                text: draft.text,
+                sourceMessageId: nativeMessage.id,
               },
             }
           : {}),
