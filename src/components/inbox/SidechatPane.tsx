@@ -53,7 +53,6 @@ interface SidechatPaneProps {
 export default function SidechatPane({
   open,
   conversation,
-  customerFirstName,
   messages,
   draft,
   setDraft,
@@ -73,9 +72,6 @@ export default function SidechatPane({
   loading = false,
 }: SidechatPaneProps) {
   const interaction = deriveConversationInteractionState(conversation.archivedAt);
-  const contextSubject = customerFirstName
-    ? `${customerFirstName}'s`
-    : "this conversation's";
   const busy = status === "submitted" || status === "streaming";
   const latestMessage = messages.at(-1);
   const latestTrace = latestMessage?.sidechatTrace;
