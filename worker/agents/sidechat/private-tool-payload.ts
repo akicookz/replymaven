@@ -183,9 +183,8 @@ export function createPrivateToolChunkProjector(
       typeof value.toolCallId === "string" &&
       typeof value.approvalId === "string"
     ) {
-      // A pending approval must never be invisible: without a rendered card
-      // the turn dies as an unexplained failure, so fall back to a generic
-      // presentation when the tool context cannot be resolved.
+      // A dropped approval card kills the turn silently; fall back to a
+      // generic presentation instead.
       const context = contextByToolCallId.get(value.toolCallId) ??
         await resolveContextByToolCallId(value.toolCallId, null, undefined) ??
         FALLBACK_APPROVAL_CONTEXT;

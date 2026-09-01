@@ -1,0 +1,22 @@
+diff --git a/dist/client-jagG8a9_.js b/dist/client-jagG8a9_.js
+index ebd0dd75d5f2bbc86a22bf04390e0f9937cc2df8..246e2480cf4b270c624dfe393b3cd1e0c4ddd3eb 100644
+--- a/dist/client-jagG8a9_.js
++++ b/dist/client-jagG8a9_.js
+@@ -991,14 +991,15 @@ var MCPClientConnection = class {
+ 	}
+ 	_capabilityErrorHandler(empty, method) {
+ 		return (e) => {
+-			if (e.code === -32601) {
++			const message = toErrorMessage(e);
++			if (e.code === -32601 || message.includes("-32601") && /method not found/i.test(message)) {
+ 				const url = this.url.toString();
+ 				this._onObservabilityEvent.fire({
+ 					type: "mcp:client:discover",
+ 					payload: {
+ 						url,
+ 						capability: method.split("/")[0],
+-						error: toErrorMessage(e)
++						error: message
+ 					},
+ 					timestamp: Date.now()
+ 				});

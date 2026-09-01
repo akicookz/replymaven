@@ -278,6 +278,7 @@ interface SidechatTurnAgent extends SidechatMessageStore {
 }
 
 const SIDECHAT_MAX_TURN_STEPS = 24;
+const CONNECTION_ACTOR_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 
 async function executeSidechatTurn(input: {
   agent: SidechatTurnAgent;
@@ -649,7 +650,7 @@ export class MavenChatAgent extends AIChatAgent<
   PublicChatChildState | Record<string, never>
 > {
   messageConcurrency = "queue" as const;
-  chatRecovery = true;
+  chatRecovery = true as const;
   maxPersistedMessages: number | undefined;
   waitForMcpConnections = false;
   private publicState?: PublicConversationStateStore;
@@ -664,17 +665,20 @@ export class MavenChatAgent extends AIChatAgent<
       ? 200
       : undefined;
     if (channel === "public") {
+      // Reassignments, not overrides: a prototype override runs inside the
+      // SDK's own wrappers and never sees the chat-request frames.
       const sdkOnMessage = this.onMessage.bind(this);
       this.onMessage = async (connection, message) => {
         if (typeof message !== "string") {
           connection.close(4003, "Invalid public chat protocol");
           return;
         }
+        const actorState = this.readConnectionActor(connection.id);
         const guarded = guardPublicChatProtocolMessage({
           raw: message,
           authoritativeMessages: this.messages,
-          claims: readPublicChatConnectionClaims(connection.state),
-          expectedOrigin: readPublicChatConnectionOrigin(connection.state),
+          claims: readPublicChatConnectionClaims(actorState),
+          expectedOrigin: readPublicChatConnectionOrigin(actorState),
         });
         if (!guarded.allowed) {
           // Content-free: reasons and structural shapes only, never text.
@@ -708,6 +712,61 @@ export class MavenChatAgent extends AIChatAgent<
     }
   }
 
+  // agents 0.22 drops sub-agent connection.state writes between events, so
+  // claims live in this child's SQLite instead.
+  private connectionActorTableReady = false;
+
+  private ensureConnectionActorTable(): void {
+    if (this.connectionActorTableReady) return;
+    void this.sql`
+      CREATE TABLE IF NOT EXISTS maven_connection_actors (
+        connection_id TEXT PRIMARY KEY,
+        payload TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )
+    `;
+    this.connectionActorTableReady = true;
+  }
+
+  private storeConnectionActor(
+    connectionId: string,
+    payload: Record<string, unknown>,
+  ): void {
+    this.ensureConnectionActorTable();
+    const now = Date.now();
+    void this.sql`
+      INSERT OR REPLACE INTO maven_connection_actors
+        (connection_id, payload, created_at)
+      VALUES (${connectionId}, ${JSON.stringify(payload)}, ${now})
+    `;
+    void this.sql`
+      DELETE FROM maven_connection_actors
+      WHERE created_at < ${now - CONNECTION_ACTOR_TTL_MS}
+    `;
+  }
+
+  private readConnectionActor(
+    connectionId: string | undefined,
+  ): Record<string, unknown> | null {
+    if (!connectionId) return null;
+    this.ensureConnectionActorTable();
+    const rows = this.sql<{ payload: string }>`
+      SELECT payload FROM maven_connection_actors
+      WHERE connection_id = ${connectionId}
+    `;
+    const payload = rows[0]?.payload;
+    if (!payload) return null;
+    try {
+      const parsed: unknown = JSON.parse(payload);
+      return parsed !== null && typeof parsed === "object" &&
+          !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
   override async onConnect(
     connection: Connection,
     context: ConnectionContext,
@@ -729,7 +788,7 @@ export class MavenChatAgent extends AIChatAgent<
         throw new Error("Unauthorized public child connection");
       }
       await super.onConnect(connection, context);
-      connection.setState({
+      this.storeConnectionActor(connection.id, {
         publicChatActor: claims,
         publicChatOrigin: new URL(context.request.url).origin,
       });
@@ -740,7 +799,7 @@ export class MavenChatAgent extends AIChatAgent<
       throw new Error("Unauthorized Sidechat child connection");
     }
     await super.onConnect(connection, context);
-    connection.setState({ sidechatActor: claims });
+    this.storeConnectionActor(connection.id, { sidechatActor: claims });
   }
 
   override shouldConnectionBeReadonly(
@@ -774,7 +833,9 @@ export class MavenChatAgent extends AIChatAgent<
     const claims = await resolveSidechatChatTurnClaims({
       token,
       continuation: options.continuation === true,
-      connectionState: getCurrentAgent<MavenChatAgent>().connection?.state,
+      connectionState: this.readConnectionActor(
+        getCurrentAgent<MavenChatAgent>().connection?.id,
+      ),
       secret: this.env.SIDECHAT_TOKEN_SECRET,
     });
     if (
@@ -964,7 +1025,9 @@ export class MavenChatAgent extends AIChatAgent<
     const identity = this.assertPublicChild();
     const projectId = this.publicProjectId();
     const claims = readPublicChatConnectionClaims(
-      getCurrentAgent<MavenChatAgent>().connection?.state,
+      this.readConnectionActor(
+        getCurrentAgent<MavenChatAgent>().connection?.id,
+      ),
     );
     if (
       !claims ||

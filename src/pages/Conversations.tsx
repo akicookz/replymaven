@@ -282,10 +282,8 @@ function NativeSidechatPane({
     isServerStreaming: sidechat.isServerStreaming,
     isRecovering: sidechat.isRecovering,
   });
-  // The agents transport can miss the continuation handshake after a tool
-  // approval, leaving this client "streaming" although the server already
-  // finished the turn. Clear the phantom stream once the server-side summary
-  // is terminal and the settled answer is visible.
+  // The transport can miss the post-approval continuation handshake and stay
+  // "streaming" after the server finished; clear the phantom stream.
   const stopSidechat = sidechat.stop;
   const latestSidechatMessage = sidechat.messages[sidechat.messages.length - 1];
   const hasSettledSidechatAnswer = latestSidechatMessage?.role === "bot" && (

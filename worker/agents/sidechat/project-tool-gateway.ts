@@ -568,9 +568,8 @@ export function buildSidechatGatewayTools(
         try {
           tool = await options.resolve(call.toolRef);
         } catch {
-          // An unresolvable toolRef must surface as a tool error the model can
-          // recover from, not an approval card that has no tool context to
-          // render. Unapproved writes are still blocked inside execute.
+          // Unresolvable refs fail as tool errors, not blank approval cards;
+          // execute still blocks unapproved writes.
           return false;
         }
         if (!tool) return false;
