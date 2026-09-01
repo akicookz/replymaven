@@ -59,6 +59,17 @@ function redactGatewayInput(value: unknown): unknown {
   }
 }
 
+// Gemini 3 rejects replayed tool calls without this opaque signature.
+function preservedThoughtSignature(
+  value: unknown,
+): Record<string, unknown> | null {
+  if (!isRecord(value) || !isRecord(value.google)) return null;
+  const signature = value.google.thoughtSignature;
+  return typeof signature === "string" && signature.length > 0
+    ? { google: { thoughtSignature: signature } }
+    : null;
+}
+
 function redactToolChunk(chunk: ToolChunkLike): ToolChunkLike {
   const redacted: Record<string, unknown> = { ...chunk };
   if ("input" in chunk) {
@@ -77,7 +88,9 @@ function redactToolChunk(chunk: ToolChunkLike): ToolChunkLike {
   if (typeof chunk.errorText === "string") {
     redacted.errorText = redactPrivateToolText(chunk.errorText);
   }
-  delete redacted.callProviderMetadata;
+  const preserved = preservedThoughtSignature(chunk.callProviderMetadata);
+  if (preserved) redacted.callProviderMetadata = preserved;
+  else delete redacted.callProviderMetadata;
   return redacted;
 }
 

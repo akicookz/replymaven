@@ -376,6 +376,15 @@ async function executeSidechatTurn(input: {
         selectSidechatModelMessages(input.agent.messages, input.continuation),
       ),
       tools,
+      maxRetries: 4,
+      onError({ error }) {
+        logError("sidechat_turn.stream_error", error, {
+          childName: input.agent.name,
+          conversationId: input.conversationId,
+          continuation: input.continuation,
+          model: (model as { modelId?: string }).modelId ?? null,
+        });
+      },
       providerOptions: {
         openai: { reasoningSummary: "auto" },
         google: { thinkingConfig: { includeThoughts: true } },
@@ -873,9 +882,15 @@ export class MavenChatAgent extends AIChatAgent<
       await parent.setLastSidechatTurnOrigin(conversationId, null);
     }
 
+    const childName = this.name;
     const stream = createUIMessageStream<SidechatUIMessage>({
       originalMessages: this.messages as SidechatUIMessage[],
-      onError() {
+      onError(error) {
+        logError("sidechat_turn.response_stream_error", error, {
+          childName,
+          conversationId,
+          continuation: options.continuation === true,
+        });
         return "The Sidechat response failed.";
       },
       execute: async ({ writer }) => {
@@ -966,10 +981,16 @@ export class MavenChatAgent extends AIChatAgent<
   }): Promise<void> {
     const conversationId = conversationIdFromChildName(this.name);
     const parent = await this.parentAgent(MavenProjectAgent);
+    const childName = this.name;
     try {
       const stream = createUIMessageStream<SidechatUIMessage>({
         originalMessages: this.messages as SidechatUIMessage[],
-        onError() {
+        onError(error) {
+          logError("sidechat_turn.response_stream_error", error, {
+            childName,
+            conversationId,
+            continuation: false,
+          });
           return "The Sidechat response failed.";
         },
         execute: async ({ writer }) => {
@@ -1476,6 +1497,7 @@ export class MavenChatAgent extends AIChatAgent<
         requestId: result.requestId,
         continuation: result.continuation,
         status: result.status,
+        error: result.error ?? null,
       });
       await parent.updateSidechatSummary(conversationId, "failed");
       return;
