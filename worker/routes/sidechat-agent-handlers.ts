@@ -31,9 +31,9 @@ interface SidechatProjectService {
 }
 
 interface SidechatConversationService {
-  getConversationById(
-    conversationId: string,
+  get(
     projectId: string,
+    conversationId: string,
   ): Promise<{
     id: string;
     projectId: string;
@@ -174,9 +174,9 @@ export async function handleCreateSidechatSession(
   const denied = await authorizeProject(options);
   if (denied) return denied;
 
-  const conversation = await options.chatService.getConversationById(
-    options.conversationId,
+  const conversation = await options.chatService.get(
     options.projectId,
+    options.conversationId,
   );
   if (!conversation || conversation.projectId !== options.projectId) {
     return errorResponse("not_found", 404);

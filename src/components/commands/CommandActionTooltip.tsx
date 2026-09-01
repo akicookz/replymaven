@@ -40,7 +40,7 @@ export function CommandActionTooltip({
         </TooltipTrigger>
         <TooltipContent
           sideOffset={6}
-          className="flex items-center gap-2 bg-glass-raised text-ink-2"
+          className="flex items-center gap-2 bg-popover fill-popover text-popover-foreground"
         >
           <span>{disabledReason ?? availability.presentation.description}</span>
           <CommandKeycap keycap={availability.presentation.keycap} />

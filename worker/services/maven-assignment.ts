@@ -25,7 +25,7 @@ export function mavenAssignedSystemContent(input: {
 export async function recordMavenAssignment(input: {
   chatService: Pick<
     PublicConversationStore,
-    "setAssignee" | "addPublicSystemMessage"
+    "applyAction" | "addPublicSystemMessage"
   >;
   conversationId: string;
   projectId: string;
@@ -33,11 +33,11 @@ export async function recordMavenAssignment(input: {
   actorName?: string | null;
   reason: MavenAssignmentReason;
 }): Promise<void> {
-  await input.chatService.setAssignee(
-    input.conversationId,
-    input.projectId,
-    MAVEN_ASSIGNEE_ID,
-  );
+  await input.chatService.applyAction({
+    projectId: input.projectId,
+    conversationId: input.conversationId,
+    action: { action: "assign", assigneeId: MAVEN_ASSIGNEE_ID },
+  });
   await input.chatService.addPublicSystemMessage(
     input.conversationId,
     "assigned",

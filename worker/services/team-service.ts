@@ -122,53 +122,6 @@ export class TeamService {
     return rows[0] ?? null;
   }
 
-  /**
-   * For a given userId, check if they are a team member of someone else's account.
-   * Returns the team membership if found (ownerId + role), null if the user is an owner.
-   */
-  async getTeamMembership(userId: string): Promise<{
-    id: string;
-    ownerId: string;
-    role: "admin" | "member";
-    accessAllProjects: boolean;
-  } | null> {
-    // The app assumes a user belongs to at most one owner's team. If they ever
-    // hold multiple accepted memberships we pick the earliest deterministically
-    // (rather than relying on storage order) so role/access resolution is stable.
-    const rows = await this.db
-      .select()
-      .from(teamMembers)
-      .where(
-        and(
-          eq(teamMembers.userId, userId),
-          eq(teamMembers.status, "accepted"),
-        ),
-      )
-      .orderBy(teamMembers.acceptedAt)
-      .limit(1);
-
-    if (!rows[0]) return null;
-    return {
-      id: rows[0].id,
-      ownerId: rows[0].ownerId,
-      role: rows[0].role as "admin" | "member",
-      accessAllProjects: rows[0].accessAllProjects,
-    };
-  }
-
-  /**
-   * Resolves the effective userId for billing purposes.
-   * If the user is a team member, returns the owner's userId.
-   * Otherwise returns the user's own userId.
-   *
-   * @deprecated Single-team resolution. The team switcher resolves the active
-   * team via {@link getMembershipForOwner} / team-context instead.
-   */
-  async getEffectiveUserId(userId: string): Promise<string> {
-    const membership = await this.getTeamMembership(userId);
-    return membership ? membership.ownerId : userId;
-  }
-
   /** The user's accepted membership in one specific owner's team, if any. */
   async getMembershipForOwner(
     userId: string,

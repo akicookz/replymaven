@@ -149,15 +149,15 @@ function createBotNameCommandDeps(
       await chatService.updateConversation(conversation.id, projectId, fields);
     },
     async updateConversationStatus(status, closeReason) {
-      await chatService.updateConversationStatus(
-        conversation.id,
+      await chatService.setStatus(
         projectId,
+        conversation.id,
         status,
         closeReason,
       );
     },
     async closeOpenConversationsAsSpam() {
-      await chatService.closeOpenConversationsAsSpam(
+      await chatService.closeOpenAsSpam(
         projectId,
         conversation.visitorId,
         conversation.visitorEmail,
@@ -175,9 +175,9 @@ function createBotNameCommandDeps(
       });
     },
     async generateDirectedResponse(instruction) {
-      const msgs = await chatService.getPublicMessages(
-        conversation.id,
+      const msgs = await chatService.getMessages(
         projectId,
+        conversation.id,
       );
       return aiService.generateDirectedResponse(
         input.projectSettings ?? DEFAULT_DIRECTED_SETTINGS,

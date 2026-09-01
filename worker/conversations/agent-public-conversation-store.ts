@@ -1359,41 +1359,6 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     return deleted;
   }
 
-  async getConversationById(
-    conversationId: string,
-    projectId: string,
-  ): Promise<PublicConversationRecord | null> {
-    return this.get(projectId, conversationId);
-  }
-
-  async getOperationalConversationById(
-    conversationId: string,
-    projectId: string,
-  ): Promise<PublicConversationRecord | null> {
-    return this.getOperational(projectId, conversationId);
-  }
-
-  async getActiveConversationByVisitor(
-    projectId: string,
-    visitorId: string,
-  ): Promise<PublicConversationRecord | null> {
-    return this.getActiveByVisitor(projectId, visitorId);
-  }
-
-  async getLastConversationByVisitor(
-    projectId: string,
-    visitorId: string,
-  ): Promise<PublicConversationRecord | null> {
-    return this.getLastByVisitor(projectId, visitorId);
-  }
-
-  async getRecentConversationByVisitorEmail(
-    projectId: string,
-    email: string,
-  ): Promise<PublicConversationRecord | null> {
-    return this.getRecentByVisitorEmail(projectId, email);
-  }
-
   async createConversation(input: {
     projectId: string;
     customerId?: string | null;
@@ -1412,60 +1377,6 @@ export class AgentPublicConversationStore implements PublicConversationStore {
       metadata = {};
     }
     return this.create({ ...input, metadata });
-  }
-
-  async getNeedsReviewSince(
-    projectId: string,
-    since: number,
-  ): Promise<PublicConversationRecord[]> {
-    return this.listNeedsReview(projectId, since);
-  }
-
-  async getAgentModeConversations(
-    projectId: string,
-  ): Promise<PublicConversationRecord[]> {
-    return this.listAgentMode(projectId);
-  }
-
-  async getPublicMessages(
-    conversationId: string,
-    projectId?: string,
-  ): Promise<PublicMessageRecord[]> {
-    if (!projectId) throw new Error("Agent message reads require a project ID");
-    return this.getMessages(projectId, conversationId);
-  }
-
-  async getRecentPublicMessages(
-    conversationId: string,
-    limit = 50,
-    projectId?: string,
-  ): Promise<PublicMessagePage> {
-    if (!projectId) throw new Error("Agent message reads require a project ID");
-    return this.getRecentMessages(projectId, conversationId, limit);
-  }
-
-  async getPublicMessagesBefore(
-    conversationId: string,
-    beforeCreatedAt: Date,
-    limit = 50,
-    projectId?: string,
-  ): Promise<PublicMessagePage> {
-    if (!projectId) throw new Error("Agent message reads require a project ID");
-    return this.getMessagesBefore({
-      projectId,
-      conversationId,
-      beforeCreatedAt: beforeCreatedAt.getTime(),
-      limit,
-    });
-  }
-
-  async getPublicMessagesSince(
-    conversationId: string,
-    since: number,
-    projectId?: string,
-  ): Promise<PublicMessageRecord[]> {
-    if (!projectId) throw new Error("Agent message reads require a project ID");
-    return this.getMessagesSince(projectId, conversationId, since);
   }
 
   async getPublicMessageById(
@@ -1603,81 +1514,6 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     return this.addPublicAgentMessageAndTakeOwnership(input, projectId);
   }
 
-  async getLatestEmailedPublicAgentMessage(
-    conversationId: string,
-    projectId?: string,
-  ): Promise<PublicMessageRecord | null> {
-    if (!projectId) throw new Error("Agent message reads require a project ID");
-    return this.getLatestEmailedHumanMessage(projectId, conversationId);
-  }
-
-  async markPublicMessageAsEmailed(
-    conversationId: string,
-    messageId: string,
-    projectId?: string,
-  ): Promise<void> {
-    if (!projectId) throw new Error("Agent message writes require a project ID");
-    await this.markEmailed({ projectId, conversationId, messageId });
-  }
-
-  async markPublicDeliveredUpTo(
-    conversationId: string,
-    messageId: string,
-    projectId?: string,
-  ): Promise<string[]> {
-    if (!projectId) throw new Error("Agent message writes require a project ID");
-    return this.markDelivery({
-      projectId,
-      conversationId,
-      upToMessageId: messageId,
-      kind: "delivered",
-    });
-  }
-
-  async markPublicReadUpTo(
-    conversationId: string,
-    messageId: string,
-    projectId?: string,
-  ): Promise<string[]> {
-    if (!projectId) throw new Error("Agent message writes require a project ID");
-    return this.markDelivery({
-      projectId,
-      conversationId,
-      upToMessageId: messageId,
-      kind: "read",
-    });
-  }
-
-  async deletePublicAgentMessage(
-    conversationId: string,
-    messageId: string,
-    projectId?: string,
-  ): Promise<DeletePublicMessageResult> {
-    if (!projectId) throw new Error("Agent message writes require a project ID");
-    return this.deleteHumanMessage(projectId, conversationId, messageId);
-  }
-
-  async updateConversationStatus(
-    conversationId: string,
-    projectId: string,
-    status: PublicConversationRecord["status"],
-    closeReason?: PublicConversationRecord["closeReason"],
-  ): Promise<void> {
-    await this.setStatus(projectId, conversationId, status, closeReason);
-  }
-
-  async transitionChatOwnership(
-    conversationId: string,
-    projectId: string,
-    event: ChatOwnershipEvent,
-  ): Promise<PublicConversationRecord["status"] | null> {
-    return (await this.transitionOwnership({
-      projectId,
-      conversationId,
-      event,
-    })).status;
-  }
-
   async updateConversation(
     conversationId: string,
     projectId: string,
@@ -1707,14 +1543,6 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     });
   }
 
-  async updateConversationEmail(
-    conversationId: string,
-    projectId: string,
-    email: string,
-  ): Promise<void> {
-    return this.updateEmail(projectId, conversationId, email);
-  }
-
   async updateVisitorLastSeen(
     conversationId: string,
     projectId: string,
@@ -1728,29 +1556,6 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     return updated ? this.get(projectId, conversationId) : null;
   }
 
-  async resolveConversationByAi(
-    conversationId: string,
-    projectId: string,
-  ): Promise<boolean> {
-    return this.resolveByAi(projectId, conversationId);
-  }
-
-  async closeOpenConversationsAsSpam(
-    projectId: string,
-    visitorId: string,
-    visitorEmail?: string | null,
-  ): Promise<string[]> {
-    return this.closeOpenAsSpam(projectId, visitorId, visitorEmail);
-  }
-
-  async bulkUpdateConversations(
-    projectId: string,
-    conversationIds: string[],
-    action: PublicConversationAction,
-  ): Promise<{ updatedIds: string[]; skippedIds: string[] }> {
-    return this.bulkApplyActions(projectId, conversationIds, action);
-  }
-
   async setSnooze(
     conversationId: string,
     projectId: string,
@@ -1760,30 +1565,6 @@ export class AgentPublicConversationStore implements PublicConversationStore {
       projectId,
       conversationId,
       action: { action: "snooze", until: until?.getTime() ?? null },
-    });
-  }
-
-  async setPriority(
-    conversationId: string,
-    projectId: string,
-    priority: "low" | "medium" | "high",
-  ): Promise<void> {
-    await this.applyAction({
-      projectId,
-      conversationId,
-      action: { action: "priority", priority },
-    });
-  }
-
-  async setAssignee(
-    conversationId: string,
-    projectId: string,
-    assigneeId: string | null,
-  ): Promise<void> {
-    await this.applyAction({
-      projectId,
-      conversationId,
-      action: { action: "assign", assigneeId },
     });
   }
 

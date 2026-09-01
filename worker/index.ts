@@ -794,7 +794,7 @@ const app = new Hono<HonoAppContext>()
       encryptionKey: c.env.ENCRYPTION_KEY,
       nowSeconds: Math.floor(Date.now() / 1000),
       getConversation(projectId, conversationId) {
-        return chatService.getConversationById(conversationId, projectId);
+        return chatService.get(projectId, conversationId);
       },
       identityService: new CustomerIdentityService(
         db,
@@ -932,7 +932,7 @@ const app = new Hono<HonoAppContext>()
     if (!project) return c.json({ error: "Project not found" }, 404);
 
     const chatService = createPublicConversationStore({ db, env: c.env });
-    const conversation = await chatService.getActiveConversationByVisitor(
+    const conversation = await chatService.getActiveByVisitor(
       project.id,
       visitorId,
     );
@@ -1048,9 +1048,9 @@ const app = new Hono<HonoAppContext>()
         return c.json({ error: "Visitor identity is required" }, 400);
       }
       const chatService = createPublicConversationStore({ db, env: c.env });
-      const conversation = await chatService.getOperationalConversationById(
-        requestedConversationId,
+      const conversation = await chatService.getOperational(
         project.id,
+        requestedConversationId,
       );
       if (!conversation || conversation.visitorId !== requestedVisitorId) {
         return c.json({ error: "Conversation not found" }, 404);
@@ -1096,17 +1096,17 @@ const app = new Hono<HonoAppContext>()
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
     const chatService = createPublicConversationStore({ db, env: c.env });
-    const conversation = await chatService.getOperationalConversationById(
-      conversationId,
+    const conversation = await chatService.getOperational(
       project.id,
+      conversationId,
     );
     if (!conversation) {
       return c.json({ error: "Conversation not found" }, 404);
     }
 
-    await chatService.updateConversationEmail(
-      conversationId,
+    await chatService.updateEmail(
       project.id,
+      conversationId,
       parsed.data.email,
     );
 
@@ -1133,9 +1133,9 @@ const app = new Hono<HonoAppContext>()
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
     const chatService = createPublicConversationStore({ db, env: c.env });
-    const conversation = await chatService.getOperationalConversationById(
-      conversationId,
+    const conversation = await chatService.getOperational(
       project.id,
+      conversationId,
     );
     if (!conversation) {
       return c.json({ error: "Conversation not found" }, 404);
@@ -1222,7 +1222,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ banned: true, reason: ban.reason }, 403);
     }
 
-    let conversation = await chatService.getActiveConversationByVisitor(
+    let conversation = await chatService.getActiveByVisitor(
       project.id,
       visitorId,
     );
@@ -1295,9 +1295,9 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Conversation ownership changed. Try again." }, 409);
     }
     conversation =
-      (await chatService.getOperationalConversationById(
-        conversation.id,
+      (await chatService.getOperational(
         project.id,
+        conversation.id,
       )) ??
       conversation;
 
@@ -1523,12 +1523,12 @@ const app = new Hono<HonoAppContext>()
       },
       botName,
       getAgentModeConversations: () =>
-        chatService.getAgentModeConversations(projectId),
+        chatService.listAgentMode(projectId),
       findByChannelThread: async () => null,
       getOperationalConversation: async (conversationId) => {
-        const conversation = await chatService.getOperationalConversationById(
-          conversationId,
+        const conversation = await chatService.getOperational(
           projectId,
+          conversationId,
         );
         return conversation
           ? {
@@ -1667,7 +1667,7 @@ const app = new Hono<HonoAppContext>()
       inbound: inbound.inbound,
       botName,
       getAgentModeConversations: () =>
-        chatService.getAgentModeConversations(projectId),
+        chatService.listAgentMode(projectId),
       findByChannelThread: async (threadId) => {
         const found = await parent.findConversationByChannelThread(
           "slack",
@@ -1676,9 +1676,9 @@ const app = new Hono<HonoAppContext>()
         return found?.conversationId ?? null;
       },
       getOperationalConversation: async (conversationId) => {
-        const conversation = await chatService.getOperationalConversationById(
-          conversationId,
+        const conversation = await chatService.getOperational(
           projectId,
+          conversationId,
         );
         return conversation
           ? {
@@ -2274,7 +2274,7 @@ const app = new Hono<HonoAppContext>()
       parseEmailMessageId(inReplyToHeader) ??
       parseEmailMessageId(referencesHeader, { source: "references" });
     let conversation = null as Awaited<
-      ReturnType<typeof chatService.getRecentConversationByVisitorEmail>
+      ReturnType<typeof chatService.getRecentByVisitorEmail>
     > | null;
     if (referencedMessageId) {
       const sourceMessage = await chatService.getPublicMessageById(
@@ -2282,9 +2282,9 @@ const app = new Hono<HonoAppContext>()
         project.id,
       );
       if (sourceMessage) {
-        const conv = await chatService.getConversationById(
-          sourceMessage.conversationId,
+        const conv = await chatService.get(
           project.id,
+          sourceMessage.conversationId,
         );
         if (conv?.archivedAt) return c.json({ ok: true });
         if (conv) {
@@ -2298,9 +2298,9 @@ const app = new Hono<HonoAppContext>()
     if (!conversation) {
       const referencedConversationId = parseConversationReference(emailText);
       if (referencedConversationId) {
-        const conv = await chatService.getConversationById(
-          referencedConversationId,
+        const conv = await chatService.get(
           project.id,
+          referencedConversationId,
         );
         if (conv?.archivedAt) return c.json({ ok: true });
         if (conv) conversation = conv;
@@ -2309,7 +2309,7 @@ const app = new Hono<HonoAppContext>()
     // Last resort, and visitors only: a team member replying from their own
     // inbox is never the visitor on any conversation.
     if (!conversation) {
-      conversation = await chatService.getRecentConversationByVisitorEmail(
+      conversation = await chatService.getRecentByVisitorEmail(
         project.id,
         senderEmail,
       );
@@ -2325,10 +2325,10 @@ const app = new Hono<HonoAppContext>()
 
     // Per-conversation duplicate-content guard (defends against retries that
     // bypass the KV check, e.g. a different email_id with identical content).
-    const existingMessages = await chatService.getPublicMessagesSince(
+    const existingMessages = await chatService.getMessagesSince(
+      project.id,
       conversation.id,
       Date.now() - 5 * 60 * 1000,
-      project.id,
     );
     const alreadyProcessed = existingMessages.some(
       (m) => m.content === cleanedText,
@@ -2450,9 +2450,9 @@ const app = new Hono<HonoAppContext>()
           },
         }),
       );
-      const stillOperational = await chatService.getOperationalConversationById(
-        conversation.id,
+      const stillOperational = await chatService.getOperational(
         project.id,
+        conversation.id,
       );
       if (!stillOperational) return c.json({ ok: true });
 
@@ -2560,11 +2560,11 @@ const app = new Hono<HonoAppContext>()
             inReplyToMessageId: referencedMessageId,
             autoSubmitted: true,
           });
-          await chatService.markPublicMessageAsEmailed(
-            conversation.id,
-            botMessage.id,
-            project.id,
-          );
+          await chatService.markEmailed({
+            projectId: project.id,
+            conversationId: conversation.id,
+            messageId: botMessage.id,
+          });
         })().catch((error: unknown) => {
           logError("inbound_email.assist_follow_up_failed", error, {
             projectId: project.id,
@@ -2588,11 +2588,11 @@ const app = new Hono<HonoAppContext>()
       if (!agentMessage) {
         return new Response("Conversation not found", { status: 404 });
       }
-      await chatService.markPublicMessageAsEmailed(
-        conversation.id,
-        agentMessage.id,
-        project.id,
-      );
+      await chatService.markEmailed({
+        projectId: project.id,
+        conversationId: conversation.id,
+        messageId: agentMessage.id,
+      });
 
       // Send the visitor an email with the agent's reply so the round-trip
       // continues over email. Skip if the conversation has no visitorEmail —
@@ -6835,7 +6835,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
     const since = parseInt(c.req.query("since") ?? "0", 10) || 0;
-    const rows = await createPublicConversationStore({ db, env: c.env }).getNeedsReviewSince(project.id, since);
+    const rows = await createPublicConversationStore({ db, env: c.env }).listNeedsReview(project.id, since);
     const items = rows.map((row) => {
       let meta: Record<string, unknown> = {};
       try {
@@ -6868,7 +6868,7 @@ const app = new Hono<HonoAppContext>()
     // Wave 1: conversation row + settings in parallel.
     const chatService = createPublicConversationStore({ db, env: c.env });
     const [conversation, settings] = await Promise.all([
-      chatService.getConversationById(c.req.param("convId"), project.id),
+      chatService.get(project.id, c.req.param("convId")),
       projectService.getSettings(project.id),
     ]);
     if (!conversation) {
@@ -6887,9 +6887,9 @@ const app = new Hono<HonoAppContext>()
       c.executionCtx.waitUntil(
         (async () => {
           try {
-            await chatService.updateConversationStatus(
-              conversation.id,
+            await chatService.setStatus(
               project.id,
+              conversation.id,
               "closed",
               "ended",
             );
@@ -6977,9 +6977,9 @@ const app = new Hono<HonoAppContext>()
     }
 
     const chatService = createPublicConversationStore({ db, env: c.env });
-    const conversation = await chatService.getConversationById(
-      c.req.param("convId"),
+    const conversation = await chatService.get(
       project.id,
+      c.req.param("convId"),
     );
     if (!conversation) return c.json({ error: "Not found" }, 404);
 
@@ -7038,9 +7038,9 @@ const app = new Hono<HonoAppContext>()
     }
 
     const chatService = createPublicConversationStore({ db, env: c.env });
-    const conversation = await chatService.getOperationalConversationById(
-      c.req.param("convId"),
+    const conversation = await chatService.getOperational(
       project.id,
+      c.req.param("convId"),
     );
     if (!conversation) {
       return c.json({ error: "Not found" }, 404);
@@ -7155,9 +7155,9 @@ const app = new Hono<HonoAppContext>()
     }
 
     const chatService = createPublicConversationStore({ db, env: c.env });
-    const conversation = await chatService.getOperationalConversationById(
-      c.req.param("convId"),
+    const conversation = await chatService.getOperational(
       project.id,
+      c.req.param("convId"),
     );
     if (!conversation) {
       return c.json({ error: "Conversation not found" }, 404);
@@ -7248,9 +7248,9 @@ const app = new Hono<HonoAppContext>()
       const messageId = c.req.param("messageId");
 
       const chatService = createPublicConversationStore({ db, env: c.env });
-      const conversation = await chatService.getOperationalConversationById(
-        convId,
+      const conversation = await chatService.getOperational(
         project.id,
+        convId,
       );
       if (!conversation) return c.json({ error: "Not found" }, 404);
 
@@ -7302,12 +7302,10 @@ const app = new Hono<HonoAppContext>()
     }
 
     const chatService = createPublicConversationStore({ db, env: c.env });
-    const actionAt = new Date();
-    const result = await chatService.bulkUpdateConversations(
+    const result = await chatService.bulkApplyActions(
       project.id,
       parsed.data.conversationIds,
       parsed.data,
-      actionAt,
     );
 
     if (parsed.data.action === "archive") {
@@ -7330,9 +7328,9 @@ const app = new Hono<HonoAppContext>()
     ) {
       const settings = await projectService.getSettings(project.id);
       await Promise.all(result.updatedIds.map(async (conversationId) => {
-        const target = await chatService.getOperationalConversationById(
-          conversationId,
+        const target = await chatService.getOperational(
           project.id,
+          conversationId,
         );
         if (target && canHandConversationToMaven(target)) {
           await chatService.transitionOwnership({
@@ -7387,9 +7385,9 @@ const app = new Hono<HonoAppContext>()
     }
 
     const chatService = createPublicConversationStore({ db, env: c.env });
-    const conversation = await chatService.getOperationalConversationById(
-      c.req.param("convId"),
+    const conversation = await chatService.getOperational(
       project.id,
+      c.req.param("convId"),
     );
     if (!conversation) {
       return c.json({ error: "Not found" }, 404);
@@ -7410,9 +7408,9 @@ const app = new Hono<HonoAppContext>()
     }
 
     // Close the conversation
-    await chatService.updateConversationStatus(
-      conversation.id,
+    await chatService.setStatus(
       project.id,
+      conversation.id,
       "closed",
       closeReason,
     );
@@ -7453,9 +7451,9 @@ const app = new Hono<HonoAppContext>()
     if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id))
       return c.json({ error: "Not found" }, 404);
     const chatService = createPublicConversationStore({ db, env: c.env });
-    const conversation = await chatService.getOperationalConversationById(
-      c.req.param("convId"),
+    const conversation = await chatService.getOperational(
       project.id,
+      c.req.param("convId"),
     );
     if (!conversation) return c.json({ error: "Not found" }, 404);
     const banService = new VisitorBanService(db);
@@ -7479,9 +7477,9 @@ const app = new Hono<HonoAppContext>()
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
     const chatService = createPublicConversationStore({ db, env: c.env });
     const convId = c.req.param("convId");
-    const conversation = await chatService.getOperationalConversationById(
-      convId,
+    const conversation = await chatService.getOperational(
       project.id,
+      convId,
     );
     if (!conversation) return c.json({ error: "Not found" }, 404);
     const until = parsed.data.until ? new Date(parsed.data.until) : null;
@@ -7513,12 +7511,16 @@ const app = new Hono<HonoAppContext>()
     const parsed = validate(prioritySchema, await c.req.json());
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
     const chatService = createPublicConversationStore({ db, env: c.env });
-    const conversation = await chatService.getOperationalConversationById(
-      c.req.param("convId"),
+    const conversation = await chatService.getOperational(
       project.id,
+      c.req.param("convId"),
     );
     if (!conversation) return c.json({ error: "Not found" }, 404);
-    await chatService.setPriority(conversation.id, project.id, parsed.data.priority);
+    await chatService.applyAction({
+      projectId: project.id,
+      conversationId: conversation.id,
+      action: { action: "priority", priority: parsed.data.priority },
+    });
     return c.json({ ok: true });
   })
   .patch("/api/projects/:id/conversations/:convId/assign", async (c) => {
@@ -7532,9 +7534,9 @@ const app = new Hono<HonoAppContext>()
     const parsed = validate(assignSchema, await c.req.json());
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
     const chatService = createPublicConversationStore({ db, env: c.env });
-    const conversation = await chatService.getOperationalConversationById(
-      c.req.param("convId"),
+    const conversation = await chatService.getOperational(
       project.id,
+      c.req.param("convId"),
     );
     if (!conversation) return c.json({ error: "Not found" }, 404);
 
@@ -7569,11 +7571,11 @@ const app = new Hono<HonoAppContext>()
       return c.json({ ok: true });
     }
 
-    await chatService.setAssignee(
-      conversation.id,
-      project.id,
-      parsed.data.assigneeId,
-    );
+    await chatService.applyAction({
+      projectId: project.id,
+      conversationId: conversation.id,
+      action: { action: "assign", assigneeId: parsed.data.assigneeId },
+    });
     return c.json({ ok: true });
   })
   .get("/api/projects/:id/inbox-counts", async (c) => {
@@ -7605,9 +7607,9 @@ const app = new Hono<HonoAppContext>()
 
     const chatService = createPublicConversationStore({ db, env: c.env });
     if (parsed.data.conversationId) {
-      const conversation = await chatService.getOperationalConversationById(
-        parsed.data.conversationId,
+      const conversation = await chatService.getOperational(
         project.id,
+        parsed.data.conversationId,
       );
       if (!conversation) return c.json({ error: "Not found" }, 404);
     }
@@ -7628,15 +7630,15 @@ const app = new Hono<HonoAppContext>()
     // visitor, so any leftovers would sit in Needs You forever.
     const closedIds = new Set<string>();
     if (parsed.data.conversationId) {
-      await chatService.updateConversationStatus(
-        parsed.data.conversationId,
+      await chatService.setStatus(
         project.id,
+        parsed.data.conversationId,
         "closed",
         "spam",
       );
       closedIds.add(parsed.data.conversationId);
     }
-    const sweptIds = await chatService.closeOpenConversationsAsSpam(
+    const sweptIds = await chatService.closeOpenAsSpam(
       project.id,
       parsed.data.visitorId,
       parsed.data.visitorEmail ?? null,
@@ -8057,9 +8059,9 @@ const app = new Hono<HonoAppContext>()
         return c.json({ error: "Not found" }, 404);
       }
       const chatService = createPublicConversationStore({ db, env: c.env });
-      const conversation = await chatService.getOperationalConversationById(
-        requestedConversationId,
+      const conversation = await chatService.getOperational(
         project.id,
+        requestedConversationId,
       );
       if (!conversation) return c.json({ error: "Not found" }, 404);
 

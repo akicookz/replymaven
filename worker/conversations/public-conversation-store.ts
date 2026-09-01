@@ -417,40 +417,14 @@ export interface PublicConversationStore {
   isUploadKeyReferencedElsewhere(key: string, conversationId: string): Promise<boolean>;
   deleteRetentionClaim(projectId: string, conversationId: string, purgeStartedAt: number): Promise<boolean>;
 
-  // Temporary compatibility names keep the behavior-preserving cutover small.
-  // They return storage-neutral records and disappear with the legacy runtime.
-  getConversationById(conversationId: string, projectId: string): Promise<PublicConversationRecord | null>;
-  getOperationalConversationById(conversationId: string, projectId: string): Promise<PublicConversationRecord | null>;
-  getActiveConversationByVisitor(projectId: string, visitorId: string): Promise<PublicConversationRecord | null>;
-  getLastConversationByVisitor(projectId: string, visitorId: string): Promise<PublicConversationRecord | null>;
-  getRecentConversationByVisitorEmail(projectId: string, email: string): Promise<PublicConversationRecord | null>;
   createConversation(input: LegacyPublicConversationCreateInput): Promise<PublicConversationRecord>;
-  getNeedsReviewSince(projectId: string, since: number): Promise<PublicConversationRecord[]>;
-  getAgentModeConversations(projectId: string): Promise<PublicConversationRecord[]>;
-  getPublicMessages(conversationId: string, projectId?: string): Promise<PublicMessageRecord[]>;
-  getRecentPublicMessages(conversationId: string, limit?: number, projectId?: string): Promise<PublicMessagePage>;
-  getPublicMessagesBefore(conversationId: string, beforeCreatedAt: Date, limit?: number, projectId?: string): Promise<PublicMessagePage>;
-  getPublicMessagesSince(conversationId: string, since: number, projectId?: string): Promise<PublicMessageRecord[]>;
   getPublicMessageById(messageId: string, projectId?: string, conversationId?: string): Promise<PublicMessageRecord | null>;
   addPublicVisitorMessageWithFirstTurn(input: LegacyPublicMessageInput, projectId: string): Promise<AppendVisitorResult | null>;
   addPublicAgentMessageAndTakeOwnership(input: LegacyPublicMessageInput, projectId: string): Promise<PublicMessageRecord | null>;
   addPublicBotMessageIfOwnershipMatches(input: LegacyPublicMessageInput, projectId: string, expected: { status: PublicConversationStatus; chatState: string | null }): Promise<PublicMessageRecord | null>;
   addPublicSystemMessage(conversationId: string, kind: AppendPublicSystemInput["kind"], content: string, idempotencyKey?: string, projectId?: string): Promise<PublicMessageRecord | null>;
   addPublicMessage(input: LegacyPublicMessageInput & { role: "visitor" | "agent" }, projectId: string): Promise<PublicMessageRecord | null>;
-  getLatestEmailedPublicAgentMessage(conversationId: string, projectId?: string): Promise<PublicMessageRecord | null>;
-  markPublicMessageAsEmailed(conversationId: string, messageId: string, projectId?: string): Promise<void>;
-  markPublicDeliveredUpTo(conversationId: string, messageId: string, projectId?: string): Promise<string[]>;
-  markPublicReadUpTo(conversationId: string, messageId: string, projectId?: string): Promise<string[]>;
-  deletePublicAgentMessage(conversationId: string, messageId: string, projectId?: string): Promise<DeletePublicMessageResult>;
-  updateConversationStatus(conversationId: string, projectId: string, status: PublicConversationStatus, closeReason?: PublicConversationRecord["closeReason"]): Promise<void>;
-  transitionChatOwnership(conversationId: string, projectId: string, event: ChatOwnershipEvent): Promise<PublicConversationStatus | null>;
   updateConversation(conversationId: string, projectId: string, input: { visitorName?: string; visitorEmail?: string; metadata?: string }): Promise<PublicConversationRecord | null>;
-  updateConversationEmail(conversationId: string, projectId: string, email: string): Promise<void>;
   updateVisitorLastSeen(conversationId: string, projectId: string, presence?: "active" | "background"): Promise<PublicConversationRecord | null>;
-  resolveConversationByAi(conversationId: string, projectId: string): Promise<boolean>;
-  closeOpenConversationsAsSpam(projectId: string, visitorId: string, visitorEmail?: string | null): Promise<string[]>;
-  bulkUpdateConversations(projectId: string, conversationIds: string[], action: PublicConversationAction, now?: Date): Promise<PublicBulkConversationActionResult>;
   setSnooze(conversationId: string, projectId: string, until: Date | null): Promise<void>;
-  setPriority(conversationId: string, projectId: string, priority: "low" | "medium" | "high"): Promise<void>;
-  setAssignee(conversationId: string, projectId: string, assigneeId: string | null): Promise<void>;
 }

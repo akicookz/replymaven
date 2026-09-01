@@ -39,9 +39,9 @@ export async function emailLastAgentReply(input: {
   const visitorEmail = input.visitorEmail?.trim() ?? "";
   if (!visitorEmail) return { ok: false, reason: "no_visitor_email" };
 
-  const messages = await input.chatService.getPublicMessages(
-    input.conversationId,
+  const messages = await input.chatService.getMessages(
     input.projectId,
+    input.conversationId,
   );
   const message = findLastAgentReply(messages);
   if (!message) return { ok: false, reason: "no_reply" };

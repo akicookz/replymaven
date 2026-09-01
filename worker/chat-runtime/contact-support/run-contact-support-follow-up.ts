@@ -147,7 +147,7 @@ export async function runContactSupportFollowUp(
   let sources: PublicSourceReference[] = [];
   try {
     const rawHistory = (
-      await options.chatService.getPublicMessages(conversation.id, project.id)
+      await options.chatService.getMessages(project.id, conversation.id)
     ).map((message) => ({
       role: message.author,
       content: message.content,
