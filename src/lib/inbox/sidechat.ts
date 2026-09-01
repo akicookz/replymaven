@@ -307,7 +307,9 @@ export function readLastCompletedSidechatToolKind(
     }
     if (
       item.tool.source.name === "Docs" &&
-      item.tool.displayName === "Search"
+      (item.tool.displayName === "Search" ||
+        item.tool.displayName === "List" ||
+        item.tool.displayName === "Read")
     ) {
       return "docs";
     }
@@ -343,9 +345,6 @@ function sidechatWorkingLabel(
   return "Thinking…";
 }
 
-// A completed tool row is not the same as a finished turn. Keep a plain
-// phase line after a tool returns until reasoning, text, a draft, or an
-// error arrives. Never show Maven · time in that gap.
 export function deriveSidechatWorkingTail(
   input: SidechatWorkingTailInput,
 ): SidechatWorkingTail {

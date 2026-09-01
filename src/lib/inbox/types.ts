@@ -1,12 +1,9 @@
 import type { InboxFilter } from "./filters";
+import type { KnowledgeChangePreview } from "../../../shared/knowledge-change";
 import type {
   SidechatToolPresentation,
   SidechatToolSafety,
 } from "../../../shared/sidechat-agent";
-
-// Shared inbox data shapes consumed by the Conversations orchestrator and the
-// inbox presentational components (MessageList / ReadingPane / FocusView and
-// their descendants in Tasks 8–13).
 
 export interface LastMessagePreview {
   id: string;
@@ -46,6 +43,20 @@ export type MessageRole = "visitor" | "bot" | "agent" | "system";
 export interface MessageReplyDraft {
   text: string;
   sourceMessageId: string;
+}
+
+export type KnowledgeChangeCardStatus =
+  | "pending"
+  | "applied"
+  | "rejected"
+  | "error";
+
+export interface MessageKnowledgeChange {
+  preview: KnowledgeChangePreview;
+  toolCallId: string;
+  approvalId: string | null;
+  status: KnowledgeChangeCardStatus;
+  errorText?: string;
 }
 
 export interface MessagePresentationAction {
@@ -91,11 +102,10 @@ export type SidechatTraceItem =
 
 export interface Message {
   id: string;
-  // Dashboard threads include centred `system` event rows (snoozed, flagged,
-  // joined, …) in addition to the conversational roles.
   role: MessageRole;
   content: string;
   replyDraft?: MessageReplyDraft;
+  knowledgeChange?: MessageKnowledgeChange;
   presentationAction?: MessagePresentationAction;
   sidechatTrace?: SidechatTraceItem[];
   imageUrl?: string | null;

@@ -41,7 +41,7 @@ interface ChatThreadProps {
   onApprovalAction?: (
     approvalId: string,
     toolCallId: string,
-    mode: "always" | "once",
+    mode: "always" | "once" | "deny",
   ) => void;
   /** Optional inset override for layouts such as FocusView. */
   contentClassName?: string;

@@ -46,6 +46,14 @@ import { ToolService } from "../../services/tool-service";
 import { decrypt, encrypt } from "../../services/encryption-service";
 import { type AppEnv } from "../../types";
 import { createSearchKnowledgeTool } from "../../chat-runtime/tools/internal/search-knowledge";
+import { ResourceService } from "../../services/resource-service";
+import {
+  applyKnowledgeChange,
+  listKnowledgeResources,
+  prepareKnowledgeChange,
+  readKnowledgeResource,
+} from "../../services/sidechat-knowledge";
+import type { KnowledgeChangePreview } from "../../../shared/knowledge-change";
 import { executeHttpToolRequest } from "../../chat-runtime/tools/http-tool-executor";
 import type { MavenTurnContext, SupportToolDefinition } from "../../chat-runtime/types";
 import {
@@ -1674,6 +1682,126 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       approvalMode: "none",
       input: request.input,
     });
+  }
+
+  private async assertSidechatKnowledgeAccess(
+    request: ExecuteSidechatKnowledgeRequest,
+  ): Promise<boolean> {
+    this.assertRegisteredSidechat(request.childName, request.conversationId);
+    const conversation = this.conversationDirectory().getConversation(
+      request.conversationId,
+    );
+    if (!conversation || conversation.archivedAt !== null) return false;
+    return this.canActorAccessProject(
+      drizzle(this.env.DB),
+      request.actorUserId,
+    );
+  }
+
+  async listSidechatKnowledge(
+    request: ExecuteSidechatKnowledgeRequest,
+  ): Promise<unknown> {
+    if (!await this.assertSidechatKnowledgeAccess(request)) {
+      return { error: "unavailable" };
+    }
+    const resources = await listKnowledgeResources(
+      new ResourceService(drizzle(this.env.DB), this.env.UPLOADS),
+      this.name,
+      typeof request.input.query === "string" ? request.input.query : null,
+    );
+    return { resources };
+  }
+
+  async readSidechatKnowledge(
+    request: ExecuteSidechatKnowledgeRequest,
+  ): Promise<unknown> {
+    if (!await this.assertSidechatKnowledgeAccess(request)) {
+      return { error: "unavailable" };
+    }
+    const result = await readKnowledgeResource(
+      new ResourceService(drizzle(this.env.DB), this.env.UPLOADS),
+      this.name,
+      {
+        resourceId: typeof request.input.resourceId === "string"
+          ? request.input.resourceId
+          : null,
+        title: typeof request.input.title === "string" ? request.input.title : null,
+        url: typeof request.input.url === "string" ? request.input.url : null,
+      },
+    );
+    if (result.status === "ready") return result.result;
+    if (result.status === "ambiguous") return { candidates: result.candidates };
+    return { error: result.error };
+  }
+
+  async prepareSidechatKnowledgeChange(
+    request: ExecuteSidechatKnowledgeRequest,
+  ): Promise<
+    | { status: "ready"; preview: KnowledgeChangePreview }
+    | { status: "ambiguous"; candidates: unknown; error: string }
+    | { status: "failed"; error: string }
+  > {
+    if (!await this.assertSidechatKnowledgeAccess(request)) {
+      return { status: "failed", error: "unavailable" };
+    }
+    const prepared = await prepareKnowledgeChange(
+      new ResourceService(drizzle(this.env.DB), this.env.UPLOADS),
+      this.name,
+      request.input,
+    );
+    if (prepared.status === "ready") {
+      return { status: "ready", preview: prepared.preview };
+    }
+    return prepared;
+  }
+
+  async executeSidechatKnowledgeChange(
+    request: ExecuteSidechatKnowledgeRequest,
+  ): Promise<ExecuteProjectToolResult> {
+    if (!await this.assertSidechatKnowledgeAccess(request)) {
+      return {
+        status: "unavailable",
+        safeActivity: "Apply",
+        errorCode: "unavailable",
+      };
+    }
+    const prepared = await prepareKnowledgeChange(
+      new ResourceService(drizzle(this.env.DB), this.env.UPLOADS),
+      this.name,
+      request.input,
+    );
+    if (prepared.status !== "ready") {
+      return {
+        status: "failed",
+        safeActivity: "Apply",
+        errorCode: prepared.status === "ambiguous" ? "ambiguous" : "invalid_tool_input",
+        output: prepared.status === "ambiguous"
+          ? { candidates: prepared.candidates, error: prepared.error }
+          : { error: prepared.error },
+      };
+    }
+    const applied = await applyKnowledgeChange(
+      new ResourceService(drizzle(this.env.DB), this.env.UPLOADS),
+      this.env,
+      this.name,
+      prepared.write,
+      (promise) => {
+        this.ctx.waitUntil(promise);
+      },
+    );
+    if (!applied.ok) {
+      return {
+        status: "failed",
+        safeActivity: "Apply",
+        errorCode: "apply_failed",
+        output: { error: applied.error },
+      };
+    }
+    return {
+      status: "completed",
+      safeActivity: "Applied knowledge change",
+      output: { ok: true, resourceId: applied.resourceId },
+    };
   }
 
   async grantAlwaysForPendingApproval(

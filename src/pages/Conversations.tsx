@@ -300,6 +300,7 @@ function NativeSidechatPane({
   const hasApproval = sidechat.messages.some(
     (message) =>
       message.presentationAction?.type === "approval" ||
+      message.knowledgeChange?.status === "pending" ||
       message.sidechatTrace?.some(
         (item) =>
           item.type === "tool" && item.state === "approval-requested",
@@ -319,6 +320,7 @@ function NativeSidechatPane({
   const latestSidechatMessage = sidechat.messages[sidechat.messages.length - 1];
   const hasSettledSidechatAnswer = latestSidechatMessage?.role === "bot" && (
     Boolean(latestSidechatMessage.replyDraft) ||
+    Boolean(latestSidechatMessage.knowledgeChange) ||
     latestSidechatMessage.content.trim().length > 0
   );
   const summaryIsTerminal =

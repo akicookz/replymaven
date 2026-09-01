@@ -17,6 +17,7 @@ import {
 } from "../../../shared/message-images";
 import MessageImages from "./MessageImages";
 import SidechatReplyDraftCard from "./SidechatReplyDraftCard";
+import SidechatKnowledgeChangeCard from "./SidechatKnowledgeChangeCard";
 import SidechatExecutionTrace from "./SidechatExecutionTrace";
 
 interface MessageBubbleProps {
@@ -41,7 +42,7 @@ interface MessageBubbleProps {
   onApprovalAction?: (
     approvalId: string,
     toolCallId: string,
-    mode: "always" | "once",
+    mode: "always" | "once" | "deny",
   ) => void;
 }
 
@@ -314,6 +315,22 @@ export default function MessageBubble({
               <Trash2 size={14} />
             </button>
           )}
+        </div>
+      )}
+      {perspective === "sidechat" && message.knowledgeChange && (
+        <div className={cn("w-full max-w-[94%]", showBubble && "mt-3")}>
+          <SidechatKnowledgeChangeCard
+            change={message.knowledgeChange}
+            readOnly={readOnly}
+            onApprove={onApprovalAction
+              ? (approvalId, toolCallId) =>
+                onApprovalAction(approvalId, toolCallId, "once")
+              : undefined}
+            onReject={onApprovalAction
+              ? (approvalId, toolCallId) =>
+                onApprovalAction(approvalId, toolCallId, "deny")
+              : undefined}
+          />
         </div>
       )}
       {perspective === "sidechat" && message.replyDraft && (

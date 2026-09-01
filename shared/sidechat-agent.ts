@@ -237,6 +237,11 @@ export interface SidechatCustomerContext {
     role: "visitor" | "bot" | "agent" | "system";
     content: string;
     createdAt: number;
+    sources?: Array<{
+      title: string;
+      url: string | null;
+      type: "webpage" | "pdf" | "faq";
+    }>;
   }>;
 }
 

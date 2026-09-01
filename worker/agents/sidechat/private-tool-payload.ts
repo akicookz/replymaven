@@ -30,6 +30,9 @@ const MODEL_SAFE_TOOL_NAMES = new Set([
   SAFE_STREAM_TOOL_NAME,
   GATEWAY_CALL_TOOL_NAME,
   "search_knowledge",
+  "list_knowledge",
+  "read_knowledge",
+  "apply_knowledge_change",
   "search_project_tools",
   "describe_project_tool",
 ]);

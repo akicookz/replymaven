@@ -116,6 +116,14 @@ import {
   type SidechatGatewaySearchResult,
 } from "../sidechat/project-tool-gateway";
 import {
+  APPLY_KNOWLEDGE_CHANGE_TOOL_NAME,
+  LIST_KNOWLEDGE_TOOL_NAME,
+  READ_KNOWLEDGE_TOOL_NAME,
+  buildSidechatKnowledgeTools,
+  persistKnowledgeChangeParts,
+} from "../sidechat/knowledge-tools";
+import type { KnowledgeChangePreview } from "../../../shared/knowledge-change";
+import {
   PublicConversationStateStore,
   type PublicConversationStateSql,
   type StoredPublicConversationState,
@@ -261,6 +269,22 @@ interface SidechatTurnParent extends SidechatStatusUpdater {
   executeSidechatKnowledge(
     request: ExecuteSidechatKnowledgeRequest,
   ): Promise<ExecuteProjectToolResult>;
+  listSidechatKnowledge(
+    request: ExecuteSidechatKnowledgeRequest,
+  ): Promise<unknown>;
+  readSidechatKnowledge(
+    request: ExecuteSidechatKnowledgeRequest,
+  ): Promise<unknown>;
+  prepareSidechatKnowledgeChange(
+    request: ExecuteSidechatKnowledgeRequest,
+  ): Promise<
+    | { status: "ready"; preview: KnowledgeChangePreview }
+    | { status: "ambiguous"; candidates: unknown; error: string }
+    | { status: "failed"; error: string }
+  >;
+  executeSidechatKnowledgeChange(
+    request: ExecuteSidechatKnowledgeRequest,
+  ): Promise<ExecuteProjectToolResult>;
 }
 
 interface SidechatMessageStore {
@@ -275,6 +299,7 @@ interface SidechatMessageStore {
 
 interface SidechatTurnAgent extends SidechatMessageStore {
   createSidechatLanguageModel(): LanguageModel;
+  pendingKnowledgeChanges: Map<string, KnowledgeChangePreview>;
 }
 
 const SIDECHAT_MAX_TURN_STEPS = 24;
@@ -325,8 +350,44 @@ async function executeSidechatTurn(input: {
     const approvedToolCallIds = approvedSidechatToolCallIds(
       input.agent.messages,
     );
+    const knowledgeChangePreviews = new Map<string, KnowledgeChangePreview>();
+    input.agent.pendingKnowledgeChanges = knowledgeChangePreviews;
     const tools: ToolSet = {
       present_reply_draft: createReplyDraftTool(),
+      ...buildSidechatKnowledgeTools({
+        list: (knowledgeInput) =>
+          input.parent.listSidechatKnowledge({
+            ...gatewayContext,
+            input: knowledgeInput,
+          }),
+        read: (knowledgeInput) =>
+          input.parent.readSidechatKnowledge({
+            ...gatewayContext,
+            input: knowledgeInput,
+          }),
+        prepareChange: (knowledgeInput) =>
+          input.parent.prepareSidechatKnowledgeChange({
+            ...gatewayContext,
+            input: knowledgeInput,
+          }),
+        executeChange: (knowledgeInput) =>
+          input.parent.executeSidechatKnowledgeChange({
+            ...gatewayContext,
+            input: knowledgeInput,
+          }),
+        approvedToolCallIds,
+        emitKnowledgeChange(preview, toolCallId) {
+          knowledgeChangePreviews.set(toolCallId, preview);
+          input.writer.write({
+            type: "data-knowledge-change",
+            id: `${toolCallId}:knowledge-change`,
+            data: { ...preview, toolCallId },
+          });
+        },
+        emitActivity(part) {
+          input.writer.write(part);
+        },
+      }),
       ...buildSidechatGatewayTools({
         search: (request) => input.parent.searchSidechatProjectTools({
           ...gatewayContext,
@@ -432,16 +493,48 @@ async function executeSidechatTurn(input: {
       }
     }
     const projectChunk = createPrivateToolChunkProjector(
-      new Map([[
-        "search_knowledge",
-        {
-          safety: "read",
-          tool: {
-            displayName: "Search",
-            source: { kind: "http", name: "Docs", icon: null },
+      new Map([
+        [
+          "search_knowledge",
+          {
+            safety: "read" as const,
+            tool: {
+              displayName: "Search",
+              source: { kind: "http" as const, name: "Docs", icon: null },
+            },
           },
-        },
-      ]]),
+        ],
+        [
+          LIST_KNOWLEDGE_TOOL_NAME,
+          {
+            safety: "read" as const,
+            tool: {
+              displayName: "List",
+              source: { kind: "http" as const, name: "Docs", icon: null },
+            },
+          },
+        ],
+        [
+          READ_KNOWLEDGE_TOOL_NAME,
+          {
+            safety: "read" as const,
+            tool: {
+              displayName: "Read",
+              source: { kind: "http" as const, name: "Docs", icon: null },
+            },
+          },
+        ],
+        [
+          APPLY_KNOWLEDGE_CHANGE_TOOL_NAME,
+          {
+            safety: "write" as const,
+            tool: {
+              displayName: "Apply",
+              source: { kind: "http" as const, name: "Docs", icon: null },
+            },
+          },
+        ],
+      ]),
       Date.now,
       seedToolCalls,
       async (toolCallId, toolName, toolInput) => {
@@ -617,7 +710,8 @@ export function approvedSidechatToolCallIds(
     for (const part of message.parts) {
       if (
         isToolUIPart(part) &&
-        getToolName(part) === "call_project_tool" &&
+        (getToolName(part) === "call_project_tool" ||
+          getToolName(part) === APPLY_KNOWLEDGE_CHANGE_TOOL_NAME) &&
         part.state === "approval-responded" &&
         part.approval.approved
       ) {
@@ -639,7 +733,8 @@ export function hasPendingSidechatApproval(messages: UIMessage[]): boolean {
       if (seenToolCalls.has(part.toolCallId)) continue;
       seenToolCalls.add(part.toolCallId);
       if (
-        getToolName(part) === "call_project_tool" &&
+        (getToolName(part) === "call_project_tool" ||
+          getToolName(part) === APPLY_KNOWLEDGE_CHANGE_TOOL_NAME) &&
         part.state === "approval-requested"
       ) return true;
     }
@@ -666,6 +761,7 @@ export class MavenChatAgent extends AIChatAgent<
   private publicTurnOutcomes?: PublicTurnOutcomeStore;
   private publicMutationTail: Promise<void> = Promise.resolve();
   private publicToolRateLimit = { count: 0, resetAt: 0 };
+  pendingKnowledgeChanges = new Map<string, KnowledgeChangePreview>();
 
   constructor(ctx: DurableObjectState, env: AppEnv) {
     super(ctx, env);
@@ -1504,6 +1600,21 @@ export class MavenChatAgent extends AIChatAgent<
     }
 
     if (hasPendingSidechatApproval([...this.messages, result.message])) {
+      if (
+        persistKnowledgeChangeParts(
+          result.message as { id: string; parts: Array<Record<string, unknown>> },
+          this.pendingKnowledgeChanges,
+        )
+      ) {
+        const nextMessages = this.messages.map((message) =>
+          message.id === result.message.id ? result.message : message,
+        );
+        if (!nextMessages.some((message) => message.id === result.message.id)) {
+          nextMessages.push(result.message);
+        }
+        await this.persistMessages(nextMessages);
+      }
+      this.pendingKnowledgeChanges.clear();
       logInfo("sidechat_turn.completed", {
         childName: this.name,
         conversationId,

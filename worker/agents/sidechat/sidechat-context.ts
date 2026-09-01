@@ -127,12 +127,22 @@ export async function buildSidechatContext(
   const recentPublicMessages = [...publicPage.messages]
     .sort(comparePublicMessages)
     .slice(-40)
-    .map((message) => ({
-      id: message.id,
-      role: message.author,
-      content: message.content.slice(0, MAX_PUBLIC_MESSAGE_CHARS),
-      createdAt: toEpochMilliseconds(message.createdAt),
-    }));
+    .map((message) => {
+      const sources = message.author === "bot"
+        ? message.sources.filter((source) =>
+          source.type === "webpage" ||
+          source.type === "pdf" ||
+          source.type === "faq"
+        ).slice(0, 5)
+        : [];
+      return {
+        id: message.id,
+        role: message.author,
+        content: message.content.slice(0, MAX_PUBLIC_MESSAGE_CHARS),
+        createdAt: toEpochMilliseconds(message.createdAt),
+        ...(sources.length > 0 ? { sources } : {}),
+      };
+    });
 
   return {
     projectId: options.projectId,

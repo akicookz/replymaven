@@ -83,7 +83,7 @@ export interface SidechatAgentController {
   approve(
     approvalId: string,
     toolCallId: string,
-    mode: "always" | "once",
+    mode: "always" | "once" | "deny",
   ): Promise<void>;
 }
 
@@ -315,12 +315,12 @@ export function planFailedSidechatRetry(options: {
 }
 
 interface SubmitSidechatApprovalOptions {
-  mode: "always" | "once";
+  mode: "always" | "once" | "deny";
   projectId: string;
   conversationId: string;
   approvalId: string;
   toolCallId: string;
-  approveNative(approvalId: string): Promise<void>;
+  approveNative(approvalId: string, approved: boolean): Promise<void>;
   fetcher?: typeof fetch;
 }
 
@@ -346,7 +346,7 @@ export async function submitSidechatApproval(
       throw new Error(body?.error ?? `Request failed (${response.status})`);
     }
   }
-  await options.approveNative(options.approvalId);
+  await options.approveNative(options.approvalId, options.mode !== "deny");
 }
 
 export function useSidechatParentState(
@@ -428,7 +428,7 @@ export function useSidechatAgent(
   const approve = useCallback(async (
     approvalId: string,
     toolCallId: string,
-    mode: "always" | "once",
+    mode: "always" | "once" | "deny",
   ) => {
     await submitSidechatApproval({
       mode,
@@ -436,8 +436,8 @@ export function useSidechatAgent(
       conversationId: options.conversationId,
       approvalId,
       toolCallId,
-      approveNative: async (id) => {
-        await addToolApprovalResponse({ id, approved: true });
+      approveNative: async (id, approved) => {
+        await addToolApprovalResponse({ id, approved });
       },
     });
   }, [
