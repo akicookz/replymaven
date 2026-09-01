@@ -277,6 +277,8 @@ interface SidechatTurnAgent extends SidechatMessageStore {
   createSidechatLanguageModel(): LanguageModel;
 }
 
+const SIDECHAT_MAX_TURN_STEPS = 24;
+
 async function executeSidechatTurn(input: {
   agent: SidechatTurnAgent;
   writer: {
@@ -373,7 +375,18 @@ async function executeSidechatTurn(input: {
         selectSidechatModelMessages(input.agent.messages, input.continuation),
       ),
       tools,
-      stopWhen: stepCountIs(8),
+      providerOptions: {
+        openai: { reasoningSummary: "auto" },
+        google: { thinkingConfig: { includeThoughts: true } },
+      },
+      stopWhen: stepCountIs(SIDECHAT_MAX_TURN_STEPS),
+      prepareStep({ stepNumber }) {
+        // Last allowed step runs without tools so the turn always ends in text.
+        if (stepNumber >= SIDECHAT_MAX_TURN_STEPS - 1) {
+          return { toolChoice: "none" as const };
+        }
+        return {};
+      },
       abortSignal: input.abortSignal,
       onFinish(event) {
         logInfo("sidechat_turn.model_finished", {

@@ -19,6 +19,13 @@ interface ToolChunkLike {
 
 const SAFE_STREAM_TOOL_NAME = "present_reply_draft";
 const GATEWAY_CALL_TOOL_NAME = "call_project_tool";
+const FALLBACK_APPROVAL_CONTEXT: SidechatToolApprovalContext = {
+  safety: "write",
+  tool: {
+    displayName: "Connected tool",
+    source: { kind: "mcp", name: "MCP", icon: null },
+  },
+};
 const MODEL_SAFE_TOOL_NAMES = new Set([
   SAFE_STREAM_TOOL_NAME,
   GATEWAY_CALL_TOOL_NAME,
@@ -176,9 +183,12 @@ export function createPrivateToolChunkProjector(
       typeof value.toolCallId === "string" &&
       typeof value.approvalId === "string"
     ) {
+      // A pending approval must never be invisible: without a rendered card
+      // the turn dies as an unexplained failure, so fall back to a generic
+      // presentation when the tool context cannot be resolved.
       const context = contextByToolCallId.get(value.toolCallId) ??
-        await resolveContextByToolCallId(value.toolCallId, null, undefined);
-      if (!context) return projected;
+        await resolveContextByToolCallId(value.toolCallId, null, undefined) ??
+        FALLBACK_APPROVAL_CONTEXT;
       projected.push(
         {
           type: "data-tool-approval",

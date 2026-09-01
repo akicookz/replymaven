@@ -403,10 +403,21 @@ function activityPart(
   };
 }
 
+const INVALID_TOOL_INPUT_HINT =
+  "argumentsJson did not match this tool's schema. Call describe_project_tool with this exact toolRef to get the argument guide, then retry with one JSON object string that follows it.";
+const TOOL_UNAVAILABLE_HINT =
+  "This toolRef could not be used right now; it may be stale. Call search_project_tools again for a fresh toolRef, then retry.";
+
 function toolError(result: ExecuteProjectToolResult): unknown {
-  return result.status === "completed"
-    ? result.output
-    : { error: result.errorCode ?? "tool_unavailable" };
+  if (result.status === "completed") return result.output;
+  const error = result.errorCode ?? "tool_unavailable";
+  if (error === "invalid_tool_input") {
+    return { error, hint: INVALID_TOOL_INPUT_HINT };
+  }
+  if (error === "tool_unavailable") {
+    return { error, hint: TOOL_UNAVAILABLE_HINT };
+  }
+  return { error };
 }
 
 export function buildSidechatGatewayTools(
@@ -557,13 +568,12 @@ export function buildSidechatGatewayTools(
         try {
           tool = await options.resolve(call.toolRef);
         } catch {
-          approvalModeByToolCallId.set(context.toolCallId, "once");
-          return true;
+          // An unresolvable toolRef must surface as a tool error the model can
+          // recover from, not an approval card that has no tool context to
+          // render. Unapproved writes are still blocked inside execute.
+          return false;
         }
-        if (!tool) {
-          approvalModeByToolCallId.set(context.toolCallId, "once");
-          return true;
-        }
+        if (!tool) return false;
         options.rememberToolContext(context.toolCallId, {
           safety: tool.safety,
           tool: tool.presentation,
@@ -581,14 +591,22 @@ export function buildSidechatGatewayTools(
       },
       async execute(input, context) {
         const call = parseGatewayCallInput(input);
-        if (!call) return { error: "invalid_tool_input" };
+        if (!call) {
+          return {
+            error: "invalid_tool_input",
+            hint:
+              "Provide toolRef copied exactly from search_project_tools and argumentsJson as one JSON object string.",
+          };
+        }
         let tool: SidechatGatewayResolvedTool | null;
         try {
           tool = await options.resolve(call.toolRef);
         } catch {
-          return { error: "tool_unavailable" };
+          return { error: "tool_unavailable", hint: TOOL_UNAVAILABLE_HINT };
         }
-        if (!tool) return { error: "tool_unavailable" };
+        if (!tool) {
+          return { error: "tool_unavailable", hint: TOOL_UNAVAILABLE_HINT };
+        }
         options.rememberToolContext(context.toolCallId, {
           safety: tool.safety,
           tool: tool.presentation,

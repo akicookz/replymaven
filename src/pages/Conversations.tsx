@@ -172,6 +172,8 @@ function NativePublicConversationBridge({
   return null;
 }
 
+const PHANTOM_STREAM_STOP_GRACE_MS = 3_000;
+
 interface NativeSidechatPaneProps {
   open: boolean;
   conversation: Conversation;
@@ -280,6 +282,34 @@ function NativeSidechatPane({
     isServerStreaming: sidechat.isServerStreaming,
     isRecovering: sidechat.isRecovering,
   });
+  // The agents transport can miss the continuation handshake after a tool
+  // approval, leaving this client "streaming" although the server already
+  // finished the turn. Clear the phantom stream once the server-side summary
+  // is terminal and the settled answer is visible.
+  const stopSidechat = sidechat.stop;
+  const latestSidechatMessage = sidechat.messages[sidechat.messages.length - 1];
+  const hasSettledSidechatAnswer = latestSidechatMessage?.role === "bot" && (
+    Boolean(latestSidechatMessage.replyDraft) ||
+    latestSidechatMessage.content.trim().length > 0
+  );
+  const summaryIsTerminal =
+    summaryStatus === "idle" ||
+    summaryStatus === "ready" ||
+    summaryStatus === "failed";
+  useEffect(() => {
+    if (sidechatUiStatus !== "streaming") return;
+    if (hasApproval || !summaryIsTerminal || !hasSettledSidechatAnswer) return;
+    const timer = window.setTimeout(() => {
+      void stopSidechat();
+    }, PHANTOM_STREAM_STOP_GRACE_MS);
+    return () => window.clearTimeout(timer);
+  }, [
+    sidechatUiStatus,
+    hasApproval,
+    summaryIsTerminal,
+    hasSettledSidechatAnswer,
+    stopSidechat,
+  ]);
   const presentation = deriveSidechatPresentation({
     uiStatus: sidechatUiStatus,
     rawStatus: sidechat.status,

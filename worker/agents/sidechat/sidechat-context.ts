@@ -115,6 +115,15 @@ export async function buildSidechatContext(
         }
       : null;
 
+  const visitorName = trimNullable(
+    conversation.visitorName,
+    MAX_CUSTOMER_NAME_CHARS,
+  );
+  const visitorEmail = normalizeEmail(conversation.visitorEmail);
+  const visitor = visitorName !== null || visitorEmail !== null
+    ? { name: visitorName, email: visitorEmail }
+    : null;
+
   const recentPublicMessages = [...publicPage.messages]
     .sort(comparePublicMessages)
     .slice(-40)
@@ -131,6 +140,7 @@ export async function buildSidechatContext(
     conversationStatus: conversation.status,
     archivedAt: conversation.archivedAt,
     customer: canonicalCustomer,
+    visitor,
     // The public schema currently has no durable bounded conversation summary.
     // Do not synthesize one or repurpose private handoff metadata here.
     publicSummary: null,

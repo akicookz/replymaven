@@ -227,6 +227,10 @@ export interface SidechatCustomerContext {
     externalId: string | null;
     email: string | null;
   } | null;
+  visitor: {
+    name: string | null;
+    email: string | null;
+  } | null;
   publicSummary: string | null;
   recentPublicMessages: Array<{
     id: string;

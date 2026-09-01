@@ -42,6 +42,20 @@ function formatDuration(durationMs: number | undefined): string | null {
   )}s`;
 }
 
+function reasoningTitle(
+  item: Extract<SidechatTraceItem, { type: "reasoning" }>,
+): string {
+  const firstLine = item.text.split(/\r?\n/u, 1)[0]?.trim() ?? "";
+  const title = firstLine
+    .replace(/^#{1,6}\s+/u, "")
+    .replace(/^(?:\*\*|__)/u, "")
+    .replace(/(?:\*\*|__)$/u, "")
+    .trim();
+  if (!title) return item.state === "streaming" ? "Thinking…" : "Thought";
+  if (title.length <= 160) return title;
+  return `${title.slice(0, 159).trimEnd()}…`;
+}
+
 function prettyPayload(value: unknown): string {
   if (typeof value === "string") return value;
   if (value === undefined) return "";
@@ -198,12 +212,18 @@ function ReasoningTrace({
 }: {
   item: Extract<SidechatTraceItem, { type: "reasoning" }>;
 }) {
+  const title = reasoningTitle(item);
+
   return (
-    <details className="group/reasoning" open={item.state === "streaming" || undefined}>
+    <details className="group/reasoning">
       <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2.5 text-[12.5px] text-ink-5 hover:text-ink-2 motion-safe:transition-colors motion-safe:duration-150 [&::-webkit-details-marker]:hidden">
         <Brain aria-hidden="true" className="size-4 shrink-0" />
-        <span>
-          {item.state === "streaming" ? "Thinking…" : "Thought"}
+        <span
+          className={item.state === "streaming"
+            ? "rm-text-sweep min-w-0 truncate font-medium"
+            : "min-w-0 truncate font-medium text-ink-3"}
+        >
+          {title}
         </span>
         <ChevronDown
           aria-hidden="true"

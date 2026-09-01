@@ -41,9 +41,9 @@ export default function SidechatMcpAvatars({
             <Tooltip key={connection.id}>
               <TooltipTrigger asChild>
                 <Avatar
-                  size="sm"
+                  size="xs"
                   aria-label={connection.name}
-                  className="glass-button bg-glass-raised"
+                  className="border border-hairline-100"
                 >
                   {connection.icon ? (
                     <AvatarImage
