@@ -16,6 +16,7 @@ import { slugify } from "../lib/slugify";
 import { buildHelpUrl } from "../helpdesk-render/build-help-url";
 import { buildFrontmatterMarkdown } from "../helpdesk-render/build-frontmatter-md";
 import { applyHelpArticleSeoDefaults } from "../helpdesk-render/apply-help-article-seo-defaults";
+import { helpArticleR2RefreshAction } from "../helpdesk-render/help-article-r2-refresh";
 
 interface CreateCategoryInput {
   name: string;
@@ -573,35 +574,33 @@ export class HelpdeskService {
     const updated = await this.getArticleById(id, projectId);
 
     if (updated && projectSlug) {
-      const transitionedToPublished =
-        existing.status !== "published" && nextStatus === "published";
-      const transitionedToDraft =
-        existing.status === "published" && nextStatus === "draft";
+      const beforeCategory = await this.getCategoryById(
+        existing.categoryId,
+        projectId,
+      );
+      const afterCategory =
+        updated.categoryId === existing.categoryId
+          ? beforeCategory
+          : await this.getCategoryById(updated.categoryId, projectId);
+      const refresh = helpArticleR2RefreshAction({
+        existingStatus: existing.status,
+        nextStatus,
+        before: beforeCategory
+          ? { article: existing, category: beforeCategory }
+          : null,
+        after: afterCategory
+          ? { article: updated, category: afterCategory }
+          : null,
+      });
 
-      const stayedPublished =
-        existing.status === "published" && nextStatus === "published";
-      const contentLikeChanged =
-        updates.title !== undefined ||
-        updates.content !== undefined ||
-        updates.excerpt !== undefined ||
-        updates.ogImageUrl !== undefined ||
-        updates.slug !== undefined ||
-        updates.categoryId !== undefined ||
-        patch.excerpt !== undefined ||
-        patch.ogImageUrl !== undefined;
-
-      if (transitionedToPublished || (stayedPublished && contentLikeChanged)) {
-        const category =
-          (await this.getCategoryById(updated.categoryId, projectId)) ?? null;
-        if (category) {
-          await this.publishArticleToR2(
-            updated,
-            category,
-            projectId,
-            projectSlug,
-          );
-        }
-      } else if (transitionedToDraft) {
+      if (refresh === "publish" && afterCategory) {
+        await this.publishArticleToR2(
+          updated,
+          afterCategory,
+          projectId,
+          projectSlug,
+        );
+      } else if (refresh === "unpublish") {
         await this.unpublishArticleFromR2(updated, projectId);
       }
     }
