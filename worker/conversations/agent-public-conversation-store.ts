@@ -70,6 +70,7 @@ import type {
   ChatOwnershipEvent,
   ConversationChatState,
 } from "../chat-runtime/types";
+import { isMavenAssignee } from "../../shared/maven-assignee";
 
 interface LegacyConversationReaderLike {
   get(
@@ -153,6 +154,13 @@ interface PublicChildStub {
     conversationId: string;
     status: PublicConversationRecord["status"];
     closeReason?: PublicConversationRecord["closeReason"];
+  }): Promise<PublicConversationRecord | null>;
+  reopenPublicConversation(input: {
+    projectId: string;
+    conversationId: string;
+    status?: Exclude<PublicConversationRecord["status"], "closed">;
+    assigneeId?: string | null;
+    system?: { kind: "reopened"; content: string };
   }): Promise<PublicConversationRecord | null>;
   transitionPublicOwnership(
     event: ChatOwnershipEvent,
@@ -403,6 +411,10 @@ interface NewMessageInput {
   idempotencyKey?: string | null;
   origin?: "widget" | "dashboard" | "telegram" | "slack" | "email" | "mcp" | null;
   externalReplyTo?: string | null;
+}
+
+function reopenSystemContent(actorName: string | null | undefined): string {
+  return `${actorName?.trim() || "Someone"} reopened this conversation`;
 }
 
 function newMessage(
@@ -1122,9 +1134,24 @@ export class AgentPublicConversationStore implements PublicConversationStore {
   async reopen(
     projectId: string,
     conversationId: string,
-    status: "active" | "agent_replied" = "active",
+    actor?: { assigneeId: string | null; actorName: string | null },
   ): Promise<PublicConversationRecord | null> {
-    return this.setStatus(projectId, conversationId, status, null);
+    const child = await this.resolveChild(projectId, conversationId);
+    if (!child) return null;
+    return child.reopenPublicConversation({
+      projectId,
+      conversationId,
+      status: actor
+        ? (isMavenAssignee(actor.assigneeId) ? "active" : "waiting_agent")
+        : undefined,
+      assigneeId: actor?.assigneeId,
+      system: actor
+        ? {
+            kind: "reopened",
+            content: reopenSystemContent(actor.actorName),
+          }
+        : undefined,
+    });
   }
 
   async prepareContactSupportOwnership(
@@ -1637,14 +1664,6 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     closeReason?: PublicConversationRecord["closeReason"],
   ): Promise<void> {
     await this.setStatus(projectId, conversationId, status, closeReason);
-  }
-
-  async reopenConversation(
-    conversationId: string,
-    projectId: string,
-    status: "active" | "agent_replied" = "active",
-  ): Promise<PublicConversationRecord | null> {
-    return this.reopen(projectId, conversationId, status);
   }
 
   async transitionChatOwnership(

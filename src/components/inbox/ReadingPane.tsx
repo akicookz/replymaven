@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import type { CustomerDetail } from "../../../shared/customer-types";
@@ -10,7 +10,6 @@ import { cn } from "@/lib/utils";
 import ReadingHeader from "./ReadingHeader";
 import ChatThread from "./ChatThread";
 import Composer from "./Composer";
-import ConversationSearchDialog from "./ConversationSearchDialog";
 
 // Props contract — orchestrator (Conversations.tsx) passes these; all props
 // are additive from the Task-7 stub. Tasks 10/11 receive the subset they need.
@@ -54,6 +53,15 @@ interface ReadingPaneProps {
   publicComposerFocusRequest: number;
   /** The message id targeted by a `?msg=` deep link — pulses the review-summary card. */
   highlightMessageId?: string | null;
+  search?: string;
+  onSearchChange?: (query: string) => void;
+  matchCount?: number;
+  matchIndex?: number;
+  onMatchNext?: () => void;
+  onMatchPrev?: () => void;
+  onOpenSearch?: () => void;
+  searchQuery?: string;
+  activeMatchId?: string | null;
   /** Responsive visibility overrides owned by the inbox orchestrator. */
   className?: string;
 }
@@ -86,6 +94,15 @@ export default function ReadingPane({
   sidechatStatus,
   publicComposerFocusRequest,
   highlightMessageId,
+  search = "",
+  onSearchChange = () => undefined,
+  matchCount = 0,
+  matchIndex = 0,
+  onMatchNext = () => undefined,
+  onMatchPrev = () => undefined,
+  onOpenSearch = () => undefined,
+  searchQuery = "",
+  activeMatchId = null,
   className,
 }: ReadingPaneProps) {
   const interaction = deriveConversationInteractionState(conversation.archivedAt);
@@ -96,36 +113,8 @@ export default function ReadingPane({
   const convIdRef = useRef<string | null>(null);
   const pendingJumpRef = useRef(true);
   const prevLenRef = useRef(0);
+  const query = searchQuery;
 
-  // In-conversation search: opened from a single toolbar icon into a modal.
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const [activeMatch, setActiveMatch] = useState(0);
-
-  const query = search.trim().toLowerCase();
-  const matchMessages = query
-    ? messages.filter(
-        (m) => m.role !== "system" && m.content.toLowerCase().includes(query),
-      )
-    : [];
-  const matchIds = matchMessages.map((m) => m.id);
-  // Clamp the active index whenever the match set changes.
-  const safeActive = matchIds.length ? Math.min(activeMatch, matchIds.length - 1) : 0;
-  const activeMatchId = matchIds[safeActive] ?? null;
-
-  // Reset the active match when the query changes.
-  useEffect(() => {
-    setActiveMatch(0);
-  }, [query]);
-
-  // Clear search when switching conversations.
-  useEffect(() => {
-    setSearch("");
-    setSearchOpen(false);
-    setActiveMatch(0);
-  }, [conversation.id]);
-
-  // Scroll the active search match into view as the user steps through them.
   useEffect(() => {
     if (!activeMatchId) return;
     const el = scrollRef.current?.querySelector(
@@ -189,22 +178,6 @@ export default function ReadingPane({
     scrolledForRef.current = conversation.id;
   }, [highlightMessageId, messages.length, conversation.id]);
 
-  // Desktop inline search: cycle through matches.
-  function stepMatch(delta: number) {
-    if (matchIds.length === 0) return;
-    setActiveMatch((i) => {
-      const len = matchIds.length;
-      return (((i + delta) % len) + len) % len;
-    });
-  }
-
-  // Mobile modal: jump to a chosen result.
-  function handlePickMatch(messageId: string) {
-    const idx = matchIds.indexOf(messageId);
-    if (idx >= 0) setActiveMatch(idx);
-    setSearchOpen(false);
-  }
-
   return (
     <div className={cn(
       "glass-reading h-full min-w-0 flex-1 flex flex-col overflow-hidden",
@@ -228,12 +201,12 @@ export default function ReadingPane({
         onFocus={onFocus}
         onBack={onBack}
         search={search}
-        onSearchChange={setSearch}
-        matchCount={matchIds.length}
-        matchIndex={matchIds.length ? safeActive + 1 : 0}
-        onMatchNext={() => stepMatch(1)}
-        onMatchPrev={() => stepMatch(-1)}
-        onOpenSearch={() => setSearchOpen(true)}
+        onSearchChange={onSearchChange}
+        matchCount={matchCount}
+        matchIndex={matchIndex}
+        onMatchNext={onMatchNext}
+        onMatchPrev={onMatchPrev}
+        onOpenSearch={onOpenSearch}
         searchActive={query.length > 0}
         compact={sidechatOpen}
       />
@@ -273,6 +246,7 @@ export default function ReadingPane({
           onSend={onSend}
           onResolve={onResolve}
           convId={conversation.id}
+          conversation={conversation}
           focusRequest={publicComposerFocusRequest}
           mode={{
             kind: "public",
@@ -283,16 +257,6 @@ export default function ReadingPane({
           }}
         />
       )}
-
-      {/* Search-conversation modal (opened from the toolbar search icon) */}
-      <ConversationSearchDialog
-        open={searchOpen}
-        onOpenChange={setSearchOpen}
-        query={search}
-        onQueryChange={setSearch}
-        results={matchMessages}
-        onPick={handlePickMatch}
-      />
     </div>
   );
 }

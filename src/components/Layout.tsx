@@ -26,8 +26,10 @@ import {
   Flag,
   Clock,
   CheckCircle2,
+  Settings,
 } from "lucide-react";
 import ProfileSetupDialog from "@/components/ProfileSetupDialog";
+import { DashboardCommandProvider } from "@/components/commands/DashboardCommandProvider";
 import { signOut, useSession } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 import { useSubscription } from "@/hooks/use-subscription";
@@ -35,7 +37,13 @@ import { getTrialDaysRemaining, usagePercent } from "@/lib/plan";
 import { canCreateProjects } from "@/lib/team-permissions";
 import { useNeedsYouPing } from "@/lib/use-needs-you-ping";
 import { formatTitleWithBadge } from "@/lib/title-badge";
-import { projectRoute } from "@/lib/dashboard-routes";
+import {
+  dashboardNav,
+  projectSwitchHref,
+  type DashboardNavGroup,
+  type DashboardNavIcon,
+  type DashboardNavItem,
+} from "@/lib/dashboard/nav";
 import {
   Popover,
   PopoverContent,
@@ -147,42 +155,26 @@ function Layout() {
     return () => { document.title = base; };
   }, [inboxCounts]);
 
-  const inboxNav = currentProject ? [
-    { label: "Needs You", filter: "needs-you", icon: Hand },
-    { label: "Inbox",     filter: "inbox",     icon: Inbox },
-    { label: "Snoozed",           filter: "snoozed",   icon: Clock },
-    { label: "Resolved",          filter: "resolved",  icon: CheckCircle2 },
-    { label: "Archived",          filter: "archived",  icon: Archive },
-    { label: "Flagged",           filter: "flagged",   icon: Flag },
-  ].map((i) => ({ ...i, href: `/app/projects/${currentProject.id}/conversations?filter=${i.filter}` })) : [];
-
-  const knowledgebaseNav = currentProject ? [
-    { label: "Sources", href: projectRoute(currentProject.id, "sources"), icon: Database },
-    { label: "Help Center", href: projectRoute(currentProject.id, "help-center"), icon: BookOpen },
-    { label: "SOPs", href: projectRoute(currentProject.id, "sops"), icon: ListChecks },
-    { label: "Company info", href: projectRoute(currentProject.id, "company-info"), icon: Building2 },
-  ] : [];
-
-  const supportChatNav = currentProject ? [
-    { label: "Chat Widget", href: projectRoute(currentProject.id, "chat-widget"), icon: MessageSquare },
-    { label: "Greetings", href: projectRoute(currentProject.id, "greetings"), icon: MessagesSquare },
-    { label: "Tools", href: projectRoute(currentProject.id, "tools"), icon: Wrench },
-  ] : [];
-
-  const workspaceNav = currentProject ? [
-    { label: "Dashboard", href: projectRoute(currentProject.id, "dashboard"), icon: LayoutDashboard, exact: true },
-    { label: "Customers", href: projectRoute(currentProject.id, "customers"), icon: Users },
-    { label: "MCP Connections", href: projectRoute(currentProject.id, "mcp-connections"), icon: Plug },
-  ] : [];
+  const navItems = currentProject
+    ? dashboardNav({
+        projectId: currentProject.id,
+        pathname: location.pathname,
+        search: location.search,
+        counts: inboxCounts,
+      })
+    : [];
 
   function switchProject(project: Project) {
     setSelectorOpen(false);
     if (params.projectId) {
-      const newPath = location.pathname.replace(
-        `/projects/${params.projectId}`,
-        `/projects/${project.id}`,
+      navigate(
+        projectSwitchHref(
+          location.pathname,
+          location.search,
+          params.projectId,
+          project.id,
+        ),
       );
-      navigate({ pathname: newPath, search: location.search });
     } else {
       navigate(`/app/projects/${project.id}`);
     }
@@ -193,21 +185,35 @@ function Layout() {
     navigate("/");
   }
 
-  function isActive(item: { label: string; href: string; exact?: boolean }) {
-    return item.label === "Dashboard" || item.exact
-      ? location.pathname === item.href
-      : location.pathname.startsWith(item.href);
-  }
-
-  type NavItem = {
-    label: string;
-    href: string;
-    icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
-    badge?: number;
-    exact?: boolean;
-    filter?: string;
-    count?: number;
+  const NAV_ICONS: Record<
+    DashboardNavIcon,
+    React.ComponentType<{ className?: string; strokeWidth?: number }>
+  > = {
+    "layout-dashboard": LayoutDashboard,
+    hand: Hand,
+    inbox: Inbox,
+    clock: Clock,
+    "check-circle": CheckCircle2,
+    archive: Archive,
+    flag: Flag,
+    database: Database,
+    "book-open": BookOpen,
+    "list-checks": ListChecks,
+    "building-2": Building2,
+    "message-square": MessageSquare,
+    "messages-square": MessagesSquare,
+    wrench: Wrench,
+    users: Users,
+    plug: Plug,
+    settings: Settings,
   };
+
+  const NAV_SECTIONS: { id: DashboardNavGroup; label: string }[] = [
+    { id: "inbox", label: "Inbox" },
+    { id: "knowledgebase", label: "Knowledgebase" },
+    { id: "support-chat", label: "Support Chat" },
+    { id: "workspace", label: "Workspace" },
+  ];
 
   function isSectionOpen(id: string) {
     return collapsed || !collapsedSections[id];
@@ -261,10 +267,8 @@ function Layout() {
     );
   }
 
-  function NavLink({ item }: { item: NavItem }) {
-    const active = item.filter != null
-      ? location.pathname.includes("/conversations") && searchParams.get("filter") === item.filter
-      : isActive(item);
+  function NavLink({ item }: { item: DashboardNavItem }) {
+    const Icon = NAV_ICONS[item.icon];
 
     return (
       <Link
@@ -273,34 +277,29 @@ function Layout() {
         className={cn(
           "flex h-8 items-center gap-2 rounded-md text-[13px] font-medium transition-colors",
           collapsed ? "justify-center px-0" : "px-2",
-          active
+          item.active
             ? "bg-glass-raised text-ink-1"
             : "text-ink-4 hover:bg-glass-button hover:text-ink-1",
         )}
       >
-        <item.icon
+        <Icon
           className={cn(
             "size-4 shrink-0",
-            active ? "text-ink-2" : "text-ink-5",
+            item.active ? "text-ink-2" : "text-ink-5",
           )}
           strokeWidth={1.5}
         />
         {!collapsed && item.label}
-        {!collapsed && item.filter != null && (
+        {!collapsed && item.count != null && (
           <span
             className={cn(
               "ml-auto text-[11px] font-medium tabular-nums",
-              active ? "text-ink-5" : "text-ink-7",
+              item.active ? "text-ink-5" : "text-ink-7",
             )}
           >
-            {item.count ?? 0}
+            {item.count}
           </span>
         )}
-        {!collapsed && item.badge != null && item.badge > 0 ? (
-          <span className="ml-auto inline-flex items-center justify-center w-5 h-5 text-[10px] font-bold bg-primary text-primary-foreground rounded-full">
-            {item.badge}
-          </span>
-        ) : null}
       </Link>
     );
   }
@@ -320,6 +319,7 @@ function Layout() {
   }
 
   return (
+    <DashboardCommandProvider projectId={currentProject?.id ?? null}>
     <div className="flex h-screen">
       {/* Mobile overlay */}
       {mobileOpen && (
@@ -424,40 +424,17 @@ function Layout() {
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto px-2">
-          {inboxNav.length > 0 && (
-            <NavSection id="inbox" label="Inbox">
-              {inboxNav.map((item) => (
-                <NavLink
-                  key={item.href}
-                  item={{ ...item, count: inboxCounts?.[item.filter] ?? 0 }}
-                />
-              ))}
-            </NavSection>
-          )}
-
-          {knowledgebaseNav.length > 0 && (
-            <NavSection id="knowledgebase" label="Knowledgebase">
-              {knowledgebaseNav.map((item) => (
-                <NavLink key={item.href} item={item} />
-              ))}
-            </NavSection>
-          )}
-
-          {supportChatNav.length > 0 && (
-            <NavSection id="support-chat" label="Support Chat">
-              {supportChatNav.map((item) => (
-                <NavLink key={item.href} item={item} />
-              ))}
-            </NavSection>
-          )}
-
-          {workspaceNav.length > 0 && (
-            <NavSection id="workspace" label="Workspace">
-              {workspaceNav.map((item) => (
-                <NavLink key={item.href} item={item} />
-              ))}
-            </NavSection>
-          )}
+          {NAV_SECTIONS.map((section) => {
+            const items = navItems.filter((item) => item.group === section.id);
+            if (items.length === 0) return null;
+            return (
+              <NavSection key={section.id} id={section.id} label={section.label}>
+                {items.map((item) => (
+                  <NavLink key={item.href} item={item} />
+                ))}
+              </NavSection>
+            );
+          })}
 
           {!currentProject && canCreateProjects(subData?.role) && (
             <Link
@@ -576,6 +553,7 @@ function Layout() {
         onOpenChange={handleProfileSetupChange}
       />
     </div>
+    </DashboardCommandProvider>
   );
 }
 

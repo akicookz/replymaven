@@ -2407,7 +2407,7 @@ const app = new Hono<HonoAppContext>()
     }
 
     if (conversation.status === "closed") {
-      await chatService.reopenConversation(conversation.id, project.id);
+      await chatService.reopen(project.id, conversation.id);
     }
 
     const widgetService = new WidgetService(db);
@@ -7108,7 +7108,7 @@ const app = new Hono<HonoAppContext>()
     }
 
     if (conversation.status === "closed") {
-      await chatService.reopenConversation(conversation.id, project.id);
+      await chatService.reopen(project.id, conversation.id);
     }
 
     const replyIds = dashboardReplyIdentity({
@@ -7420,7 +7420,7 @@ const app = new Hono<HonoAppContext>()
     return c.json({ ok: true });
   })
   .post("/api/projects/:id/conversations/:convId/reopen", async (c) => {
-    // Un-resolve / un-flag: bring a closed conversation back to active.
+    // Un-resolve / un-flag: claim the thread, bump activity, and write a pill.
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
     const db = c.get("db");
@@ -7429,9 +7429,13 @@ const app = new Hono<HonoAppContext>()
     if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id))
       return c.json({ error: "Not found" }, 404);
     const chatService = createPublicConversationStore({ db, env: c.env });
-    const reopened = await chatService.reopenConversation(
-      c.req.param("convId"),
+    const reopened = await chatService.reopen(
       project.id,
+      c.req.param("convId"),
+      {
+        assigneeId: user.id,
+        actorName: user.name,
+      },
     );
     if (!reopened) return c.json({ error: "Not found" }, 404);
     return c.json({ ok: true });

@@ -2348,6 +2348,63 @@ export class MavenChatAgent extends AIChatAgent<
     });
   }
 
+  async reopenPublicConversation(input: {
+    projectId: string;
+    conversationId: string;
+    status?: Exclude<PublicConversationRecord["status"], "closed">;
+    assigneeId?: string | null;
+    system?: { kind: "reopened"; content: string };
+  }): Promise<PublicConversationRecord | null> {
+    return this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      this.assertPublicInput(input.projectId, input.conversationId);
+      if (state.archivedAt !== null || state.purgeStartedAt !== null) {
+        return null;
+      }
+      if (state.status !== "closed") {
+        return this.toPublicConversation(state);
+      }
+      const now = Date.now();
+      const status = input.status ?? this.statusFromStoredChatState(state);
+      if (state.autoCloseScheduleId) {
+        await this.cancelSchedule(state.autoCloseScheduleId);
+      }
+      let messages = this.readPublicMessages();
+      if (input.system) {
+        const message: PublicMessageRecord = {
+          id: crypto.randomUUID(),
+          conversationId: state.id,
+          author: "system",
+          content: input.system.content,
+          imageUrls: [],
+          sources: [],
+          senderName: null,
+          senderAvatar: null,
+          userId: null,
+          systemKind: input.system.kind,
+          createdAt: now,
+          deliveredAt: null,
+          readAt: null,
+          emailedAt: null,
+        };
+        messages = [...messages, message];
+        await this.persistPublicRecords(messages);
+      }
+      const saved = this.saveNextPublicState(state, {
+        status,
+        closeReason: null,
+        lastActivityAt: now,
+        updatedAt: now,
+        autoCloseScheduleId: null,
+        ...(input.assigneeId !== undefined
+          ? { assigneeId: input.assigneeId }
+          : {}),
+      });
+      await this.publishPublicProjection(saved, messages);
+      return this.toPublicConversation(saved);
+    });
+  }
+
   async transitionPublicOwnership(
     event: ChatOwnershipEvent,
     expectedRevision?: number,
@@ -3280,6 +3337,17 @@ export class MavenChatAgent extends AIChatAgent<
       throw new Error("Stored public conversation does not match its child");
     }
     return state;
+  }
+
+  private statusFromStoredChatState(
+    state: StoredPublicConversationState,
+  ): Exclude<PublicConversationRecord["status"], "closed"> {
+    const chatState = this.parseStoredChatState(state);
+    if (chatState.aiParticipation === "human_only") return "agent_replied";
+    if (chatState.aiParticipation === "assist_until_agent") {
+      return "waiting_agent";
+    }
+    return "active";
   }
 
   private parseStoredChatState(

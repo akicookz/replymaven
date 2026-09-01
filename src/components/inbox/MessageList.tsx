@@ -16,6 +16,22 @@ import {
   X,
 } from "lucide-react";
 import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+} from "@/components/ui/popover";
+import { Skeleton } from "@/components/ui/skeleton";
+import { CommandActionTooltip } from "@/components/commands/CommandActionTooltip";
+import { CommandKeycap } from "@/components/commands/CommandKeycap";
+import type { CommandAvailability } from "@/lib/commands/dashboard-command-domain";
+import {
+  buildInboxSelection,
+  commandKeycap,
+  commandLabel,
+  inboxCommandContext,
+  resolveInboxCommand,
+} from "@/lib/commands/inbox-command-lookup";
+import {
   formatInboxEmptyCopy,
   inboxEmptyCopy,
 } from "@/lib/inbox/empty-state";
@@ -29,15 +45,21 @@ import type {
 import type { SidechatPresentationStatus } from "@/lib/inbox/sidechat";
 import { cn } from "@/lib/utils";
 import { useMobileSidebar } from "@/lib/mobile-sidebar";
-import {
-  Popover,
-  PopoverTrigger,
-  PopoverContent,
-} from "@/components/ui/popover";
-import { Skeleton } from "@/components/ui/skeleton";
 import AssigneeMenu from "./AssigneeMenu";
 import ConversationRow from "./ConversationRow";
 import PriorityMenu from "./PriorityMenu";
+
+function bulkSnoozeUntil(availability: CommandAvailability): number | null {
+  if (
+    availability.status === "enabled" &&
+    availability.intent.type === "bulk-action" &&
+    availability.intent.action.type === "snooze" &&
+    availability.intent.action.until === null
+  ) {
+    return null;
+  }
+  return Date.now() + 86_400_000;
+}
 
 // Props from Task 7 orchestrator contract — keep these signatures.
 // Restorations (search / load-more) added in Task 8.
@@ -149,6 +171,33 @@ export default function MessageList({
 
   const openCount = counts[filter] ?? 0;
   const selectionActive = selectedIds.size > 0;
+  const selectedConversation =
+    conversations.find((conversation) => conversation.id === selectedId) ??
+    conversations.find((conversation) => selectedIds.has(conversation.id)) ??
+    null;
+  const commandContext = inboxCommandContext({
+    filter,
+    selection: buildInboxSelection(
+      selectedConversation,
+      selectedIds,
+      conversations,
+    ),
+  });
+  const archiveCommand = resolveInboxCommand(
+    "archive-conversation",
+    commandContext,
+  );
+  const resolveCommand = resolveInboxCommand(
+    "resolve-conversation",
+    commandContext,
+  );
+  const snoozeCommand = resolveInboxCommand(
+    "snooze-conversation",
+    commandContext,
+  );
+  const spamCommand = resolveInboxCommand("flag-spam", commandContext);
+  const escapeCommand = resolveInboxCommand("escape-inbox", commandContext);
+  const menuCommand = resolveInboxCommand("toggle-command-menu", commandContext);
   const selectedConversations = conversations.filter((conversation) =>
     selectedIds.has(conversation.id)
   );
@@ -294,51 +343,67 @@ export default function MessageList({
             </span>
             <div className="flex-1" />
             {filter === "archived" ? (
-              <button
-                type="button"
-                onClick={() => onBulkAction({ action: "unarchive" })}
-                disabled={bulkPending}
-                className="glass-button rounded-glass flex size-8 items-center justify-center text-ink-3 disabled:opacity-50"
-                aria-label="Unarchive selected conversations"
-                title="Unarchive"
-              >
-                <ArchiveRestore size={15} />
-              </button>
+              <CommandActionTooltip availability={archiveCommand}>
+                <button
+                  type="button"
+                  onClick={() => onBulkAction({ action: "unarchive" })}
+                  disabled={bulkPending}
+                  className="glass-button rounded-glass flex size-8 items-center justify-center text-ink-3 disabled:opacity-50"
+                  aria-label={commandLabel(
+                    archiveCommand,
+                    "Unarchive selected conversations",
+                  )}
+                >
+                  <ArchiveRestore size={15} />
+                </button>
+              </CommandActionTooltip>
             ) : (
               <>
-                <button
-                  type="button"
-                  onClick={() => onBulkAction({ action: "archive" })}
-                  disabled={bulkPending}
-                  className="glass-button rounded-glass flex size-8 items-center justify-center text-ink-3 disabled:opacity-50"
-                  aria-label="Archive selected conversations"
-                  title="Archive"
-                >
-                  <Archive size={15} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onBulkAction({ action: "resolve" })}
-                  disabled={bulkPending}
-                  className="glass-button rounded-glass flex size-8 items-center justify-center text-ink-3 disabled:opacity-50"
-                  aria-label="Resolve selected conversations"
-                  title="Resolve"
-                >
-                  <CheckCircle2 size={15} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onBulkAction({
-                    action: "snooze",
-                    until: Date.now() + 86_400_000,
-                  })}
-                  disabled={bulkPending}
-                  className="glass-button rounded-glass flex size-8 items-center justify-center text-ink-3 disabled:opacity-50"
-                  aria-label="Snooze selected conversations"
-                  title="Snooze until tomorrow"
-                >
-                  <Clock size={15} />
-                </button>
+                <CommandActionTooltip availability={archiveCommand}>
+                  <button
+                    type="button"
+                    onClick={() => onBulkAction({ action: "archive" })}
+                    disabled={bulkPending}
+                    className="glass-button rounded-glass flex size-8 items-center justify-center text-ink-3 disabled:opacity-50"
+                    aria-label={commandLabel(
+                      archiveCommand,
+                      "Archive selected conversations",
+                    )}
+                  >
+                    <Archive size={15} />
+                  </button>
+                </CommandActionTooltip>
+                <CommandActionTooltip availability={resolveCommand}>
+                  <button
+                    type="button"
+                    onClick={() => onBulkAction({ action: "resolve" })}
+                    disabled={bulkPending}
+                    className="glass-button rounded-glass flex size-8 items-center justify-center text-ink-3 disabled:opacity-50"
+                    aria-label={commandLabel(
+                      resolveCommand,
+                      "Resolve selected conversations",
+                    )}
+                  >
+                    <CheckCircle2 size={15} />
+                  </button>
+                </CommandActionTooltip>
+                <CommandActionTooltip availability={snoozeCommand}>
+                  <button
+                    type="button"
+                    onClick={() => onBulkAction({
+                      action: "snooze",
+                      until: bulkSnoozeUntil(snoozeCommand),
+                    })}
+                    disabled={bulkPending}
+                    className="glass-button rounded-glass flex size-8 items-center justify-center text-ink-3 disabled:opacity-50"
+                    aria-label={commandLabel(
+                      snoozeCommand,
+                      "Snooze selected conversations",
+                    )}
+                  >
+                    <Clock size={15} />
+                  </button>
+                </CommandActionTooltip>
                 <AssigneeMenu
                   compact
                   value={selectedAssignee}
@@ -381,17 +446,22 @@ export default function MessageList({
                   <CheckCheck size={14} className="shrink-0 text-ink-5" />
                   Mark as read
                 </button>
-                {filter !== "archived" && (
+                {filter !== "archived" && spamCommand.status !== "hidden" && (
                   <button
                     onClick={() => {
                       onBulkAction({ action: "flag_spam" });
                       setSelectionMoreOpen(false);
                     }}
-                    disabled={bulkPending}
+                    disabled={bulkPending || spamCommand.status === "disabled"}
                     className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-[13px] text-ink-3 hover:bg-glass-button hover:text-ink-1 transition-colors disabled:opacity-50"
+                    title={
+                      spamCommand.status === "disabled"
+                        ? spamCommand.reason
+                        : spamCommand.presentation.description
+                    }
                   >
                     <Flag size={14} className="shrink-0 text-ink-5" />
-                    Flag as spam
+                    {commandLabel(spamCommand, "Flag as spam")}
                   </button>
                 )}
                 <button
@@ -406,15 +476,16 @@ export default function MessageList({
                 </button>
               </PopoverContent>
             </Popover>
-            <button
-              type="button"
-              onClick={onClearSelection}
-              className="flex size-8 items-center justify-center rounded-glass text-ink-5 hover:text-ink-1 transition-colors"
-              aria-label="Clear selection"
-              title="Clear selection"
-            >
-              <X size={15} />
-            </button>
+            <CommandActionTooltip availability={escapeCommand}>
+              <button
+                type="button"
+                onClick={onClearSelection}
+                className="flex size-8 items-center justify-center rounded-glass text-ink-5 hover:text-ink-1 transition-colors"
+                aria-label={commandLabel(escapeCommand, "Clear selection")}
+              >
+                <X size={15} />
+              </button>
+            </CommandActionTooltip>
           </div>
         ) : (
           <div className="mt-2 h-[30px] rounded-[8px] glass-button flex items-center gap-2 px-2">
@@ -426,7 +497,10 @@ export default function MessageList({
               onChange={(e) => onSearchChange(e.target.value)}
               className="flex-1 min-w-0 bg-transparent text-[13px] text-ink-2 placeholder:text-ink-6 outline-none"
             />
-            <span className="keycap shrink-0">⌘K</span>
+            <CommandKeycap
+              keycap={commandKeycap(menuCommand, { keys: ["⌘", "K"] })}
+              className="shrink-0"
+            />
           </div>
         )}
       </div>

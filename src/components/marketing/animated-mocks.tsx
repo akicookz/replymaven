@@ -7,6 +7,10 @@ import ReadingPane from "@/components/inbox/ReadingPane";
 import SidechatPane from "@/components/inbox/SidechatPane";
 import { Button } from "@/components/ui/button";
 import type { InboxSort } from "@/lib/inbox/filters";
+import {
+  createFocusCardSnapshot,
+  type FocusViewModel,
+} from "@/lib/inbox/focus-queue";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import {
   ANNA,
@@ -231,15 +235,27 @@ export function SidechatMock() {
   const sideMessages =
     shown === 1 ? [SIDECHAT_ASK] : [SIDECHAT_ASK, SIDECHAT_ANSWER];
   const status = shown === 1 ? "streaming" : "ready";
+  const focusViewModel = {
+    phase: "reviewing",
+    currentCard: createFocusCardSnapshot(MARCUS),
+    nextCard: null,
+    stackDepth: 2,
+    progress: { position: 2, total: 12 },
+    motion: "none",
+    newArrivalCount: 0,
+  } satisfies FocusViewModel;
   return (
     <InboxFrame className="h-[720px]">
       <div className="h-full min-w-0 flex-1">
         <FocusView
+          viewModel={focusViewModel}
           conversation={MARCUS}
           messages={PUBLIC_SIDECHAT_THREAD}
-          index={1}
-          total={12}
+          reducedMotion
           onExit={noop}
+          onContinue={noop}
+          onMotionFinished={noop}
+          onRollbackMotionFinished={noop}
           onSend={noop}
           onResolve={noop}
           onDeleteMessage={noop}

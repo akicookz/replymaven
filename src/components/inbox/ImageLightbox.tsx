@@ -49,6 +49,7 @@ export default function ImageLightbox({
       role="dialog"
       aria-modal="true"
       aria-label="Image viewer"
+      data-command-layer="blocking"
     >
       <img
         src={images[index]}

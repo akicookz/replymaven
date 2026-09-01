@@ -118,7 +118,8 @@ export interface AppendPublicSystemInput {
     | "snooze_ended"
     | "drafted"
     | "review_summary"
-    | "assigned";
+    | "assigned"
+    | "reopened";
   content: string;
   idempotencyKey?: string;
 }
@@ -376,7 +377,10 @@ export interface PublicConversationStore {
   takeHumanOwnership(projectId: string, conversationId: string): Promise<{ status: PublicConversationStatus; chatState: string | null } | null>;
   resolveByAi(projectId: string, conversationId: string): Promise<boolean>;
   setStatus(projectId: string, conversationId: string, status: PublicConversationStatus, closeReason?: PublicConversationRecord["closeReason"]): Promise<PublicConversationRecord | null>;
-  reopen(projectId: string, conversationId: string, status?: "active" | "agent_replied"): Promise<PublicConversationRecord | null>;
+  reopen(projectId: string, conversationId: string, actor?: {
+    assigneeId: string | null;
+    actorName: string | null;
+  }): Promise<PublicConversationRecord | null>;
   prepareContactSupportOwnership(projectId: string, conversationId: string): Promise<"waiting_agent" | "agent_replied" | null>;
   closeOpenAsSpam(projectId: string, visitorId: string, visitorEmail?: string | null): Promise<string[]>;
   claimTeamRequest(input: PublicTeamRequestClaimInput): Promise<PublicTeamRequestClaimResult>;
@@ -439,7 +443,6 @@ export interface PublicConversationStore {
   markPublicReadUpTo(conversationId: string, messageId: string, projectId?: string): Promise<string[]>;
   deletePublicAgentMessage(conversationId: string, messageId: string, projectId?: string): Promise<DeletePublicMessageResult>;
   updateConversationStatus(conversationId: string, projectId: string, status: PublicConversationStatus, closeReason?: PublicConversationRecord["closeReason"]): Promise<void>;
-  reopenConversation(conversationId: string, projectId: string, status?: "active" | "agent_replied"): Promise<PublicConversationRecord | null>;
   transitionChatOwnership(conversationId: string, projectId: string, event: ChatOwnershipEvent): Promise<PublicConversationStatus | null>;
   updateConversation(conversationId: string, projectId: string, input: { visitorName?: string; visitorEmail?: string; metadata?: string }): Promise<PublicConversationRecord | null>;
   updateConversationEmail(conversationId: string, projectId: string, email: string): Promise<void>;

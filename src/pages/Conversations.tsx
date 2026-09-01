@@ -4,6 +4,7 @@ import {
   useRef,
   useMemo,
   useCallback,
+  useReducer,
 } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
@@ -31,12 +32,23 @@ import type {
 } from "../../shared/public-chat-agent";
 import type { SafeSidechatDataPart } from "@/lib/inbox/sidechat-message-adapter";
 import { cn } from "@/lib/utils";
+import { useSession } from "@/lib/auth-client";
 import { serializeMessageImageUrls } from "../../shared/message-images";
 import {
   parseInboxFilter,
   passesInboxFilter,
   type InboxSort,
 } from "@/lib/inbox/filters";
+import {
+  INITIAL_FOCUS_QUEUE_STATE,
+  createFocusCardSnapshot,
+  currentFocusConversationId,
+  reduceFocusQueue,
+  selectFocusDetailIfCurrent,
+  selectFocusViewModel,
+  type FocusDepartureAction,
+  type FocusQueueState,
+} from "@/lib/inbox/focus-queue";
 import {
   moveRangeSelection,
   selectInclusiveRange,
@@ -83,11 +95,13 @@ import { looksLikeAgentBotNameCommand } from "@/lib/inbox/bot-name-command";
 import InboxEmptyPane from "@/components/inbox/InboxEmptyPane";
 import MessageList from "@/components/inbox/MessageList";
 import ReadingPane from "@/components/inbox/ReadingPane";
+import ConversationSearchDialog from "@/components/inbox/ConversationSearchDialog";
 import FocusView, { FocusViewSkeleton } from "@/components/inbox/FocusView";
 import FocusSidechatLayout from "@/components/inbox/FocusSidechatLayout";
 import SidechatPane from "@/components/inbox/SidechatPane";
 import CustomerFormDialog from "@/components/customers/CustomerFormDialog";
 import CustomerPickerDialog from "@/components/customers/CustomerPickerDialog";
+import { useRegisterInboxCommands } from "@/components/commands/DashboardCommandProvider";
 import {
   applyConversationCustomerResult,
   customerKeys,
@@ -95,6 +109,16 @@ import {
   invalidateCustomerProjectQueries,
   setConversationCustomer,
 } from "@/lib/customers";
+import {
+  ALL_INBOX_CAPABILITIES,
+  type DashboardCommandIntent,
+  type InboxCommandScope,
+} from "@/lib/commands/dashboard-command-domain";
+import { buildInboxSelection } from "@/lib/commands/inbox-command-lookup";
+import {
+  previewFocusConversationAction,
+  type FocusConversationAction,
+} from "@/lib/inbox/focus-action-preview";
 
 // ─── Wire shapes (orchestrator-local) ──────────────────────────────────────────
 
@@ -117,6 +141,13 @@ interface ConversationDetail {
 interface BulkConversationMutationInput {
   conversationIds: string[];
   action: BulkConversationAction;
+}
+
+interface FocusActionExecution {
+  conversation: Conversation;
+  action: FocusConversationAction;
+  departureAction: FocusDepartureAction;
+  mutate: () => Promise<unknown>;
 }
 
 interface ConversationDirectoryAgentBridgeProps {
@@ -391,6 +422,13 @@ function optionalPublicStateIso(value: number | null): string | null {
   return value === null ? null : new Date(value).toISOString();
 }
 
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
 // Priority sort rank (absent priority defaults to medium, matching the schema).
 function priorityRank(convo: Conversation): number {
   switch (convo.priority) {
@@ -452,6 +490,9 @@ function Conversations() {
   const { projectId } = useParams<{ projectId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
+  const { data: session } = useSession();
+  const currentUserId = session?.user.id ?? null;
+  const currentUserName = session?.user.name?.trim() || "Someone";
 
   // Active inbox filter is owned by the URL (the sidebar deep-links to
   // `?filter=<id>`). `all` is the old All Conversations id.
@@ -500,6 +541,15 @@ function Conversations() {
   const view = !isMobileViewport && searchParams.get("focus") === "true"
     ? "focus"
     : "split";
+  const [focusQueueState, dispatchFocusQueue] = useReducer(
+    reduceFocusQueue,
+    INITIAL_FOCUS_QUEUE_STATE,
+  );
+  const focusQueueStateRef = useRef<FocusQueueState>(focusQueueState);
+  focusQueueStateRef.current = focusQueueState;
+  const focusConversationId = currentFocusConversationId(focusQueueState);
+  const activeConversationId =
+    view === "focus" ? focusConversationId : selectedConvo;
   const setView = useCallback(
     (nextView: "split" | "focus") => {
       setSearchParams(
@@ -545,6 +595,7 @@ function Conversations() {
   // Sync selectedConvo <-> ?id= URL param so deep links work and shares are
   // stable. Other params (e.g. ?filter=) are preserved.
   useEffect(() => {
+    if (view !== "split") return;
     const current = searchParams.get("id");
     if (selectedConvo && current !== selectedConvo) {
       const next = new URLSearchParams(searchParams);
@@ -556,7 +607,31 @@ function Conversations() {
       setSearchParams(next, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedConvo]);
+  }, [selectedConvo, view]);
+
+  useEffect(() => {
+    if (view !== "focus" || focusQueueState.kind === "inactive") return;
+    setSearchParams(
+      (current) => {
+        const currentId = current.get("id");
+        const alreadyMatches =
+          current.get("focus") === "true" &&
+          currentId === focusConversationId;
+        if (alreadyMatches) return current;
+        const next = new URLSearchParams(current);
+        next.set("focus", "true");
+        if (focusConversationId) next.set("id", focusConversationId);
+        else next.delete("id");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [
+    focusConversationId,
+    focusQueueState.kind,
+    setSearchParams,
+    view,
+  ]);
 
   // One-shot deep-link target from ?msg= (Telegram/email/ping links). Cleared
   // from the URL immediately so refreshes don't re-pulse. highlightConvRef
@@ -581,7 +656,9 @@ function Conversations() {
   useEffect(() => {
     const urlId = searchParams.get("id");
     const urlMsg = searchParams.get("msg");
-    if (urlId && urlId !== selectedConvo) setSelectedConvo(urlId);
+    if (view !== "focus" && urlId && urlId !== selectedConvo) {
+      setSelectedConvo(urlId);
+    }
     if (urlMsg) {
       setHighlightMsgId(urlMsg);
       // Anchor the highlight to the conversation the URL targeted so the
@@ -592,17 +669,22 @@ function Conversations() {
       setSearchParams(next, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, [searchParams, view]);
 
   useEffect(() => {
-    if (selectedConvo !== highlightConvRef.current) setHighlightMsgId(null);
-  }, [selectedConvo]);
+    if (activeConversationId !== highlightConvRef.current) {
+      setHighlightMsgId(null);
+    }
+  }, [activeConversationId]);
 
   // ── Search & pagination state ──────────────────────────────────────────
   // searchQuery is the raw input value (controlled); debouncedSearch is what
   // the query key and fetch URL use, updated after a 300ms idle window.
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [threadSearch, setThreadSearch] = useState("");
+  const [threadSearchOpen, setThreadSearchOpen] = useState(false);
+  const [threadSearchMatchIndex, setThreadSearchMatchIndex] = useState(0);
   // listLimit grows by 25 on each "Load more" click. We keep a flat response
   // shape (not useInfiniteQuery) so the /updates patch logic stays unchanged.
   const [listLimit, setListLimit] = useState(25);
@@ -667,6 +749,7 @@ function Conversations() {
     data: convosPage,
     isPending: convosLoading,
     isPlaceholderData,
+    isError: convosError,
   } = useQuery<ConversationsPage>({
     queryKey: ["conversations", projectId, filter, debouncedSearch, listLimit],
     queryFn: async () => {
@@ -701,10 +784,10 @@ function Conversations() {
 
   // ── Detail query (drives the reading pane / focus thread) ────────────────
   const { data: convoDetail, isLoading: detailLoading } = useQuery<ConversationDetail>({
-    queryKey: ["conversation-detail", selectedConvo],
+    queryKey: ["conversation-detail", activeConversationId],
     queryFn: async () => {
       const res = await fetch(
-        `/api/projects/${projectId}/conversations/${selectedConvo}`,
+        `/api/projects/${projectId}/conversations/${activeConversationId}`,
       );
       if (!res.ok) {
         const body = await res.text().catch(() => "");
@@ -714,7 +797,7 @@ function Conversations() {
       }
       return res.json();
     },
-    enabled: !!selectedConvo,
+    enabled: Boolean(activeConversationId),
     retry: 1,
     // Detail is kept fresh in real time by the Agent session; cache 60s so
     // revisiting a conversation is instant.
@@ -724,8 +807,8 @@ function Conversations() {
 
   const publicChatSession = usePublicChatSession({
     projectId,
-    conversationId: selectedConvo,
-    enabled: Boolean(selectedConvo),
+    conversationId: activeConversationId,
+    enabled: Boolean(activeConversationId),
   });
 
   const handleDirectoryEvent = useCallback((event: MavenProjectEvent) => {
@@ -832,21 +915,29 @@ function Conversations() {
   // Reset the composer draft when switching conversations.
   useEffect(() => {
     setDraft("");
-  }, [selectedConvo]);
+  }, [activeConversationId]);
+
+  useEffect(() => {
+    setThreadSearch("");
+    setThreadSearchOpen(false);
+    setThreadSearchMatchIndex(0);
+  }, [activeConversationId]);
 
   // ── Mutations ─────────────────────────────────────────────────────────────
   const sendReply = useMutation({
     mutationFn: async ({
+      conversationId,
       content,
       imageUrls,
       idempotencyKey,
     }: {
+      conversationId: string;
       content: string;
       imageUrls?: string[];
       idempotencyKey: string;
     }) => {
       const res = await fetch(
-        `/api/projects/${projectId}/conversations/${selectedConvo}/reply`,
+        `/api/projects/${projectId}/conversations/${conversationId}/reply`,
         {
           method: "POST",
           headers: {
@@ -867,16 +958,21 @@ function Conversations() {
       }
       return data;
     },
-    onMutate: async ({ content, imageUrls, idempotencyKey }) => {
+    onMutate: async ({
+      conversationId,
+      content,
+      imageUrls,
+      idempotencyKey,
+    }) => {
       await queryClient.cancelQueries({
-        queryKey: ["conversation-detail", selectedConvo],
+        queryKey: ["conversation-detail", conversationId],
       });
       const previous = queryClient.getQueryData<ConversationDetail>([
         "conversation-detail",
-        selectedConvo,
+        conversationId,
       ]);
       queryClient.setQueryData<ConversationDetail | undefined>(
-        ["conversation-detail", selectedConvo],
+        ["conversation-detail", conversationId],
         (old) => {
           if (!old) return old;
           if (
@@ -909,18 +1005,18 @@ function Conversations() {
       setDraft("");
       return { previous };
     },
-    onError: (err: Error, _vars, ctx) => {
+    onError: (err: Error, variables, ctx) => {
       if (ctx?.previous) {
         queryClient.setQueryData(
-          ["conversation-detail", selectedConvo],
+          ["conversation-detail", variables.conversationId],
           ctx.previous,
         );
       }
       toast.error(err.message || "Failed to send reply");
     },
-    onSettled: () => {
+    onSettled: (_data, _error, variables) => {
       queryClient.invalidateQueries({
-        queryKey: ["conversation-detail", selectedConvo],
+        queryKey: ["conversation-detail", variables.conversationId],
       });
       queryClient.invalidateQueries({
         queryKey: ["conversations", projectId],
@@ -1099,9 +1195,9 @@ function Conversations() {
     },
   });
 
-  // Toggle-off for Resolve / Flag-as-spam: bring a closed conversation back to
-  // active (status "active", closeReason cleared). Mirrors closeConversation's
-  // optimistic patch of both the detail cache and the local list.
+  // Toggle-off for Resolve / Flag-as-spam: claim the thread, bump activity,
+  // and write a reopen pill. Mirrors closeConversation's optimistic patch of
+  // both the detail cache and the local list.
   const reopenConversation = useMutation({
     mutationFn: async ({ convId }: { convId: string }) => {
       const res = await fetch(
@@ -1120,6 +1216,15 @@ function Conversations() {
         convId,
       ]);
       const previousList = loadedConversations;
+      const now = new Date().toISOString();
+      const reopenContent = `${currentUserName} reopened this conversation`;
+      const reopenMessage: Message = {
+        id: `optimistic-reopen-${convId}`,
+        role: "system",
+        content: reopenContent,
+        sources: JSON.stringify({ systemKind: "reopened" }),
+        createdAt: now,
+      };
       queryClient.setQueryData<ConversationDetail | undefined>(
         ["conversation-detail", convId],
         (old) =>
@@ -1128,15 +1233,41 @@ function Conversations() {
                 ...old,
                 conversation: {
                   ...old.conversation,
-                  status: "active",
+                  status: "waiting_agent",
                   closeReason: null,
+                  assigneeId: currentUserId,
+                  lastActivityAt: now,
+                  updatedAt: now,
                 },
+                messages: old.messages.some((message) =>
+                  message.sources?.includes("\"reopened\"") &&
+                  message.content === reopenContent
+                )
+                  ? old.messages
+                  : [...old.messages, reopenMessage],
               }
             : old,
       );
       setLoadedConversations((prev) =>
         prev.map((c) =>
-          c.id === convId ? { ...c, status: "active", closeReason: null } : c,
+          c.id === convId
+            ? {
+                ...c,
+                status: "waiting_agent",
+                closeReason: null,
+                assigneeId: currentUserId,
+                lastActivityAt: now,
+                updatedAt: now,
+                lastMessage: {
+                  id: reopenMessage.id,
+                  role: "system",
+                  content: reopenContent,
+                  senderName: null,
+                  emailedAt: null,
+                  createdAt: now,
+                },
+              }
+            : c,
         ),
       );
       return { previousDetail, previousList };
@@ -1179,7 +1310,47 @@ function Conversations() {
       if (!res.ok) throw new Error("Failed to snooze conversation");
       return res.json();
     },
-    onError: () => toast.error("Failed to snooze conversation"),
+    onMutate: async ({ convId, until }) => {
+      await queryClient.cancelQueries({
+        queryKey: ["conversation-detail", convId],
+      });
+      const previousDetail = queryClient.getQueryData<ConversationDetail>([
+        "conversation-detail",
+        convId,
+      ]);
+      const previousList = loadedConversations;
+      const snoozedUntil = until ? new Date(until).toISOString() : null;
+      queryClient.setQueryData<ConversationDetail | undefined>(
+        ["conversation-detail", convId],
+        (old) =>
+          old
+            ? {
+                ...old,
+                conversation: { ...old.conversation, snoozedUntil },
+              }
+            : old,
+      );
+      setLoadedConversations((current) =>
+        current.map((conversation) =>
+          conversation.id === convId
+            ? { ...conversation, snoozedUntil }
+            : conversation,
+        ),
+      );
+      return { previousDetail, previousList };
+    },
+    onError: (_error, { convId }, context) => {
+      if (context?.previousDetail) {
+        queryClient.setQueryData(
+          ["conversation-detail", convId],
+          context.previousDetail,
+        );
+      }
+      if (context?.previousList) {
+        setLoadedConversations(context.previousList);
+      }
+      toast.error("Failed to snooze conversation");
+    },
     onSettled: (_data, _error, { convId }) => {
       queryClient.invalidateQueries({ queryKey: ["conversations", projectId] });
       queryClient.invalidateQueries({
@@ -1456,7 +1627,11 @@ function Conversations() {
         );
       }
 
-      if (selectedConvo && updatedIds.has(selectedConvo)) {
+      if (
+        view === "split" &&
+        selectedConvo &&
+        updatedIds.has(selectedConvo)
+      ) {
         const current = convoDetail?.conversation ??
           loadedConversations.find((conversation) => conversation.id === selectedConvo);
         if (current) {
@@ -1505,13 +1680,13 @@ function Conversations() {
   // visitor message arrives in view), so the open thread never flips back to
   // unread under the agent. Persisted like handleMarkAllRead.
   useEffect(() => {
-    if (!selectedConvo) return;
-    const conv = loadedConversations.find((c) => c.id === selectedConvo);
+    if (!activeConversationId) return;
+    const conv = loadedConversations.find((c) => c.id === activeConversationId);
     if (!conv || conv.lastMessage?.role !== "visitor") return;
     const activity = getActivityMs(conv);
     setReadMarks((prev) => {
-      if ((prev[selectedConvo] ?? 0) >= activity) return prev;
-      const next = { ...prev, [selectedConvo]: activity };
+      if ((prev[activeConversationId] ?? 0) >= activity) return prev;
+      const next = { ...prev, [activeConversationId]: activity };
       if (projectId) {
         try {
           localStorage.setItem(readKey(projectId), JSON.stringify(next));
@@ -1521,7 +1696,7 @@ function Conversations() {
       }
       return next;
     });
-  }, [selectedConvo, loadedConversations, projectId]);
+  }, [activeConversationId, loadedConversations, projectId]);
 
   // Apply the "unread only" filter and the chosen sort over the loaded page.
   const conversations = useMemo(() => {
@@ -1538,25 +1713,6 @@ function Conversations() {
   }, [loadedConversations, unreadOnly, sort, isUnread]);
 
   useEffect(() => {
-    if (
-      view !== "focus" ||
-      selectedConvo ||
-      convosLoading ||
-      isPlaceholderData
-    ) {
-      return;
-    }
-    const firstConversation = conversations[0];
-    if (firstConversation) setSelectedConvo(firstConversation.id);
-  }, [
-    conversations,
-    convosLoading,
-    isPlaceholderData,
-    selectedConvo,
-    view,
-  ]);
-
-  useEffect(() => {
     const visibleIds = new Set(conversations.map((conversation) => conversation.id));
     setSelectedIds((prev) => {
       const next = new Set([...prev].filter((id) => visibleIds.has(id)));
@@ -1571,22 +1727,246 @@ function Conversations() {
   }, [conversations, selectionAnchorId, selectionFocusId]);
 
   const counts = convosPage?.counts ?? EMPTY_COUNTS;
+  const focusHasMore = convosPage?.hasMore ?? false;
+  const focusKnownTotal =
+    unreadOnly || debouncedSearch.length > 0
+      ? conversations.length + (focusHasMore ? 1 : 0)
+      : counts[filter];
+  const focusCards = useMemo(
+    () => {
+      const nowMs = Date.now();
+      return conversations
+        .filter((conversation) =>
+          passesInboxFilter(filter, conversation, nowMs),
+        )
+        .map(createFocusCardSnapshot);
+    },
+    [conversations, filter],
+  );
+  const focusViewModel = selectFocusViewModel(focusQueueState);
+  const focusReducedMotion =
+    focusQueueState.kind === "inactive"
+      ? false
+      : focusQueueState.reducedMotion;
+  const focusSessionKey = [
+    projectId ?? "",
+    filter,
+    debouncedSearch,
+    sort,
+    unreadOnly ? "unread" : "all",
+  ].join(":");
+  const focusSessionKeyRef = useRef<string | null>(null);
+  const focusRefillTargetRef = useRef<number | null>(null);
+  const focusNearEndLimitRef = useRef<number | null>(null);
+  const previousFocusKindRef = useRef<FocusQueueState["kind"]>("inactive");
+
+  useEffect(() => {
+    if (
+      view !== "focus" ||
+      convosLoading ||
+      isPlaceholderData ||
+      focusSessionKeyRef.current === focusSessionKey
+    ) {
+      return;
+    }
+    setSelectedIds(new Set());
+    setSelectionAnchorId(null);
+    setSelectionFocusId(null);
+    focusSessionKeyRef.current = focusSessionKey;
+    dispatchFocusQueue({
+      type: "ENTER",
+      visible: focusCards,
+      selectedId: searchParams.get("id") ?? selectedConvo,
+      knownTotal: focusKnownTotal,
+      hasMore: focusHasMore,
+      reducedMotion: prefersReducedMotion(),
+    });
+  }, [
+    convosLoading,
+    focusCards,
+    focusHasMore,
+    focusKnownTotal,
+    focusSessionKey,
+    isPlaceholderData,
+    searchParams,
+    selectedConvo,
+    view,
+  ]);
+
+  useEffect(() => {
+    if (view === "focus") return;
+    focusSessionKeyRef.current = null;
+    focusRefillTargetRef.current = null;
+    focusNearEndLimitRef.current = null;
+    if (focusQueueState.kind === "inactive") return;
+    const currentId = currentFocusConversationId(focusQueueState);
+    setSelectedConvo(currentId);
+    dispatchFocusQueue({ type: "EXIT" });
+  }, [focusQueueState, view]);
+
+  useEffect(() => {
+    if (focusQueueState.kind === "departing") {
+      setSidechatOpen(false);
+    }
+  }, [focusQueueState.kind]);
+
+  useEffect(() => {
+    const previousKind = previousFocusKindRef.current;
+    previousFocusKindRef.current = focusQueueState.kind;
+    if (
+      view !== "focus" ||
+      previousKind !== "rolling-back" ||
+      focusQueueState.kind !== "reviewing"
+    ) {
+      return;
+    }
+    dispatchFocusQueue({
+      type: "VISIBLE_LIST_SYNC",
+      visible: focusCards,
+      knownTotal: focusKnownTotal,
+      hasMore: focusHasMore,
+    });
+  }, [
+    focusCards,
+    focusHasMore,
+    focusKnownTotal,
+    focusQueueState.kind,
+    view,
+  ]);
+
+  useEffect(() => {
+    if (
+      view !== "focus" ||
+      focusQueueStateRef.current.kind === "inactive" ||
+      convosLoading ||
+      isPlaceholderData
+    ) {
+      return;
+    }
+    dispatchFocusQueue({
+      type: "VISIBLE_LIST_SYNC",
+      visible: focusCards,
+      knownTotal: focusKnownTotal,
+      hasMore: focusHasMore,
+    });
+  }, [
+    convosLoading,
+    focusCards,
+    focusHasMore,
+    focusKnownTotal,
+    isPlaceholderData,
+    view,
+  ]);
+
+  useEffect(() => {
+    if (
+      view !== "focus" ||
+      (focusQueueState.kind !== "loading" &&
+        focusQueueState.kind !== "checking-queue")
+    ) {
+      focusRefillTargetRef.current = null;
+      return;
+    }
+    const target = focusRefillTargetRef.current;
+    if (target == null) {
+      if (focusQueueState.refillFailed) return;
+      const nextLimit = listLimit + 25;
+      focusRefillTargetRef.current = nextLimit;
+      setListLimit(nextLimit);
+      return;
+    }
+    if (listLimit < target || isPlaceholderData || convosLoading) return;
+    focusRefillTargetRef.current = null;
+    if (convosError) {
+      dispatchFocusQueue({ type: "QUEUE_REFILL_FAILED" });
+      return;
+    }
+    dispatchFocusQueue({
+      type: "QUEUE_REFILL_RETURNED",
+      visible: focusCards,
+      knownTotal: focusKnownTotal,
+      hasMore: focusHasMore,
+    });
+  }, [
+    convosError,
+    convosLoading,
+    focusCards,
+    focusHasMore,
+    focusKnownTotal,
+    focusQueueState,
+    isPlaceholderData,
+    listLimit,
+    view,
+  ]);
+
+  useEffect(() => {
+    if (
+      view !== "focus" ||
+      focusQueueState.kind !== "reviewing" ||
+      convosLoading ||
+      convosError ||
+      isPlaceholderData
+    ) {
+      return;
+    }
+    const currentId = currentFocusConversationId(focusQueueState);
+    const currentIndex = focusCards.findIndex((card) => card.id === currentId);
+    const nearEnd = currentIndex >= focusCards.length - 2;
+    if (currentIndex < 0 || !nearEnd || !focusHasMore) return;
+    if (focusNearEndLimitRef.current === listLimit) return;
+    focusNearEndLimitRef.current = listLimit;
+    setListLimit((current) => current + 25);
+  }, [
+    convosLoading,
+    convosError,
+    focusCards,
+    focusHasMore,
+    focusQueueState,
+    isPlaceholderData,
+    listLimit,
+    view,
+  ]);
+
   // Always render the thread in true chronological order. The server returns
   // messages sorted by full createdAt, but the cached array can drift out of
   // order as live WS messages append onto a stale cache that spans days — so
   // sort by full timestamp here rather than trusting array order (which made
   // messages from different days interleave by time-of-day).
+  const activeConversationDetail =
+    view === "focus"
+      ? selectFocusDetailIfCurrent(focusQueueState, convoDetail)
+      : (convoDetail ?? null);
   const messages = useMemo(
     () =>
-      [...(convoDetail?.messages ?? [])].sort(
+      [...(activeConversationDetail?.messages ?? [])].sort(
         (a, b) =>
           new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
       ),
-    [convoDetail?.messages],
+    [activeConversationDetail?.messages],
   );
+  const threadSearchQuery = threadSearch.trim().toLowerCase();
+  const threadSearchMatches = useMemo(() => {
+    if (!threadSearchQuery) return [];
+    return messages.filter(
+      (message) =>
+        message.role !== "system" &&
+        message.content.toLowerCase().includes(threadSearchQuery),
+    );
+  }, [messages, threadSearchQuery]);
+  const threadSearchMatchIds = threadSearchMatches.map((message) => message.id);
+  const threadSearchSafeIndex = threadSearchMatchIds.length
+    ? Math.min(threadSearchMatchIndex, threadSearchMatchIds.length - 1)
+    : 0;
+  const threadSearchActiveMatchId =
+    threadSearchMatchIds[threadSearchSafeIndex] ?? null;
+
+  useEffect(() => {
+    setThreadSearchMatchIndex(0);
+  }, [threadSearchQuery]);
+
   const selected =
-    convoDetail?.conversation ??
-    conversations.find((c) => c.id === selectedConvo) ??
+    activeConversationDetail?.conversation ??
+    conversations.find((c) => c.id === activeConversationId) ??
     null;
   const selectedIndex = selected
     ? conversations.findIndex((c) => c.id === selected.id)
@@ -1602,12 +1982,12 @@ function Conversations() {
     enabled: Boolean(projectId && selectedCustomerId),
   });
 
-  const sidechatDraft = selectedConvo
-    ? sidechatDrafts[selectedConvo] ?? ""
+  const sidechatDraft = activeConversationId
+    ? sidechatDrafts[activeConversationId] ?? ""
     : "";
   const sendingMavenDraftMessageId =
     sendMavenDraft.isPending &&
-      sendMavenDraft.variables?.conversationId === selectedConvo
+      sendMavenDraft.variables?.conversationId === activeConversationId
       ? sendMavenDraft.variables.sourceMessageId
       : null;
   const customerFirstName = (
@@ -1718,9 +2098,9 @@ function Conversations() {
   }
 
   function handleCustomerSelected(customer: CustomerListItem): void {
-    if (!selectedConvo) return;
+    if (!activeConversationId) return;
     setCustomerMutation.mutate({
-      conversationId: selectedConvo,
+      conversationId: activeConversationId,
       customerId: customer.id,
     });
   }
@@ -1732,8 +2112,9 @@ function Conversations() {
     const text = (content ?? draft).trim();
     const imageUrls = opts?.imageUrls ?? [];
     if (!text && imageUrls.length === 0) return;
-    if (!selectedConvo) return;
+    if (!activeConversationId) return;
     sendReply.mutate({
+      conversationId: activeConversationId,
       content: text,
       imageUrls,
       idempotencyKey: crypto.randomUUID(),
@@ -1741,13 +2122,13 @@ function Conversations() {
   }
 
   function handleSendEmail(messageId: string) {
-    if (!selectedConvo) return;
-    sendEmail.mutate({ conversationId: selectedConvo, messageId });
+    if (!activeConversationId) return;
+    sendEmail.mutate({ conversationId: activeConversationId, messageId });
   }
 
   function setSelectedSidechatDraft(value: SetStateAction<string>): void {
-    if (!selectedConvo) return;
-    const conversationId = selectedConvo;
+    if (!activeConversationId) return;
+    const conversationId = activeConversationId;
     setSidechatDrafts((current) => {
       const currentDraft = current[conversationId] ?? "";
       const nextDraft = typeof value === "function"
@@ -1759,11 +2140,17 @@ function Conversations() {
   }
 
   function handleStartSidechat(): void {
-    if (!selectedConvo || !selected) return;
+    if (!activeConversationId || !selected) return;
+    if (
+      view === "focus" &&
+      focusQueueStateRef.current.kind !== "reviewing"
+    ) {
+      return;
+    }
     const entry = planSidechatEntry({
       archived: Boolean(selected.archivedAt),
       exists: selectedSidechatExists,
-      conversationId: selectedConvo,
+      conversationId: activeConversationId,
       messageId: crypto.randomUUID(),
       publicDraft: draft,
     });
@@ -1792,11 +2179,15 @@ function Conversations() {
   }
 
   function handleSendAsMaven(sourceMessageId: string): void {
-    if (!selectedConvo || selected?.archivedAt || sendMavenDraft.isPending) {
+    if (
+      !activeConversationId ||
+      selected?.archivedAt ||
+      sendMavenDraft.isPending
+    ) {
       return;
     }
     sendMavenDraft.mutate({
-      conversationId: selectedConvo,
+      conversationId: activeConversationId,
       sourceMessageId,
     });
   }
@@ -1819,7 +2210,7 @@ function Conversations() {
     const result = reduceAcceptedSidechatTransfer({
       transfer: pendingSidechatTransfer,
       acceptedMessageId: messageId,
-      selectedConversationId: selectedConvo,
+      selectedConversationId: activeConversationId,
       currentPublicDraft: draft,
     });
     if (result.nextDraft !== draft) setDraft(result.nextDraft);
@@ -1828,29 +2219,109 @@ function Conversations() {
     }
   }
 
+  async function runFocusAwareAction(
+    execution: FocusActionExecution,
+  ): Promise<void> {
+    const nowMs = Date.now();
+    const preview = previewFocusConversationAction(
+      execution.conversation,
+      execution.action,
+      nowMs,
+    );
+    const currentState = focusQueueStateRef.current;
+    const isCurrentFocusConversation =
+      view === "focus" &&
+      currentState.kind === "reviewing" &&
+      currentFocusConversationId(currentState) === execution.conversation.id;
+    if (view === "focus" && !isCurrentFocusConversation) return;
+    const leavesFilter =
+      isCurrentFocusConversation &&
+      !passesInboxFilter(filter, preview, nowMs);
+
+    if (!leavesFilter) {
+      await execution.mutate().catch(() => undefined);
+      return;
+    }
+
+    const transactionId = crypto.randomUUID();
+    dispatchFocusQueue({
+      type: "DEPARTURE_STARTED",
+      transactionId,
+      action: execution.departureAction,
+      reducedMotion: prefersReducedMotion(),
+    });
+    setSidechatOpen(false);
+
+    try {
+      await execution.mutate();
+      dispatchFocusQueue({ type: "MUTATION_SUCCEEDED", transactionId });
+    } catch {
+      dispatchFocusQueue({ type: "MUTATION_FAILED", transactionId });
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["conversation-detail", execution.conversation.id],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["conversations", projectId],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["inbox-counts", projectId],
+        }),
+      ]);
+    }
+  }
+
   function handleResolve(convId: string) {
     const conv = findConv(convId);
-    // Lit (resolved, i.e. closed for a non-spam reason) → reopen; else resolve.
-    if (conv && conv.status === "closed" && conv.closeReason !== "spam") {
-      reopenConversation.mutate({ convId });
-    } else {
-      closeConversation.mutate({ convId, closeReason: "resolved" });
+    if (!conv) return;
+    if (conv.status === "closed" && conv.closeReason !== "spam") {
+      void runFocusAwareAction({
+        conversation: conv,
+        action: { type: "reopen" },
+        departureAction: "reopen",
+        mutate: () => reopenConversation.mutateAsync({ convId }),
+      });
+      return;
     }
+    void runFocusAwareAction({
+      conversation: conv,
+      action: { type: "resolve" },
+      departureAction: "resolve",
+      mutate: () =>
+        closeConversation.mutateAsync({ convId, closeReason: "resolved" }),
+    });
   }
 
   function handleFlagSpam(convId: string) {
     const conv = findConv(convId);
-    // Lit (already flagged as spam) → reopen / un-flag; else flag.
-    if (conv?.closeReason === "spam") {
-      reopenConversation.mutate({ convId });
-    } else {
-      closeConversation.mutate({ convId, closeReason: "spam" });
+    if (!conv) return;
+    if (conv.closeReason === "spam") {
+      void runFocusAwareAction({
+        conversation: conv,
+        action: { type: "unflag" },
+        departureAction: "unflag",
+        mutate: () => reopenConversation.mutateAsync({ convId }),
+      });
+      return;
     }
+    void runFocusAwareAction({
+      conversation: conv,
+      action: { type: "spam" },
+      departureAction: "spam",
+      mutate: () =>
+        closeConversation.mutateAsync({ convId, closeReason: "spam" }),
+    });
   }
 
   function handleSnooze(convId: string, until: number | null) {
-    // until === null is the un-snooze path (the header sends it when snoozed).
-    snoozeConversation.mutate({ convId, until });
+    const conv = findConv(convId);
+    if (!conv) return;
+    void runFocusAwareAction({
+      conversation: conv,
+      action: { type: "snooze", until },
+      departureAction: until === null ? "unsnooze" : "snooze",
+      mutate: () => snoozeConversation.mutateAsync({ convId, until }),
+    });
   }
 
   function handleSetPriority(
@@ -1933,9 +2404,17 @@ function Conversations() {
     action: "archive" | "unarchive",
   ) {
     if (bulkConversationMutation.isPending) return;
-    bulkConversationMutation.mutate({
-      conversationIds: [convId],
-      action: { action },
+    const conv = findConv(convId);
+    if (!conv) return;
+    void runFocusAwareAction({
+      conversation: conv,
+      action: { type: action },
+      departureAction: action,
+      mutate: () =>
+        bulkConversationMutation.mutateAsync({
+          conversationIds: [convId],
+          action: { action },
+        }),
     });
   }
 
@@ -1993,15 +2472,15 @@ function Conversations() {
   }
 
   async function handleDeleteMessage(messageId: string) {
-    if (!selectedConvo) return;
+    if (!activeConversationId) return;
     try {
       const res = await fetch(
-        `/api/projects/${projectId}/conversations/${selectedConvo}/messages/${messageId}`,
+        `/api/projects/${projectId}/conversations/${activeConversationId}/messages/${messageId}`,
         { method: "DELETE" },
       );
       if (!res.ok) throw new Error("Failed to delete message");
       queryClient.invalidateQueries({
-        queryKey: ["conversation-detail", selectedConvo],
+        queryKey: ["conversation-detail", activeConversationId],
       });
       toast.success("Message deleted");
     } catch {
@@ -2010,100 +2489,252 @@ function Conversations() {
   }
 
   function handleBlock(convId: string) {
-    // Look up the conversation to get visitor identifiers. Prefer the detail
-    // cache (most current) but only when its id matches the target — a stale
-    // detail cache during a navigation/mutation race must not ban the wrong
-    // visitor. Fall back to the list otherwise.
     const conv =
       (convoDetail?.conversation?.id === convId
         ? convoDetail.conversation
         : null) ?? conversations.find((c) => c.id === convId);
     if (!conv) return;
-    // Lit (visitor already blocked) → unblock; else block. visitorBlocked is
-    // only populated on the detail cache, so the toggle-off path is reachable
-    // only for the open conversation (which is exactly where the icon shows).
     if (conv.visitorBlocked) {
-      unblockVisitor.mutate({ convId });
+      void runFocusAwareAction({
+        conversation: conv,
+        action: { type: "unblock" },
+        departureAction: "unblock",
+        mutate: () => unblockVisitor.mutateAsync({ convId }),
+      });
       return;
     }
-    blockVisitor.mutate({
-      visitorId: conv.visitorId,
-      ...(conv.visitorEmail ? { visitorEmail: conv.visitorEmail } : {}),
-      conversationId: convId,
+    void runFocusAwareAction({
+      conversation: conv,
+      action: { type: "block" },
+      departureAction: "block",
+      mutate: () =>
+        blockVisitor.mutateAsync({
+          visitorId: conv.visitorId,
+          ...(conv.visitorEmail ? { visitorEmail: conv.visitorEmail } : {}),
+          conversationId: convId,
+        }),
     });
   }
 
-  // ── Keyboard navigation ───────────────────────────────────────────────────
-  useEffect(() => {
-    function selectRelative(delta: number) {
-      if (conversations.length === 0) return;
-      const newIndex = Math.max(
-        0,
-        Math.min(conversations.length - 1, selectedIndex + delta),
-      );
+  function selectRelative(delta: number) {
+    if (view === "focus") {
       clearBulkSelection();
-      setSelectedConvo(conversations[newIndex].id);
+      dispatchFocusQueue({
+        type: "MOVE",
+        direction: delta > 0 ? "next" : "previous",
+      });
+      return;
     }
+    if (conversations.length === 0) return;
+    const newIndex = Math.max(
+      0,
+      Math.min(conversations.length - 1, selectedIndex + delta),
+    );
+    clearBulkSelection();
+    setSelectedConvo(conversations[newIndex].id);
+  }
 
-    function onKey(e: KeyboardEvent) {
-      const t = e.target as HTMLElement;
-      if (t.matches?.("input, textarea, [contenteditable='true']")) return;
-      if (e.shiftKey && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
-        e.preventDefault();
-        const orderedIds = conversations.map((conversation) => conversation.id);
-        const fallbackId = selectedConvo && orderedIds.includes(selectedConvo)
-          ? selectedConvo
-          : orderedIds[0] ?? null;
-        const anchorId = selectionAnchorId && orderedIds.includes(selectionAnchorId)
-          ? selectionAnchorId
-          : fallbackId;
-        const focusId = selectionFocusId && orderedIds.includes(selectionFocusId)
-          ? selectionFocusId
-          : fallbackId;
-        const result = moveRangeSelection({
-          orderedIds,
-          anchorId,
-          focusId,
-          direction: e.key === "ArrowDown" ? 1 : -1,
-        });
-        setSelectedIds(result.selectedIds);
-        setSelectionAnchorId(anchorId);
-        setSelectionFocusId(result.focusId);
-        if (result.focusId) setSelectedConvo(result.focusId);
-      } else if (e.key === "j" || e.key === "ArrowDown") {
-        e.preventDefault();
-        selectRelative(1);
-      } else if (e.key === "k" || e.key === "ArrowUp") {
-        e.preventDefault();
-        selectRelative(-1);
-      } else if (e.key === "e" || e.key === "E") {
-        if (selected && !selected.archivedAt) handleResolve(selected.id);
-      } else if (e.key === "f" || e.key === "F") {
-        if (selected && !selected.archivedAt) {
-          setView(view === "focus" ? "split" : "focus");
-        }
-      } else if (e.key === "Escape") {
-        if (selectedIds.size > 0) clearBulkSelection();
-        else setView("split");
+  function exitFocus(): void {
+    const currentId = currentFocusConversationId(focusQueueStateRef.current);
+    setSelectedConvo(currentId);
+    dispatchFocusQueue({ type: "EXIT" });
+    focusSessionKeyRef.current = null;
+    setView("split");
+  }
+
+  function continueFocus(): void {
+    dispatchFocusQueue({
+      type: "CONTINUE",
+      visible: focusCards,
+      selectedId: focusCards[0]?.id ?? null,
+      knownTotal: focusKnownTotal,
+      hasMore: focusHasMore,
+    });
+  }
+
+  function retryFocusRefill(): void {
+    const state = focusQueueStateRef.current;
+    if (
+      state.kind !== "loading" &&
+      state.kind !== "checking-queue"
+    ) {
+      return;
+    }
+    const nextLimit = listLimit + 25;
+    focusRefillTargetRef.current = nextLimit;
+    setListLimit(nextLimit);
+  }
+
+  function handleFocusMotionFinished(): void {
+    const state = focusQueueStateRef.current;
+    if (state.kind !== "departing") return;
+    dispatchFocusQueue({
+      type: "MOTION_FINISHED",
+      transactionId: state.departure.transactionId,
+    });
+  }
+
+  function handleFocusRollbackMotionFinished(): void {
+    const state = focusQueueStateRef.current;
+    if (state.kind !== "rolling-back") return;
+    dispatchFocusQueue({
+      type: "ROLLBACK_MOTION_FINISHED",
+      transactionId: state.departure.transactionId,
+    });
+  }
+
+  function extendRange(direction: "next" | "previous") {
+    const orderedIds = conversations.map((conversation) => conversation.id);
+    const fallbackId = selectedConvo && orderedIds.includes(selectedConvo)
+      ? selectedConvo
+      : orderedIds[0] ?? null;
+    const anchorId = selectionAnchorId && orderedIds.includes(selectionAnchorId)
+      ? selectionAnchorId
+      : fallbackId;
+    const focusId = selectionFocusId && orderedIds.includes(selectionFocusId)
+      ? selectionFocusId
+      : fallbackId;
+    const result = moveRangeSelection({
+      orderedIds,
+      anchorId,
+      focusId,
+      direction: direction === "next" ? 1 : -1,
+    });
+    setSelectedIds(result.selectedIds);
+    setSelectionAnchorId(anchorId);
+    setSelectionFocusId(result.focusId);
+    if (result.focusId) setSelectedConvo(result.focusId);
+  }
+
+  function stepThreadSearchMatch(delta: number) {
+    if (threadSearchMatchIds.length === 0) return;
+    setThreadSearchMatchIndex((index) => {
+      const length = threadSearchMatchIds.length;
+      return (((index + delta) % length) + length) % length;
+    });
+  }
+
+  function handlePickThreadSearchMatch(messageId: string) {
+    const index = threadSearchMatchIds.indexOf(messageId);
+    if (index >= 0) setThreadSearchMatchIndex(index);
+    setThreadSearchOpen(false);
+  }
+
+  function executeInboxCommand(intent: DashboardCommandIntent) {
+    if (intent.type === "toggle-command-menu" || intent.type === "navigate") {
+      return;
+    }
+    if (intent.type === "open-conversation-search") {
+      setThreadSearchOpen(true);
+      return;
+    }
+    if (intent.type === "set-focus") {
+      if (intent.focus) setView("focus");
+      else exitFocus();
+      return;
+    }
+    if (intent.type === "open-sidechat") {
+      handleStartSidechat();
+      return;
+    }
+    if (intent.type === "conversation-action") {
+      const { conversationId, action } = intent;
+      if (action.type === "resolve" || action.type === "reopen") {
+        handleResolve(conversationId);
+        return;
       }
+      if (action.type === "snooze") {
+        handleSnooze(conversationId, Date.now() + 86_400_000);
+        return;
+      }
+      if (action.type === "unsnooze") {
+        handleSnooze(conversationId, null);
+        return;
+      }
+      if (action.type === "flag-spam" || action.type === "unflag") {
+        handleFlagSpam(conversationId);
+        return;
+      }
+      if (action.type === "archive" || action.type === "unarchive") {
+        handleArchive(conversationId, action.type);
+        return;
+      }
+      handleBlock(conversationId);
+      return;
     }
+    if (intent.type === "bulk-action") {
+      const { action } = intent;
+      if (action.type === "resolve") {
+        handleBulkAction({ action: "resolve" });
+        return;
+      }
+      if (action.type === "snooze") {
+        handleBulkAction({
+          action: "snooze",
+          until: action.until === "tomorrow" ? Date.now() + 86_400_000 : null,
+        });
+        return;
+      }
+      if (action.type === "flag-spam") {
+        handleBulkAction({ action: "flag_spam" });
+        return;
+      }
+      handleBulkAction({ action: action.type });
+      return;
+    }
+    if (intent.type === "move-ticket") {
+      selectRelative(intent.direction === "next" ? 1 : -1);
+      return;
+    }
+    if (intent.type === "extend-range") {
+      extendRange(intent.direction);
+      return;
+    }
+    if (intent.type === "clear-selection") {
+      clearBulkSelection();
+      return;
+    }
+    if (intent.type === "exit-focus") {
+      exitFocus();
+      return;
+    }
+    const _exhaustive: never = intent;
+    void _exhaustive;
+  }
 
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // handleResolve is a function declaration that closes over the same
-    // reactive values already listed (conversations, selected, etc.), so it is
-    // kept fresh by the existing deps without being listed here.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  const inboxSelection = useMemo(
+    () => buildInboxSelection(selected, selectedIds, conversations),
+    [conversations, selected, selectedIds],
+  );
+  const inboxScope = useMemo((): InboxCommandScope | null => {
+    if (!projectId) return null;
+    return {
+      kind: "inbox",
+      projectId,
+      filter,
+      selection: inboxSelection,
+      view: { kind: view, sidechat: sidechatOpen ? "open" : "closed" },
+      viewport: isMobileViewport ? "mobile" : "desktop",
+      operations: ALL_INBOX_CAPABILITIES,
+    };
   }, [
-    selected,
-    selectedConvo,
-    selectedIds,
-    selectionAnchorId,
-    selectionFocusId,
-    conversations,
-    selectedIndex,
+    filter,
+    inboxSelection,
+    isMobileViewport,
+    projectId,
+    sidechatOpen,
     view,
   ]);
+  const executeInboxCommandRef = useRef(executeInboxCommand);
+  executeInboxCommandRef.current = executeInboxCommand;
+  const executeInboxCommandStable = useCallback((intent: DashboardCommandIntent) => {
+    executeInboxCommandRef.current(intent);
+  }, []);
+  const inboxCommandRegistration = useMemo(() => {
+    if (inboxScope == null) return null;
+    return { scope: inboxScope, execute: executeInboxCommandStable };
+  }, [executeInboxCommandStable, inboxScope]);
+  useRegisterInboxCommands(inboxCommandRegistration);
 
   // ── Render ────────────────────────────────────────────────────────────────
   // Keep the pane mounted on the last session for this conversation even if
@@ -2166,38 +2797,41 @@ function Conversations() {
       )
     : null;
 
-  // Focus deep links (?focus=true) must never flash the split view: while the
-  // list is loading or the auto-select hasn't landed yet, hold the focus
-  // frame with a same-sized skeleton. An empty loaded inbox falls through to
-  // the split view, which is the only state with something useful to show.
-  if (
-    view === "focus" &&
-    !selected &&
-    (convosLoading || isPlaceholderData || conversations.length > 0)
-  ) {
-    return (
-      <>
-        {sidechatSummarySession.data && (
-          <ConversationDirectoryAgentBridge
-            session={sidechatSummarySession.data}
-            onState={handleSidechatParentState}
-            onEvent={handleDirectoryEvent}
-          />
-        )}
-        <FocusViewSkeleton />
-      </>
-    );
-  }
+  const conversationSearchDialog = (
+    <ConversationSearchDialog
+      open={threadSearchOpen}
+      onOpenChange={setThreadSearchOpen}
+      query={threadSearch}
+      onQueryChange={setThreadSearch}
+      results={threadSearchMatches}
+      onPick={handlePickThreadSearchMatch}
+      onMatchNext={() => stepThreadSearchMatch(1)}
+      onMatchPrev={() => stepThreadSearchMatch(-1)}
+    />
+  );
 
-  if (view === "focus" && selected && !selected.archivedAt) {
-    const focusView = (
+  if (view === "focus") {
+    const hasCurrentFocusDetail =
+      focusViewModel.currentCard !== null &&
+      activeConversationDetail?.conversation.id ===
+        focusViewModel.currentCard.id;
+    const showFocusRenderer =
+      focusViewModel.phase === "all-done" || hasCurrentFocusDetail;
+    const focusRefillFailed =
+      (focusQueueState.kind === "loading" ||
+        focusQueueState.kind === "checking-queue") &&
+      focusQueueState.refillFailed;
+    const focusView = showFocusRenderer ? (
       <FocusView
-        conversation={selected}
+        viewModel={focusViewModel}
+        conversation={activeConversationDetail?.conversation ?? null}
         messages={messages}
         messagesLoading={detailLoading}
-        index={selectedIndex}
-        total={counts[filter] ?? conversations.length}
-        onExit={() => setView("split")}
+        reducedMotion={focusReducedMotion}
+        onExit={exitFocus}
+        onContinue={continueFocus}
+        onMotionFinished={handleFocusMotionFinished}
+        onRollbackMotionFinished={handleFocusRollbackMotionFinished}
         onSend={handleSend}
         onResolve={handleResolve}
         onDeleteMessage={handleDeleteMessage}
@@ -2209,7 +2843,14 @@ function Conversations() {
         sidechatExists={selectedSidechatExists}
         sidechatStatus={selectedSidechatStatus}
         publicComposerFocusRequest={publicComposerFocusRequest}
+        searchQuery={threadSearchQuery}
+        activeMatchId={threadSearchActiveMatchId}
         embedded
+      />
+    ) : (
+      <FocusViewSkeleton
+        embedded
+        onRetry={focusRefillFailed ? retryFocusRefill : undefined}
       />
     );
     return (
@@ -2221,10 +2862,10 @@ function Conversations() {
             onEvent={handleDirectoryEvent}
           />
         )}
-        {publicChatSession.data && selectedConvo && (
+        {publicChatSession.data && activeConversationId && (
           <NativePublicConversationBridge
             session={publicChatSession.data}
-            conversationId={selectedConvo}
+            conversationId={activeConversationId}
             onMessages={handleNativePublicMessages}
             onState={handleNativePublicState}
           />
@@ -2234,6 +2875,7 @@ function Conversations() {
           focusView={focusView}
           sidechatPane={sidechatPane}
         />
+        {conversationSearchDialog}
       </>
     );
   }
@@ -2311,6 +2953,15 @@ function Conversations() {
           sidechatExists={selectedSidechatExists}
           sidechatStatus={selectedSidechatStatus}
           publicComposerFocusRequest={publicComposerFocusRequest}
+          search={threadSearch}
+          onSearchChange={setThreadSearch}
+          matchCount={threadSearchMatchIds.length}
+          matchIndex={threadSearchMatchIds.length ? threadSearchSafeIndex + 1 : 0}
+          onMatchNext={() => stepThreadSearchMatch(1)}
+          onMatchPrev={() => stepThreadSearchMatch(-1)}
+          onOpenSearch={() => setThreadSearchOpen(true)}
+          searchQuery={threadSearchQuery}
+          activeMatchId={threadSearchActiveMatchId}
           className={cn(
             selectedIds.size > 0 && "hidden md:flex",
             sidechatOpen && "hidden md:flex",
@@ -2336,10 +2987,10 @@ function Conversations() {
           onEvent={handleDirectoryEvent}
         />
       )}
-      {publicChatSession.data && selectedConvo && (
+      {publicChatSession.data && activeConversationId && (
         <NativePublicConversationBridge
           session={publicChatSession.data}
-          conversationId={selectedConvo}
+          conversationId={activeConversationId}
           onMessages={handleNativePublicMessages}
           onState={handleNativePublicState}
         />
@@ -2350,7 +3001,7 @@ function Conversations() {
         open={createCustomerOpen}
         onOpenChange={setCreateCustomerOpen}
         initialValues={customerFormInitialValues}
-        conversationId={selectedConvo ?? undefined}
+        conversationId={activeConversationId ?? undefined}
         onCreated={handleCustomerCreated}
       />
       <CustomerPickerDialog
@@ -2360,6 +3011,7 @@ function Conversations() {
         onSelect={handleCustomerSelected}
         pending={setCustomerMutation.isPending}
       />
+      {conversationSearchDialog}
     </div>
   );
 }

@@ -20,6 +20,15 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { CommandActionTooltip } from "@/components/commands/CommandActionTooltip";
+import { CommandKeycap } from "@/components/commands/CommandKeycap";
+import {
+  commandLabel,
+  commandPressed,
+  inboxCommandContext,
+  resolveInboxCommand,
+  toConversationCommandTarget,
+} from "@/lib/commands/inbox-command-lookup";
 import type { Conversation } from "@/lib/inbox/types";
 import { countryFlag } from "@/lib/inbox/country-flag";
 import { getVisitorPresenceState } from "@/lib/conversation-presence";
@@ -223,6 +232,32 @@ export default function ReadingHeader({
   const isBlocked = !!conversation.visitorBlocked;
   const isArchived = !!conversation.archivedAt;
 
+  const commandContext = inboxCommandContext({
+    selection: {
+      kind: "single",
+      target: toConversationCommandTarget(conversation),
+    },
+  });
+  const resolveCommand = resolveInboxCommand(
+    "resolve-conversation",
+    commandContext,
+  );
+  const snoozeCommand = resolveInboxCommand(
+    "snooze-conversation",
+    commandContext,
+  );
+  const spamCommand = resolveInboxCommand("flag-spam", commandContext);
+  const archiveCommand = resolveInboxCommand(
+    "archive-conversation",
+    commandContext,
+  );
+  const blockCommand = resolveInboxCommand("block-visitor", commandContext);
+  const focusCommand = resolveInboxCommand("toggle-focus", commandContext);
+  const searchCommand = resolveInboxCommand(
+    "open-conversation-search",
+    commandContext,
+  );
+
   const visitorDisplayName =
     conversation.visitorName ?? conversation.visitorEmail ?? conversation.visitorId;
   const displayName = customer?.name ?? customer?.email ?? visitorDisplayName;
@@ -275,75 +310,79 @@ export default function ReadingHeader({
         )}
 
         {isArchived ? (
-          <button
-            type="button"
-            aria-label="Unarchive conversation"
-            onClick={() => onArchive(conversation.id, "unarchive")}
-            disabled={!!conversation.purgeStartedAt}
-            className="glass-button rounded-glass flex items-center gap-1.5 px-2.5 h-8 text-[13px] text-ink-3 disabled:opacity-50"
-            title={conversation.purgeStartedAt
+          <CommandActionTooltip
+            availability={archiveCommand}
+            reason={conversation.purgeStartedAt
               ? "Deletion has started and this conversation cannot be restored"
-              : "Unarchive"
-            }
+              : undefined}
           >
-            <ArchiveRestoreIcon className="size-4" />
-            Unarchive
-          </button>
+            <button
+              type="button"
+              aria-label={commandLabel(archiveCommand, "Unarchive")}
+              onClick={() => onArchive(conversation.id, "unarchive")}
+              disabled={!!conversation.purgeStartedAt}
+              className="glass-button rounded-glass flex items-center gap-1.5 px-2.5 h-8 text-[13px] text-ink-3 disabled:opacity-50"
+            >
+              <ArchiveRestoreIcon className="size-4" />
+              {commandLabel(archiveCommand, "Unarchive")}
+            </button>
+          </CommandActionTooltip>
         ) : (
           <>
             {/* Action capsule: resolve, snooze, flag, archive. */}
             <div className="flex items-center rounded-glass glass-button overflow-hidden shrink-0">
-              <button
-                type="button"
-                aria-label="Resolve"
-                aria-pressed={isResolved}
-                onClick={() => onResolve(conversation.id)}
-                className={cn(
-                  "flex items-center justify-center size-8 transition-colors hover:bg-white/5",
-                  isResolved ? "text-emerald-300 bg-emerald-400/15" : "text-ink-3",
-                )}
-                title={isResolved ? "Resolved, click to reopen" : "Resolve"}
-              >
-                <CheckIcon className="size-4" />
-              </button>
-              <button
-                type="button"
-                aria-label="Snooze"
-                aria-pressed={isSnoozed}
-                onClick={snoozeTomorrow}
-                className={cn(
-                  "flex items-center justify-center size-8 transition-colors hover:bg-white/5",
-                  isSnoozed ? "text-amber-300 bg-amber-400/15" : "text-ink-3",
-                )}
-                title={isSnoozed ? "Snoozed, click to unsnooze" : "Snooze until tomorrow"}
-              >
-                <ClockIcon className="size-4" />
-              </button>
-              <button
-                type="button"
-                aria-label="Flag as spam"
-                aria-pressed={isSpam}
-                onClick={() => onFlagSpam(conversation.id)}
-                className={cn(
-                  "flex items-center justify-center size-8 transition-colors hover:bg-white/5",
-                  isSpam ? "text-dot-orange bg-dot-orange/15" : "text-ink-3",
-                )}
-                title={isSpam
-                  ? "Flagged as spam, click to unflag"
-                  : "Mark as spam"
-                }
-              >
-                <FlagIcon className="size-4" />
-              </button>
-              <button
-                type="button"
-                aria-label="Archive conversation"
-                onClick={() => onArchive(conversation.id, "archive")}
-                className="flex items-center justify-center size-8 text-ink-3 transition-colors hover:bg-white/5"
-                title="Archive"
-              >
-                <ArchiveIcon className="size-4" />
-              </button>
+              <CommandActionTooltip availability={resolveCommand}>
+                <button
+                  type="button"
+                  aria-label={commandLabel(resolveCommand, "Resolve")}
+                  aria-pressed={commandPressed(resolveCommand, isResolved)}
+                  onClick={() => onResolve(conversation.id)}
+                  className={cn(
+                    "flex items-center justify-center size-8 transition-colors hover:bg-white/5",
+                    isResolved ? "text-emerald-300 bg-emerald-400/15" : "text-ink-3",
+                  )}
+                >
+                  <CheckIcon className="size-4" />
+                </button>
+              </CommandActionTooltip>
+              <CommandActionTooltip availability={snoozeCommand}>
+                <button
+                  type="button"
+                  aria-label={commandLabel(snoozeCommand, "Snooze")}
+                  aria-pressed={commandPressed(snoozeCommand, isSnoozed)}
+                  onClick={snoozeTomorrow}
+                  className={cn(
+                    "flex items-center justify-center size-8 transition-colors hover:bg-white/5",
+                    isSnoozed ? "text-amber-300 bg-amber-400/15" : "text-ink-3",
+                  )}
+                >
+                  <ClockIcon className="size-4" />
+                </button>
+              </CommandActionTooltip>
+              <CommandActionTooltip availability={spamCommand}>
+                <button
+                  type="button"
+                  aria-label={commandLabel(spamCommand, "Flag as spam")}
+                  aria-pressed={commandPressed(spamCommand, isSpam)}
+                  onClick={() => onFlagSpam(conversation.id)}
+                  className={cn(
+                    "flex items-center justify-center size-8 transition-colors hover:bg-white/5",
+                    isSpam ? "text-dot-orange bg-dot-orange/15" : "text-ink-3",
+                  )}
+                >
+                  <FlagIcon className="size-4" />
+                </button>
+              </CommandActionTooltip>
+              <CommandActionTooltip availability={archiveCommand}>
+                <button
+                  type="button"
+                  aria-label={commandLabel(archiveCommand, "Archive")}
+                  onClick={() => onArchive(conversation.id, "archive")}
+                  className="flex items-center justify-center size-8 text-ink-3 transition-colors hover:bg-white/5"
+                >
+                  <ArchiveIcon className="size-4" />
+                </button>
+              </CommandActionTooltip>
             </div>
 
             <AssigneeMenu
@@ -351,22 +390,20 @@ export default function ReadingHeader({
               onChange={(id) => onAssign(conversation.id, id)}
             />
 
-            <button
-              type="button"
-              aria-label="Block visitor"
-              aria-pressed={isBlocked}
-              onClick={() => onBlock(conversation.id)}
-              className={cn(
-                "glass-button rounded-glass flex items-center justify-center size-8 transition-colors shrink-0",
-                isBlocked ? "text-red-400 bg-red-400/15" : "text-ink-3 hover:text-red-400",
-              )}
-              title={isBlocked
-                ? "Visitor blocked, click to unblock"
-                : "Block visitor"
-              }
-            >
-              <ShieldOffIcon className="size-4" />
-            </button>
+            <CommandActionTooltip availability={blockCommand}>
+              <button
+                type="button"
+                aria-label={commandLabel(blockCommand, "Block visitor")}
+                aria-pressed={commandPressed(blockCommand, isBlocked)}
+                onClick={() => onBlock(conversation.id)}
+                className={cn(
+                  "glass-button rounded-glass flex items-center justify-center size-8 transition-colors shrink-0",
+                  isBlocked ? "text-red-400 bg-red-400/15" : "text-ink-3 hover:text-red-400",
+                )}
+              >
+                <ShieldOffIcon className="size-4" />
+              </button>
+            </CommandActionTooltip>
           </>
         )}
 
@@ -374,15 +411,21 @@ export default function ReadingHeader({
         <div className="flex-1" />
 
         {/* Focus button (desktop) */}
-        {!isArchived && (
-          <button
-            type="button"
-            onClick={onFocus}
-            className="glass-button rounded-glass hidden md:flex items-center gap-1.5 px-3 h-8 text-ink-3 text-[13px] shrink-0"
-          >
-            Focus
-            <span className="keycap">F</span>
-          </button>
+        {focusCommand.status !== "hidden" && (
+          <CommandActionTooltip availability={focusCommand}>
+            <button
+              type="button"
+              onClick={onFocus}
+              aria-label={commandLabel(focusCommand, "Focus")}
+              aria-pressed={commandPressed(focusCommand)}
+              className="glass-button rounded-glass hidden md:flex items-center gap-1.5 px-3 h-8 text-ink-3 text-[13px] shrink-0"
+            >
+              {commandLabel(focusCommand, "Focus")}
+              <CommandKeycap
+                keycap={focusCommand.presentation.keycap}
+              />
+            </button>
+          </CommandActionTooltip>
         )}
 
         {/* Desktop: full inline search field — highlight + jump between matches */}
@@ -439,19 +482,20 @@ export default function ReadingHeader({
         </div>
 
         {/* Mobile: search icon → full-page modal */}
+        <CommandActionTooltip availability={searchCommand}>
         <button
           type="button"
-          aria-label="Search conversation"
+          aria-label={commandLabel(searchCommand, "Search conversation")}
           onClick={onOpenSearch}
           className={cn(
             "glass-button rounded-glass items-center justify-center size-8 transition-colors shrink-0",
             compact ? "flex lg:hidden" : "flex md:hidden",
             searchActive ? "text-brand bg-glass-raised" : "text-ink-3 hover:text-ink-1",
           )}
-          title="Search conversation"
         >
           <SearchIcon className="size-4" />
         </button>
+        </CommandActionTooltip>
       </div>
 
       {/* ── User bar ── */}

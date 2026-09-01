@@ -1,3 +1,4 @@
+import type { KeyboardEvent } from "react";
 import { Search } from "lucide-react";
 import {
   Dialog,
@@ -16,6 +17,8 @@ interface ConversationSearchDialogProps {
   results: Message[];
   /** Jump to a message in the thread (highlights it + scrolls into view). */
   onPick: (messageId: string) => void;
+  onMatchNext?: () => void;
+  onMatchPrev?: () => void;
 }
 
 function senderLabel(m: Message): string {
@@ -60,8 +63,18 @@ export default function ConversationSearchDialog({
   onQueryChange,
   results,
   onPick,
+  onMatchNext,
+  onMatchPrev,
 }: ConversationSearchDialogProps) {
   const trimmed = query.trim();
+
+  function handleSearchKey(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (event.shiftKey) onMatchPrev?.();
+    else onMatchNext?.();
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/* Full-page surface — results get the whole screen instead of a cramped box */}
@@ -78,6 +91,7 @@ export default function ConversationSearchDialog({
                 autoFocus
                 value={query}
                 onChange={(e) => onQueryChange(e.target.value)}
+                onKeyDown={handleSearchKey}
                 placeholder="Search messages…"
                 className="flex-1 min-w-0 bg-transparent text-[15px] text-ink-2 placeholder:text-ink-6 outline-none"
               />

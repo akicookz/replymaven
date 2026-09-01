@@ -4,12 +4,22 @@ import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Paperclip, ArrowUp, X, Loader2, ImagePlus } from "lucide-react";
+import { CommandActionTooltip } from "@/components/commands/CommandActionTooltip";
+import { CommandKeycap } from "@/components/commands/CommandKeycap";
 import {
   deriveComposerEnterIntent,
   deriveComposerShiftTabIntent,
   type SidechatPresentationStatus,
 } from "@/lib/inbox/sidechat";
 import { readConnectedMcpAvatars } from "@/lib/inbox/sidechat-mcp-avatars";
+import {
+  commandKeycap,
+  commandLabel,
+  inboxCommandContext,
+  resolveInboxCommand,
+  toConversationCommandTarget,
+} from "@/lib/commands/inbox-command-lookup";
+import type { Conversation } from "@/lib/inbox/types";
 import { cn } from "@/lib/utils";
 import SidechatMcpAvatars from "./SidechatMcpAvatars";
 import SidechatStatusDot from "./SidechatStatusDot";
@@ -45,6 +55,7 @@ interface PublicComposerProps extends ComposerBaseProps {
     opts?: { imageUrls?: string[] },
   ) => void;
   onResolve: (convId: string) => void;
+  conversation?: Conversation;
   mode: Extract<ComposerMode, { kind: "public" }>;
 }
 
@@ -323,8 +334,40 @@ export default function Composer(props: ComposerProps) {
     ? !mode.disabled && !mode.busy && draft.trim().length > 0
     : (draft.trim().length > 0 || pendingImages.length > 0) &&
       uploadingCount === 0;
-  // The status dot next to the label already signals whether one exists.
-  const publicSidechatLabel = "Sidechat";
+  const publicConversation =
+    props.mode.kind === "public" && "conversation" in props
+      ? props.conversation
+      : undefined;
+  const composerCommandContext = inboxCommandContext({
+    selection: {
+      kind: "single",
+      target: publicConversation
+        ? toConversationCommandTarget(publicConversation)
+        : {
+            id: convId,
+            status: "active",
+            closeReason: null,
+            snoozedUntil: null,
+            archivedAt: null,
+            visitorBlocked: false,
+          },
+    },
+    view: {
+      kind: "split",
+      sidechat: props.mode.kind === "public" && props.mode.sidechatOpen
+        ? "open"
+        : "closed",
+    },
+  });
+  const sidechatCommand = resolveInboxCommand(
+    "open-sidechat",
+    composerCommandContext,
+  );
+  const resolveCommand = resolveInboxCommand(
+    "resolve-conversation",
+    composerCommandContext,
+  );
+  const publicSidechatLabel = commandLabel(sidechatCommand, "Sidechat");
 
   return (
     <div
@@ -390,6 +433,7 @@ export default function Composer(props: ComposerProps) {
         <textarea
           ref={textareaRef}
           data-public-composer={!isPrivate ? "true" : undefined}
+          data-command-composer={isPrivate ? "sidechat" : "public"}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -439,28 +483,34 @@ export default function Composer(props: ComposerProps) {
           >
             {props.mode.kind === "public" && "onResolve" in props && (
               <>
-                <button
-                  type="button"
-                  className="flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap text-[13px] text-ink-5 hover:text-ink-2 cursor-pointer motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96]"
-                  onClick={props.mode.onStartSidechat}
-                  title={`${publicSidechatLabel} (Shift+Tab)`}
-                >
-                  {props.mode.sidechatStatus && (
-                    <SidechatStatusDot status={props.mode.sidechatStatus} />
-                  )}
-                  {publicSidechatLabel}
-                  <span className="keycap">⇧⇥</span>
-                </button>
+                <CommandActionTooltip availability={sidechatCommand}>
+                  <button
+                    type="button"
+                    className="flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap text-[13px] text-ink-5 hover:text-ink-2 cursor-pointer motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96]"
+                    onClick={props.mode.onStartSidechat}
+                  >
+                    {props.mode.sidechatStatus && (
+                      <SidechatStatusDot status={props.mode.sidechatStatus} />
+                    )}
+                    {publicSidechatLabel}
+                    <CommandKeycap
+                      keycap={commandKeycap(sidechatCommand, { keys: ["⇧", "Tab"] })}
+                    />
+                  </button>
+                </CommandActionTooltip>
 
-                <button
-                  type="button"
-                  className="flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap text-[13px] text-ink-5 hover:text-ink-2 cursor-pointer motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96]"
-                  onClick={() => props.onResolve(convId)}
-                  title="Resolve conversation"
-                >
-                  Resolve
-                  <span className="keycap">E</span>
-                </button>
+                <CommandActionTooltip availability={resolveCommand}>
+                  <button
+                    type="button"
+                    className="flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap text-[13px] text-ink-5 hover:text-ink-2 cursor-pointer motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96]"
+                    onClick={() => props.onResolve(convId)}
+                  >
+                    {commandLabel(resolveCommand, "Resolve")}
+                    <CommandKeycap
+                      keycap={commandKeycap(resolveCommand, { keys: ["E"] })}
+                    />
+                  </button>
+                </CommandActionTooltip>
               </>
             )}
 
