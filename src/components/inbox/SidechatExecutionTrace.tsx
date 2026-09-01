@@ -42,18 +42,27 @@ function formatDuration(durationMs: number | undefined): string | null {
   )}s`;
 }
 
-function reasoningTitle(
+function reasoningPresentation(
   item: Extract<SidechatTraceItem, { type: "reasoning" }>,
-): string {
-  const firstLine = item.text.split(/\r?\n/u, 1)[0]?.trim() ?? "";
+): { title: string; body: string } {
+  const [firstLine = "", ...rest] = item.text.split(/\r?\n/u);
   const title = firstLine
+    .trim()
     .replace(/^#{1,6}\s+/u, "")
     .replace(/^(?:\*\*|__)/u, "")
     .replace(/(?:\*\*|__)$/u, "")
     .trim();
-  if (!title) return item.state === "streaming" ? "Thinking…" : "Thought";
-  if (title.length <= 160) return title;
-  return `${title.slice(0, 159).trimEnd()}…`;
+  if (!title) {
+    return {
+      title: item.state === "streaming" ? "Thinking…" : "Thought",
+      body: item.text.trim(),
+    };
+  }
+  // A truncated title keeps the full first line in the body so nothing is lost.
+  if (title.length > 160) {
+    return { title: `${title.slice(0, 159).trimEnd()}…`, body: item.text.trim() };
+  }
+  return { title, body: rest.join("\n").trim() };
 }
 
 function prettyPayload(value: unknown): string {
@@ -212,19 +221,25 @@ function ReasoningTrace({
 }: {
   item: Extract<SidechatTraceItem, { type: "reasoning" }>;
 }) {
-  const title = reasoningTitle(item);
+  const { title, body } = reasoningPresentation(item);
+  const titleClassName = item.state === "streaming"
+    ? "rm-text-sweep min-w-0 truncate font-medium"
+    : "min-w-0 truncate font-medium text-ink-3";
+
+  if (!body) {
+    return (
+      <div className="flex min-h-10 items-center gap-2.5 text-[12.5px] text-ink-5">
+        <Brain aria-hidden="true" className="size-4 shrink-0" />
+        <span className={titleClassName}>{title}</span>
+      </div>
+    );
+  }
 
   return (
     <details className="group/reasoning">
       <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2.5 text-[12.5px] text-ink-5 hover:text-ink-2 motion-safe:transition-colors motion-safe:duration-150 [&::-webkit-details-marker]:hidden">
         <Brain aria-hidden="true" className="size-4 shrink-0" />
-        <span
-          className={item.state === "streaming"
-            ? "rm-text-sweep min-w-0 truncate font-medium"
-            : "min-w-0 truncate font-medium text-ink-3"}
-        >
-          {title}
-        </span>
+        <span className={titleClassName}>{title}</span>
         <ChevronDown
           aria-hidden="true"
           className="size-3.5 shrink-0 transition-transform duration-150 group-open/reasoning:rotate-180 motion-reduce:transition-none"
@@ -232,7 +247,7 @@ function ReasoningTrace({
       </summary>
       <div
         className="ml-6 pb-2 pr-2 text-[12px] leading-relaxed text-ink-5"
-        dangerouslySetInnerHTML={{ __html: renderMarkdown(item.text) }}
+        dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }}
       />
     </details>
   );
