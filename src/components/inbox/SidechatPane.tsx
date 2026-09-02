@@ -17,6 +17,7 @@ import {
 import { cn } from "@/lib/utils";
 import ChatThread from "./ChatThread";
 import Composer from "./Composer";
+import SidechatEmptySuggestions from "./SidechatEmptySuggestions";
 import SidechatStatusDot from "./SidechatStatusDot";
 
 interface SidechatPaneProps {
@@ -134,6 +135,14 @@ export default function SidechatPane({
   }
 
   const isEmpty = !loading && messages.length === 0;
+  const suggestionsDisabled = composerDisabled || busy || !interaction.showComposer;
+
+  function handleSuggestion(prompt: string): void {
+    if (suggestionsDisabled) return;
+    setDraft("");
+    onSend(prompt);
+  }
+
   const composer = interaction.showComposer
     ? (
       <Composer
@@ -200,7 +209,7 @@ export default function SidechatPane({
       <div
         className={cn(
           "min-h-0 flex-1",
-          isEmpty ? "flex flex-col justify-center" : "overflow-y-auto",
+          isEmpty ? "flex flex-col justify-center overflow-y-auto" : "overflow-y-auto",
         )}
       >
         {!isEmpty && (
@@ -246,7 +255,15 @@ export default function SidechatPane({
             )}
           />
         )}
-        {isEmpty && composer}
+        {isEmpty && (
+          <>
+            <SidechatEmptySuggestions
+              disabled={suggestionsDisabled}
+              onSelect={handleSuggestion}
+            />
+            {composer}
+          </>
+        )}
       </div>
       {!isEmpty && composer}
     </aside>
