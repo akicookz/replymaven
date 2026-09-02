@@ -307,7 +307,9 @@ export function readLastCompletedSidechatToolKind(
     }
     if (
       item.tool.source.name === "Docs" &&
-      item.tool.displayName === "Search"
+      (item.tool.displayName === "Search" ||
+        item.tool.displayName === "List" ||
+        item.tool.displayName === "Read")
     ) {
       return "docs";
     }

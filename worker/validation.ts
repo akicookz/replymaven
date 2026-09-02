@@ -665,6 +665,9 @@ export interface HttpToolPolicyInput {
 
 export const RESERVED_MAVEN_TOOL_NAMES = [
   "search_knowledge",
+  "list_knowledge",
+  "read_knowledge",
+  "apply_knowledge_change",
   "request_team_help",
 ] as const;
 

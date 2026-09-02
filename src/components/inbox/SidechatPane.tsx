@@ -44,7 +44,7 @@ interface SidechatPaneProps {
   onApproval: (
     approvalId: string,
     toolCallId: string,
-    mode: "always" | "once",
+    mode: "always" | "once" | "deny",
   ) => void;
   composerDisabled?: boolean;
   loading?: boolean;
@@ -111,6 +111,7 @@ export default function SidechatPane({
   ) === true;
   const hasVisibleAnswer = Boolean(
     latestMessage?.replyDraft ||
+    (latestMessage?.knowledgeChanges?.length ?? 0) > 0 ||
     latestMessage?.content.trim(),
   ) && latestMessage?.role === "bot";
   const tail = deriveSidechatWorkingTail({
@@ -127,7 +128,7 @@ export default function SidechatPane({
   function handleApprovalAction(
     approvalId: string,
     toolCallId: string,
-    mode: "always" | "once",
+    mode: "always" | "once" | "deny",
   ): void {
     onApproval(approvalId, toolCallId, mode);
   }

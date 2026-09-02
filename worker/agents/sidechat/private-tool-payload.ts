@@ -30,6 +30,9 @@ const MODEL_SAFE_TOOL_NAMES = new Set([
   SAFE_STREAM_TOOL_NAME,
   GATEWAY_CALL_TOOL_NAME,
   "search_knowledge",
+  "list_knowledge",
+  "read_knowledge",
+  "apply_knowledge_change",
   "search_project_tools",
   "describe_project_tool",
 ]);
@@ -76,14 +79,22 @@ function redactToolChunk(chunk: ToolChunkLike): ToolChunkLike {
     const input = chunk.toolName === GATEWAY_CALL_TOOL_NAME
       ? redactGatewayInput(chunk.input)
       : chunk.input;
-    redacted.input = redactPrivateToolPayload(input);
+    redacted.input = chunk.toolName === SAFE_STREAM_TOOL_NAME
+      ? input
+      : redactPrivateToolPayload(input);
   }
-  if ("output" in chunk) redacted.output = redactPrivateToolPayload(chunk.output);
+  if ("output" in chunk) {
+    redacted.output = chunk.toolName === SAFE_STREAM_TOOL_NAME
+      ? chunk.output
+      : redactPrivateToolPayload(chunk.output);
+  }
   if ("rawInput" in chunk) {
     const rawInput = chunk.toolName === GATEWAY_CALL_TOOL_NAME
       ? redactGatewayInput(chunk.rawInput)
       : chunk.rawInput;
-    redacted.rawInput = redactPrivateToolPayload(rawInput);
+    redacted.rawInput = chunk.toolName === SAFE_STREAM_TOOL_NAME
+      ? rawInput
+      : redactPrivateToolPayload(rawInput);
   }
   if (typeof chunk.errorText === "string") {
     redacted.errorText = redactPrivateToolText(chunk.errorText);

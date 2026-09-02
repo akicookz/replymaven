@@ -11,7 +11,7 @@ interface SidechatExecutionTraceProps {
   onApproval?: (
     approvalId: string,
     toolCallId: string,
-    mode: "always" | "once",
+    mode: "always" | "once" | "deny",
   ) => void;
 }
 

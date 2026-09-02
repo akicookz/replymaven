@@ -66,6 +66,7 @@ export interface ExecuteSidechatGatewayToolRequest
 export interface ExecuteSidechatKnowledgeRequest
   extends SidechatGatewayContext {
   input: Record<string, unknown>;
+  toolCallId?: string;
 }
 
 export interface SidechatGatewayToolSummary {

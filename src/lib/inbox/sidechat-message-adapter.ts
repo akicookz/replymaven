@@ -5,11 +5,17 @@ import {
 import { getToolName, isToolUIPart, type UIMessage } from "ai";
 import type { SidechatToolPresentation } from "../../../shared/sidechat-agent";
 import {
+  isKnowledgeChangeAction,
+  type KnowledgeChangePreview,
+} from "../../../shared/knowledge-change";
+import {
   redactPrivateToolPayload,
   redactPrivateToolText,
 } from "../../../shared/private-tool-payload";
 import type {
+  KnowledgeChangeCardStatus,
   Message,
+  MessageKnowledgeChange,
   SidechatToolTraceState,
   SidechatTraceItem,
 } from "./types";
@@ -301,10 +307,9 @@ function readSidechatTrace(
     }
     if (!isToolUIPart(part)) return;
     const toolName = getToolName(part);
-    // The internal reply-draft tool is presentation plumbing, not an action:
-    // its result already renders as the draft bubble with "Add to reply".
     if (
       toolName === "present_reply_draft" ||
+      toolName === "apply_knowledge_change" ||
       HIDDEN_GATEWAY_TOOL_NAMES.has(toolName)
     ) return;
     const toolCallId = boundedString(getToolCallId(part), 200);
@@ -320,7 +325,8 @@ function readSidechatTrace(
     const legacyPendingApproval =
       part.state === "approval-requested" &&
       toolName !== GATEWAY_CALL_TOOL_NAME &&
-      toolName !== "search_knowledge";
+      toolName !== "search_knowledge" &&
+      toolName !== "apply_knowledge_change";
     const errorText = visibleToolError(
       legacyPendingApproval,
       value.errorText,
@@ -362,6 +368,105 @@ function readSidechatTrace(
     });
   });
   return traceItems;
+}
+
+function readKnowledgeChangePreview(
+  part: unknown,
+): (KnowledgeChangePreview & { toolCallId: string }) | null {
+  if (
+    !isRecord(part) ||
+    part.type !== "data-knowledge-change" ||
+    !isRecord(part.data)
+  ) {
+    return null;
+  }
+  const data = part.data;
+  if (!isKnowledgeChangeAction(data.action)) return null;
+  const title = boundedString(data.title, 200);
+  const toolCallId = boundedString(data.toolCallId, 200);
+  const before = typeof data.before === "string" ? data.before.slice(0, 12_000) : null;
+  const after = typeof data.after === "string" ? data.after.slice(0, 12_000) : null;
+  if (!title || !toolCallId || before === null || after === null) return null;
+  if (data.type !== "faq" && data.type !== "webpage") return null;
+  const url = data.url === null
+    ? null
+    : boundedString(data.url, 2_048);
+  if (data.url !== null && url === null) return null;
+  return {
+    action: data.action,
+    title,
+    url,
+    type: data.type,
+    resourceId: data.resourceId === null
+      ? null
+      : boundedString(data.resourceId, 80),
+    before,
+    after,
+    reason: data.reason === null ? null : boundedString(data.reason, 500),
+    toolCallId,
+  };
+}
+
+function knowledgeChangeFromToolPart(
+  preview: KnowledgeChangePreview & { toolCallId: string },
+  nativeMessage: UIMessage,
+): MessageKnowledgeChange {
+  let status: KnowledgeChangeCardStatus = "pending";
+  let approvalId: string | null = null;
+  let errorText: string | undefined;
+  for (const part of nativeMessage.parts) {
+    if (!isToolUIPart(part) || getToolName(part) !== "apply_knowledge_change") {
+      continue;
+    }
+    if (getToolCallId(part) !== preview.toolCallId) continue;
+    const approval = getToolApproval(part);
+    if (approval) approvalId = approval.id;
+    const value = part as typeof part & { errorText?: string; output?: unknown };
+    if (part.state === "output-available") {
+      const output = isRecord(value.output) ? value.output : null;
+      if (output?.ok === true) {
+        status = "applied";
+      } else {
+        status = "error";
+        if (typeof output?.error === "string") {
+          errorText = redactPrivateToolText(output.error).slice(0, 2_000);
+        }
+      }
+    } else if (part.state === "output-denied") {
+      status = "rejected";
+    } else if (part.state === "output-error") {
+      status = "error";
+    } else if (part.state === "approval-responded") {
+      status = "applying";
+    } else if (part.state === "approval-requested") {
+      status = "pending";
+    }
+    if (typeof value.errorText === "string") {
+      errorText = redactPrivateToolText(value.errorText).slice(0, 2_000);
+    }
+  }
+
+  return {
+    preview,
+    toolCallId: preview.toolCallId,
+    approvalId,
+    status,
+    ...(errorText ? { errorText } : {}),
+  };
+}
+
+function readKnowledgeChanges(
+  nativeMessage: UIMessage,
+): MessageKnowledgeChange[] {
+  const changes: MessageKnowledgeChange[] = [];
+  const seen = new Set<string>();
+  for (const part of nativeMessage.parts) {
+    const preview = readKnowledgeChangePreview(part);
+    if (!preview || seen.has(preview.toolCallId)) continue;
+    seen.add(preview.toolCallId);
+    changes.push(knowledgeChangeFromToolPart(preview, nativeMessage));
+  }
+  return changes;
 }
 
 function readLatestReplyDraft(
@@ -413,11 +518,14 @@ export function adaptSidechatMessages(
     const draft = nativeMessage.role === "assistant"
       ? readLatestReplyDraft(nativeMessage.id, nativeMessage.parts)
       : null;
+    const knowledgeChanges = nativeMessage.role === "assistant"
+      ? readKnowledgeChanges(nativeMessage)
+      : [];
     const content = text;
     const sidechatTrace = nativeMessage.role === "assistant"
       ? readSidechatTrace(nativeMessage, options.canAlwaysAllow === true)
       : [];
-    if (content || draft || sidechatTrace.length > 0) {
+    if (content || draft || knowledgeChanges.length > 0 || sidechatTrace.length > 0) {
       rendered.push({
         id: nativeMessage.id,
         role: nativeMessage.role === "user" ? "agent" : "bot",
@@ -437,6 +545,7 @@ export function adaptSidechatMessages(
               },
             }
           : {}),
+        ...(knowledgeChanges.length > 0 ? { knowledgeChanges } : {}),
       });
     }
   });

@@ -193,6 +193,34 @@
   font-weight: 600;
 }
 
+.knowledge-diff-line {
+  padding: 1px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.knowledge-diff-line-add {
+  background: color-mix(in oklch, var(--color-emerald-500) 12%, transparent);
+}
+.knowledge-diff-line-remove {
+  background: color-mix(in oklch, var(--color-red-500) 10%, transparent);
+}
+.knowledge-diff-add {
+  background: color-mix(in oklch, var(--color-emerald-500) 22%, transparent);
+  color: var(--color-emerald-800);
+  border-radius: 3px;
+}
+.knowledge-diff-remove {
+  color: var(--color-red-700);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklch, var(--color-red-600) 70%, transparent);
+}
+.dark .knowledge-diff-add {
+  color: var(--color-emerald-300);
+}
+.dark .knowledge-diff-remove {
+  color: var(--color-red-400);
+}
+
 /* Color input swatch styling */
 input[type="color"]::-webkit-color-swatch-wrapper {
   padding: 2px;

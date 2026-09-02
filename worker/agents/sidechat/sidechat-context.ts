@@ -49,6 +49,8 @@ const MAX_CUSTOMER_NAME_CHARS = 200;
 const MAX_CUSTOMER_EXTERNAL_ID_CHARS = 255;
 const MAX_CUSTOMER_EMAIL_CHARS = 320;
 const MAX_PUBLIC_MESSAGE_CHARS = 8_000;
+const MAX_SOURCE_TITLE_CHARS = 200;
+const MAX_SOURCE_URL_CHARS = 2_048;
 
 function trimNullable(value: string | null, maxLength: number): string | null {
   const trimmed = value?.trim();
@@ -127,12 +129,24 @@ export async function buildSidechatContext(
   const recentPublicMessages = [...publicPage.messages]
     .sort(comparePublicMessages)
     .slice(-40)
-    .map((message) => ({
-      id: message.id,
-      role: message.author,
-      content: message.content.slice(0, MAX_PUBLIC_MESSAGE_CHARS),
-      createdAt: toEpochMilliseconds(message.createdAt),
-    }));
+    .map((message) => {
+      const sources = message.author === "bot"
+        ? message.sources.slice(0, 5).map((source) => ({
+          title: source.title.slice(0, MAX_SOURCE_TITLE_CHARS),
+          url: source.url === null
+            ? null
+            : source.url.slice(0, MAX_SOURCE_URL_CHARS),
+          type: source.type,
+        }))
+        : [];
+      return {
+        id: message.id,
+        role: message.author,
+        content: message.content.slice(0, MAX_PUBLIC_MESSAGE_CHARS),
+        createdAt: toEpochMilliseconds(message.createdAt),
+        ...(sources.length > 0 ? { sources } : {}),
+      };
+    });
 
   return {
     projectId: options.projectId,

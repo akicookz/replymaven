@@ -10,6 +10,9 @@ const RESERVED_SIDECHAT_TOOL_NAMES = new Set([
   "present_reply_draft",
   "request_team_help",
   "search_knowledge",
+  "list_knowledge",
+  "read_knowledge",
+  "apply_knowledge_change",
 ]);
 
 export interface McpToolAnnotations {

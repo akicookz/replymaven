@@ -46,6 +46,20 @@ import { ToolService } from "../../services/tool-service";
 import { decrypt, encrypt } from "../../services/encryption-service";
 import { type AppEnv } from "../../types";
 import { createSearchKnowledgeTool } from "../../chat-runtime/tools/internal/search-knowledge";
+import { ResourceService } from "../../services/resource-service";
+import {
+  applyKnowledgeChange,
+  listKnowledgeResources,
+  parseKnowledgeChangeWrite,
+  prepareKnowledgeChange,
+  readKnowledgeResource,
+  type KnowledgeChangeWrite,
+} from "../../services/sidechat-knowledge";
+import type { KnowledgeChangePreview } from "../../../shared/knowledge-change";
+import {
+  isOwnHelpCenterUrl,
+  resolveHelpCustomUrl,
+} from "../../helpdesk-render/build-help-url";
 import { executeHttpToolRequest } from "../../chat-runtime/tools/http-tool-executor";
 import type { MavenTurnContext, SupportToolDefinition } from "../../chat-runtime/types";
 import {
@@ -192,6 +206,7 @@ type AddMcpServerResult =
 
 const MCP_TOOL_TIMEOUT_MS = 30_000;
 const STAGED_TOOL_APPROVAL_TTL_MS = 24 * 60 * 60 * 1_000;
+const KNOWLEDGE_CHANGE_TOOL_REF = "knowledge:apply_knowledge_change";
 
 function stagedToolApprovalMatches(
   left: StagedToolApprovalEnvelope | null,
@@ -1502,13 +1517,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       return false;
     }
 
-    this.ensureMcpApplicationSchema();
-    const now = Date.now();
-    void this.sql`
-      DELETE FROM sidechat_tool_approval_payloads
-      WHERE expires_at <= ${now}
-    `;
-    const envelope: StagedToolApprovalEnvelope = {
+    return this.stageEncryptedApproval({
       v: 1,
       childName: request.childName,
       conversationId: request.conversationId,
@@ -1516,12 +1525,24 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       toolCallId: request.toolCallId,
       toolRef: request.toolRef,
       argumentsJson: request.argumentsJson,
-    };
+    });
+  }
+
+  private async stageEncryptedApproval(
+    envelope: StagedToolApprovalEnvelope,
+  ): Promise<boolean> {
+    if (!this.env.ENCRYPTION_KEY) return false;
+    this.ensureMcpApplicationSchema();
+    const now = Date.now();
+    void this.sql`
+      DELETE FROM sidechat_tool_approval_payloads
+      WHERE expires_at <= ${now}
+    `;
     const existing = this.sql<StagedToolApprovalRow>`
       SELECT child_name, conversation_id, actor_user_id, tool_call_id,
              tool_ref, ciphertext, created_at, expires_at
       FROM sidechat_tool_approval_payloads
-      WHERE tool_call_id = ${request.toolCallId}
+      WHERE tool_call_id = ${envelope.toolCallId}
       LIMIT 1
     `[0];
     if (existing) {
@@ -1537,8 +1558,8 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
         child_name, conversation_id, actor_user_id, tool_call_id, tool_ref,
         ciphertext, created_at, expires_at
       ) VALUES (
-        ${request.childName}, ${request.conversationId}, ${request.actorUserId},
-        ${request.toolCallId}, ${request.toolRef}, ${ciphertext}, ${now},
+        ${envelope.childName}, ${envelope.conversationId}, ${envelope.actorUserId},
+        ${envelope.toolCallId}, ${envelope.toolRef}, ${ciphertext}, ${now},
         ${now + STAGED_TOOL_APPROVAL_TTL_MS}
       )
       RETURNING tool_call_id
@@ -1548,7 +1569,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       SELECT child_name, conversation_id, actor_user_id, tool_call_id,
              tool_ref, ciphertext, created_at, expires_at
       FROM sidechat_tool_approval_payloads
-      WHERE tool_call_id = ${request.toolCallId}
+      WHERE tool_call_id = ${envelope.toolCallId}
       LIMIT 1
     `[0];
     if (!raced) return false;
@@ -1594,15 +1615,31 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
   private async consumeProjectToolApproval(
     request: ExecuteSidechatGatewayToolRequest,
   ): Promise<string | null> {
+    return this.consumeEncryptedApproval({
+      childName: request.childName,
+      conversationId: request.conversationId,
+      actorUserId: request.actorUserId,
+      toolCallId: request.toolCallId,
+      toolRef: request.toolRef,
+    });
+  }
+
+  private async consumeEncryptedApproval(input: {
+    childName: string;
+    conversationId: string;
+    actorUserId: string;
+    toolCallId: string;
+    toolRef: string;
+  }): Promise<string | null> {
     if (!this.env.ENCRYPTION_KEY) return null;
     this.ensureMcpApplicationSchema();
     const rows = this.sql<StagedToolApprovalRow>`
       DELETE FROM sidechat_tool_approval_payloads
-      WHERE child_name = ${request.childName}
-        AND conversation_id = ${request.conversationId}
-        AND actor_user_id = ${request.actorUserId}
-        AND tool_call_id = ${request.toolCallId}
-        AND tool_ref = ${request.toolRef}
+      WHERE child_name = ${input.childName}
+        AND conversation_id = ${input.conversationId}
+        AND actor_user_id = ${input.actorUserId}
+        AND tool_call_id = ${input.toolCallId}
+        AND tool_ref = ${input.toolRef}
         AND expires_at > ${Date.now()}
       RETURNING child_name, conversation_id, actor_user_id, tool_call_id,
                 tool_ref, ciphertext, created_at, expires_at
@@ -1612,11 +1649,11 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     const envelope = await this.decryptStagedToolApproval(row);
     if (
       !envelope ||
-      envelope.childName !== request.childName ||
-      envelope.conversationId !== request.conversationId ||
-      envelope.actorUserId !== request.actorUserId ||
-      envelope.toolCallId !== request.toolCallId ||
-      envelope.toolRef !== request.toolRef
+      envelope.childName !== input.childName ||
+      envelope.conversationId !== input.conversationId ||
+      envelope.actorUserId !== input.actorUserId ||
+      envelope.toolCallId !== input.toolCallId ||
+      envelope.toolRef !== input.toolRef
     ) {
       return null;
     }
@@ -1673,6 +1710,202 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       access: descriptor.access,
       approvalMode: "none",
       input: request.input,
+    });
+  }
+
+  private async assertSidechatKnowledgeAccess(
+    request: ExecuteSidechatKnowledgeRequest,
+  ): Promise<boolean> {
+    try {
+      this.assertRegisteredSidechat(request.childName, request.conversationId);
+    } catch {
+      return false;
+    }
+    const conversation = this.conversationDirectory().getConversation(
+      request.conversationId,
+    );
+    if (!conversation || conversation.archivedAt !== null) return false;
+    return this.canActorAccessProject(
+      drizzle(this.env.DB),
+      request.actorUserId,
+    );
+  }
+
+  async listSidechatKnowledge(
+    request: ExecuteSidechatKnowledgeRequest,
+  ): Promise<unknown> {
+    if (!await this.assertSidechatKnowledgeAccess(request)) {
+      return { error: "unavailable" };
+    }
+    const resources = await listKnowledgeResources(
+      new ResourceService(drizzle(this.env.DB), this.env.UPLOADS),
+      this.name,
+      typeof request.input.query === "string" ? request.input.query : null,
+    );
+    return { resources };
+  }
+
+  async readSidechatKnowledge(
+    request: ExecuteSidechatKnowledgeRequest,
+  ): Promise<unknown> {
+    if (!await this.assertSidechatKnowledgeAccess(request)) {
+      return { error: "unavailable" };
+    }
+    const result = await readKnowledgeResource(
+      new ResourceService(drizzle(this.env.DB), this.env.UPLOADS),
+      this.name,
+      {
+        resourceId: typeof request.input.resourceId === "string"
+          ? request.input.resourceId
+          : null,
+        title: typeof request.input.title === "string" ? request.input.title : null,
+        url: typeof request.input.url === "string" ? request.input.url : null,
+      },
+    );
+    if (result.status === "ready") return result.result;
+    if (result.status === "ambiguous") return { candidates: result.candidates };
+    return { error: result.error };
+  }
+
+  async prepareSidechatKnowledgeChange(
+    request: ExecuteSidechatKnowledgeRequest,
+  ): Promise<
+    | { status: "ready"; preview: KnowledgeChangePreview }
+    | { status: "ambiguous"; candidates: unknown; error: string }
+    | { status: "failed"; error: string }
+  > {
+    if (!await this.assertSidechatKnowledgeAccess(request)) {
+      return { status: "failed", error: "unavailable" };
+    }
+    const prepared = await prepareKnowledgeChange(
+      new ResourceService(drizzle(this.env.DB), this.env.UPLOADS),
+      this.name,
+      request.input,
+    );
+    if (prepared.status !== "ready") return prepared;
+    const blocked = await this.rejectOwnHelpCenterWrite(prepared.write);
+    if (blocked) return blocked;
+    if (!request.toolCallId) {
+      return { status: "ready", preview: prepared.preview };
+    }
+    const staged = await this.stageEncryptedApproval({
+      v: 1,
+      childName: request.childName,
+      conversationId: request.conversationId,
+      actorUserId: request.actorUserId,
+      toolCallId: request.toolCallId,
+      toolRef: KNOWLEDGE_CHANGE_TOOL_REF,
+      argumentsJson: JSON.stringify(prepared.write),
+    });
+    if (!staged) {
+      return { status: "failed", error: "approval_payload_unavailable" };
+    }
+    return { status: "ready", preview: prepared.preview };
+  }
+
+  private async rejectOwnHelpCenterWrite(
+    write: KnowledgeChangeWrite,
+  ): Promise<{ status: "failed"; error: string } | null> {
+    if (write.action !== "create_webpage") return null;
+    const db = drizzle(this.env.DB);
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(this.name);
+    if (!project) return { status: "failed", error: "unavailable" };
+    const settings = await projectService.getSettings(this.name);
+    if (
+      !isOwnHelpCenterUrl(
+        write.url,
+        project.slug,
+        resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
+      )
+    ) {
+      return null;
+    }
+    return {
+      status: "failed",
+      error:
+        "This page is part of your help center. Published articles are indexed automatically.",
+    };
+  }
+
+  async executeSidechatKnowledgeChange(
+    request: ExecuteSidechatKnowledgeRequest,
+  ): Promise<ExecuteProjectToolResult> {
+    const startedAt = Date.now();
+    const finish = (
+      result: ExecuteProjectToolResult,
+    ): ExecuteProjectToolResult => {
+      const finishedAt = Date.now();
+      this.writeSidechatActionAudit({
+        projectId: this.name,
+        childName: request.childName,
+        conversationId: request.conversationId,
+        connectionId: "knowledge",
+        toolName: "apply_knowledge_change",
+        catalogFingerprint: "knowledge:v1",
+        access: "write",
+        actorUserId: request.actorUserId,
+        approvalMode: "once",
+        status: result.status,
+        startedAt,
+        finishedAt,
+        durationMs: Math.max(0, finishedAt - startedAt),
+        safeActivity: result.safeActivity,
+        ...(result.errorCode ? { errorCode: result.errorCode } : {}),
+      });
+      return result;
+    };
+    if (!request.toolCallId || !await this.assertSidechatKnowledgeAccess(request)) {
+      return finish({
+        status: "unavailable",
+        safeActivity: "Apply",
+        errorCode: "unavailable",
+      });
+    }
+    const stagedJson = await this.consumeEncryptedApproval({
+      childName: request.childName,
+      conversationId: request.conversationId,
+      actorUserId: request.actorUserId,
+      toolCallId: request.toolCallId,
+      toolRef: KNOWLEDGE_CHANGE_TOOL_REF,
+    });
+    let stagedWrite: unknown = null;
+    if (stagedJson) {
+      try {
+        stagedWrite = JSON.parse(stagedJson) as unknown;
+      } catch {
+        stagedWrite = null;
+      }
+    }
+    const write = parseKnowledgeChangeWrite(stagedWrite);
+    if (!write) {
+      return finish({
+        status: "denied",
+        safeActivity: "Apply",
+        errorCode: "approval_payload_unavailable",
+      });
+    }
+    const applied = await applyKnowledgeChange(
+      new ResourceService(drizzle(this.env.DB), this.env.UPLOADS),
+      this.env,
+      this.name,
+      write,
+      (promise) => {
+        this.ctx.waitUntil(promise);
+      },
+    );
+    if (!applied.ok) {
+      return finish({
+        status: "failed",
+        safeActivity: "Apply",
+        errorCode: "apply_failed",
+        output: { error: applied.error },
+      });
+    }
+    return finish({
+      status: "completed",
+      safeActivity: "Applied knowledge change",
+      output: { ok: true, resourceId: applied.resourceId },
     });
   }
 
