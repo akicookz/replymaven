@@ -8,6 +8,16 @@ export function hasVisibleSidechatAssistantText(message: UIMessage): boolean {
   });
 }
 
+export function sidechatTurnNeedsTextWrapUp(input: {
+  usedTools: boolean;
+  lastStepHadToolCalls: boolean;
+  lastStepHasText: boolean;
+}): boolean {
+  if (!input.usedTools) return false;
+  if (input.lastStepHadToolCalls) return true;
+  return !input.lastStepHasText;
+}
+
 export function resolveCompletedSidechatSummary(input: {
   publishedDraft: boolean;
   hasAssistantText: boolean;

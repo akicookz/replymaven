@@ -27,7 +27,7 @@ export interface KnowledgeCandidate {
 export interface KnowledgeReadResult {
   resource: KnowledgeCandidate;
   content: string | null;
-  pairs: FaqPair[] | null;
+  pairs: Array<{ index: number; question: string; answer: string }> | null;
 }
 
 export type KnowledgeChangeWrite =
@@ -41,9 +41,10 @@ export type KnowledgeChangeWrite =
   | {
       action: "update_faq";
       resourceId: string;
+      pairIndex: number;
+      pair: FaqPair;
       title: string | null;
       description: string | null;
-      pairs: FaqPair[];
       reason: string | null;
     }
   | {
@@ -63,13 +64,17 @@ export type KnowledgePrepareResult =
   | { status: "ambiguous"; candidates: KnowledgeCandidate[]; error: string }
   | { status: "failed"; error: string };
 
+const MAX_FAQ_PAIRS = 50;
+
+export function formatFaqPair(pair: FaqPair): string {
+  return `## Q: ${pair.question}\n\n${pair.answer}`;
+}
+
 export function formatFaqMarkdown(
   title: string,
   pairs: FaqPair[],
 ): string {
-  const sections = pairs.map(
-    (pair) => `## Q: ${pair.question}\n\n${pair.answer}`,
-  );
+  const sections = pairs.map((pair) => formatFaqPair(pair));
   return `# FAQ: ${title}\n\n${sections.join("\n\n---\n\n")}`;
 }
 
@@ -186,7 +191,11 @@ export async function readKnowledgeResource(
     result: {
       resource: toCandidate(resource),
       content: raw == null ? null : clipText(raw, MAX_READ_CHARS),
-      pairs: content?.pairs ?? null,
+      pairs: content?.pairs?.map((pair, index) => ({
+        index,
+        question: pair.question,
+        answer: pair.answer,
+      })) ?? null,
     },
   };
 }
@@ -202,8 +211,35 @@ function isStoredFaqPairs(value: unknown): value is FaqPair[] {
     );
 }
 
+function parsePair(question: unknown, answer: unknown): FaqPair | null {
+  if (typeof question !== "string" || typeof answer !== "string") return null;
+  const pair = { question: question.trim(), answer: answer.trim() };
+  if (!pair.question || !pair.answer || isFaqPairOverLimit(pair)) return null;
+  return pair;
+}
+
+function parsePairIndex(value: unknown, maxInclusive: number): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value)) return null;
+  if (value < 0 || value > maxInclusive) return null;
+  return value;
+}
+
+function replaceFaqPair(
+  current: FaqPair[],
+  index: number,
+  pair: FaqPair,
+): FaqPair[] | null {
+  if (index < 0 || index > current.length) return null;
+  if (index === current.length && current.length >= MAX_FAQ_PAIRS) return null;
+  const next = current.slice();
+  if (index === current.length) next.push(pair);
+  else next[index] = pair;
+  if (isFaqSetOverLimit(next)) return null;
+  return next;
+}
+
 function parsePairs(value: unknown): FaqPair[] | null {
-  if (!Array.isArray(value) || value.length === 0 || value.length > 50) {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_FAQ_PAIRS) {
     return null;
   }
   const pairs: FaqPair[] = [];
@@ -254,12 +290,12 @@ export async function prepareKnowledgeChange(
   const reason = optionalText(input.reason, 500);
   if (action === "create_faq") {
     const title = optionalText(input.title, 200);
-    const pairs = parsePairs(input.pairs);
+    const pair = parsePair(input.question, input.answer);
     const description = optionalText(input.description, FAQ_DESCRIPTION_MAX_CHARS);
-    if (!title || !pairs) {
-      return { status: "failed", error: "create_faq needs a title and FAQ pairs." };
+    if (!title || !pair) {
+      return { status: "failed", error: "create_faq needs a title, question, and answer." };
     }
-    const after = clipText(formatFaqMarkdown(title, pairs), MAX_DIFF_CHARS);
+    const after = clipText(formatFaqPair(pair), MAX_DIFF_CHARS);
     return {
       status: "ready",
       preview: {
@@ -268,11 +304,13 @@ export async function prepareKnowledgeChange(
         url: null,
         type: "faq",
         resourceId: null,
+        pairIndex: 0,
+        pairQuestion: pair.question,
         before: "",
         after,
         reason,
       },
-      write: { action, title, description, pairs, reason },
+      write: { action, title, description, pairs: [pair], reason },
     };
   }
 
@@ -290,6 +328,8 @@ export async function prepareKnowledgeChange(
         url,
         type: "webpage",
         resourceId: null,
+        pairIndex: null,
+        pairQuestion: null,
         before: "",
         after: `${title}\n${url}`,
         reason,
@@ -299,9 +339,9 @@ export async function prepareKnowledgeChange(
   }
 
   if (action === "update_faq") {
-    const pairs = parsePairs(input.pairs);
-    if (!pairs) {
-      return { status: "failed", error: "update_faq needs replacement FAQ pairs." };
+    const pair = parsePair(input.question, input.answer);
+    if (!pair) {
+      return { status: "failed", error: "update_faq needs a question and answer." };
     }
     const matches = await findKnowledgeResources(service, projectId, {
       resourceId: optionalText(input.resourceId, 80),
@@ -327,6 +367,18 @@ export async function prepareKnowledgeChange(
         error: "This FAQ is stored as plain text. Update it from the dashboard first.",
       };
     }
+    const pairIndex = parsePairIndex(input.pairIndex, current.pairs.length);
+    if (pairIndex === null) {
+      return {
+        status: "failed",
+        error: `update_faq needs pairIndex from 0 to ${current.pairs.length}. ${current.pairs.length} appends a pair.`,
+      };
+    }
+    const next = replaceFaqPair(current.pairs, pairIndex, pair);
+    if (!next) {
+      return { status: "failed", error: "This pair change exceeds the FAQ size limit." };
+    }
+    const currentPair = current.pairs[pairIndex] ?? null;
     const title = optionalText(input.nextTitle, 200) ?? resource.title;
     const description = optionalText(input.description, FAQ_DESCRIPTION_MAX_CHARS) ??
       resource.description;
@@ -338,16 +390,19 @@ export async function prepareKnowledgeChange(
         url: null,
         type: "faq",
         resourceId: resource.id,
-        before: clipText(formatFaqMarkdown(resource.title, current.pairs), MAX_DIFF_CHARS),
-        after: clipText(formatFaqMarkdown(title, pairs), MAX_DIFF_CHARS),
+        pairIndex,
+        pairQuestion: pair.question,
+        before: clipText(currentPair ? formatFaqPair(currentPair) : "", MAX_DIFF_CHARS),
+        after: clipText(formatFaqPair(pair), MAX_DIFF_CHARS),
         reason,
       },
       write: {
         action,
         resourceId: resource.id,
+        pairIndex,
+        pair,
         title,
         description,
-        pairs,
         reason,
       },
     };
@@ -382,6 +437,8 @@ export async function prepareKnowledgeChange(
         url: resource.url,
         type: resource.type === "faq" ? "faq" : "webpage",
         resourceId: resource.id,
+        pairIndex: null,
+        pairQuestion: null,
         before: label,
         after: `${label}\n\nReindex this source.`,
         reason,
@@ -424,11 +481,17 @@ export async function applyKnowledgeChange(
   }
 
   if (write.action === "update_faq") {
+    const current = await service.getResourceContent(write.resourceId, projectId);
+    if (!current || !isStoredFaqPairs(current.pairs)) {
+      return { ok: false, error: "FAQ update failed." };
+    }
+    const next = replaceFaqPair(current.pairs, write.pairIndex, write.pair);
+    if (!next) return { ok: false, error: "FAQ pair index is out of range." };
     const updated = await service.updateFaqResource(
       write.resourceId,
       projectId,
       write.title ?? undefined,
-      write.pairs,
+      next,
       write.description,
     );
     if (!updated) return { ok: false, error: "FAQ update failed." };
@@ -514,14 +577,21 @@ export function parseKnowledgeChangeWrite(
   }
   if (write.action === "update_faq") {
     const resourceId = optionalText(write.resourceId, 80);
-    const pairs = parsePairs(write.pairs);
-    if (!resourceId || !pairs) return null;
+    const rawPair = write.pair;
+    if (!rawPair || typeof rawPair !== "object" || Array.isArray(rawPair)) {
+      return null;
+    }
+    const pairRecord = rawPair as Record<string, unknown>;
+    const pair = parsePair(pairRecord.question, pairRecord.answer);
+    const pairIndex = parsePairIndex(write.pairIndex, MAX_FAQ_PAIRS);
+    if (!resourceId || !pair || pairIndex === null) return null;
     return {
       action: "update_faq",
       resourceId,
+      pairIndex,
+      pair,
       title: optionalText(write.title, 200),
       description: optionalText(write.description, FAQ_DESCRIPTION_MAX_CHARS),
-      pairs,
       reason,
     };
   }

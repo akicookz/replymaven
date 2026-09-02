@@ -1,5 +1,5 @@
-import { useId } from "react";
-import { Check, X } from "lucide-react";
+import { useId, useState } from "react";
+import { Check, ChevronDown, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import type { MessageKnowledgeChange } from "@/lib/inbox/types";
@@ -52,6 +52,14 @@ function DiffView({ before, after }: { before: string; after: string }) {
   );
 }
 
+function statusLabel(status: MessageKnowledgeChange["status"]): string | null {
+  if (status === "applying") return "Applying";
+  if (status === "applied") return "Applied";
+  if (status === "rejected") return "Rejected";
+  if (status === "error") return "Failed";
+  return null;
+}
+
 export default function SidechatKnowledgeChangeCard({
   change,
   readOnly,
@@ -65,6 +73,12 @@ export default function SidechatKnowledgeChangeCard({
     Boolean(approvalId) &&
     Boolean(onApprove) &&
     Boolean(onReject);
+  const decided = status !== "pending";
+  const [expanded, setExpanded] = useState(false);
+  const showDetails = !decided || expanded;
+  const heading = knowledgeChangeHeading(preview.action);
+  const subtitle = preview.pairQuestion ?? preview.title;
+  const decidedLabel = statusLabel(status);
 
   return (
     <Card
@@ -73,30 +87,51 @@ export default function SidechatKnowledgeChangeCard({
       className="glass-focus w-full gap-0 rounded-2xl p-4"
     >
       <div className="flex min-w-0 items-center justify-between gap-3">
-        <h3
-          id={titleId}
-          className="text-balance text-[13px] font-semibold text-ink-3"
-        >
-          {knowledgeChangeHeading(preview.action)}
-        </h3>
-        {status === "applying" && (
-          <span className="text-[12px] font-medium text-ink-5">Applying</span>
+        {decided ? (
+          <button
+            type="button"
+            className="flex min-w-0 items-center gap-1.5 text-left"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((open) => !open)}
+          >
+            <h3
+              id={titleId}
+              className="text-balance text-[13px] font-semibold text-ink-3"
+            >
+              {heading}
+            </h3>
+            <ChevronDown
+              aria-hidden="true"
+              className={cn(
+                "size-3.5 shrink-0 text-ink-5 motion-safe:transition-transform",
+                expanded && "rotate-180",
+              )}
+            />
+          </button>
+        ) : (
+          <h3
+            id={titleId}
+            className="text-balance text-[13px] font-semibold text-ink-3"
+          >
+            {heading}
+          </h3>
         )}
-        {status === "applied" && (
-          <span className="text-[12px] font-medium text-emerald-700 dark:text-emerald-400">
-            Applied
+        {decidedLabel && (
+          <span
+            className={cn(
+              "text-[12px] font-medium",
+              status === "applied" && "text-emerald-700 dark:text-emerald-400",
+              status === "error" && "text-destructive",
+              (status === "rejected" || status === "applying") && "text-ink-5",
+            )}
+          >
+            {decidedLabel}
           </span>
-        )}
-        {status === "rejected" && (
-          <span className="text-[12px] font-medium text-ink-5">Rejected</span>
-        )}
-        {status === "error" && (
-          <span className="text-[12px] font-medium text-destructive">Failed</span>
         )}
       </div>
 
       <p className="mt-1 text-pretty text-[13px] text-ink-2">
-        {preview.title}
+        {subtitle}
         {preview.url ? (
           <>
             <span aria-hidden="true"> · </span>
@@ -104,11 +139,23 @@ export default function SidechatKnowledgeChangeCard({
           </>
         ) : null}
       </p>
-      {preview.reason && (
-        <p className="mt-1 text-pretty text-[12.5px] text-ink-5">{preview.reason}</p>
-      )}
 
-      <DiffView before={preview.before} after={preview.after} />
+      {showDetails && (
+        <>
+          {preview.pairQuestion && preview.title !== preview.pairQuestion && (
+            <p className="mt-1 text-pretty text-[12.5px] text-ink-5">
+              {preview.title}
+            </p>
+          )}
+          {preview.reason && (
+            <p className="mt-1 text-pretty text-[12.5px] text-ink-5">
+              {preview.reason}
+            </p>
+          )}
+
+          <DiffView before={preview.before} after={preview.after} />
+        </>
+      )}
 
       {errorText && status === "error" && (
         <p className="mt-2 text-pretty text-[12px] text-destructive">{errorText}</p>

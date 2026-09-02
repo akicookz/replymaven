@@ -104,6 +104,7 @@ import { buildSidechatSystemPrompt } from "../sidechat/sidechat-prompt";
 import {
   hasVisibleSidechatAssistantText,
   resolveCompletedSidechatSummary,
+  sidechatTurnNeedsTextWrapUp,
   summarizeStreamFinish,
 } from "../sidechat/sidechat-turn-outcome";
 import {
@@ -433,12 +434,13 @@ async function executeSidechatTurn(input: {
       continuation: input.continuation,
       toolCount: Object.keys(tools).length,
     });
+    const modelMessages = await convertToModelMessages(
+      selectSidechatModelMessages(input.agent.messages, input.continuation),
+    );
     const result = streamText({
       model,
       system: buildSidechatSystemPrompt(context),
-      messages: await convertToModelMessages(
-        selectSidechatModelMessages(input.agent.messages, input.continuation),
-      ),
+      messages: modelMessages,
       tools,
       maxRetries: 4,
       onError({ error }) {
@@ -584,6 +586,49 @@ async function executeSidechatTurn(input: {
           }),
         ),
     );
+    const steps = await result.steps;
+    const lastStep = steps.at(-1);
+    if (
+      sidechatTurnNeedsTextWrapUp({
+        usedTools: steps.some((step) => step.toolCalls.length > 0),
+        lastStepHadToolCalls: (lastStep?.toolCalls.length ?? 0) > 0,
+        lastStepHasText: Boolean(lastStep?.text.trim()),
+      }) &&
+      input.abortSignal?.aborted !== true
+    ) {
+      const wrapUp = streamText({
+        model,
+        system: `${buildSidechatSystemPrompt(context)}\n\nWrite a short chat reply now. Do not call tools.`,
+        messages: [...modelMessages, ...(await result.response).messages],
+        toolChoice: "none",
+        maxRetries: 4,
+        onError({ error }) {
+          logError("sidechat_turn.wrap_up_error", error, {
+            childName: input.agent.name,
+            conversationId: input.conversationId,
+            continuation: input.continuation,
+          });
+        },
+        providerOptions: {
+          openai: { reasoningSummary: "auto" },
+          google: { thinkingConfig: { includeThoughts: true } },
+        },
+        abortSignal: input.abortSignal,
+        onFinish(event) {
+          logInfo("sidechat_turn.wrap_up_finished", {
+            childName: input.agent.name,
+            conversationId: input.conversationId,
+            continuation: input.continuation,
+            ...summarizeStreamFinish(event),
+          });
+        },
+      });
+      input.writer.merge(
+        wrapUp.toUIMessageStream<SidechatUIMessage>({
+          sendReasoning: true,
+        }),
+      );
+    }
   } catch (error) {
     logError("sidechat_turn.setup_failed", error, {
       childName: input.agent.name,

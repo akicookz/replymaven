@@ -400,6 +400,14 @@ function readKnowledgeChangePreview(
     resourceId: data.resourceId === null
       ? null
       : boundedString(data.resourceId, 80),
+    pairIndex: typeof data.pairIndex === "number" &&
+        Number.isInteger(data.pairIndex) &&
+        data.pairIndex >= 0
+      ? data.pairIndex
+      : null,
+    pairQuestion: typeof data.pairQuestion === "string"
+      ? data.pairQuestion.slice(0, 200) || null
+      : null,
     before,
     after,
     reason: data.reason === null ? null : boundedString(data.reason, 500),

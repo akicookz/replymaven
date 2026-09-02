@@ -46,9 +46,11 @@ const applyInputSchema = jsonSchema<{
   nextTitle?: string;
   url?: string;
   resourceId?: string;
+  pairIndex?: number;
+  question?: string;
+  answer?: string;
   description?: string;
   reason?: string;
-  pairs?: Array<{ question: string; answer: string }>;
 }>({
   type: "object",
   required: ["action"],
@@ -60,25 +62,22 @@ const applyInputSchema = jsonSchema<{
     title: { type: "string" },
     nextTitle: {
       type: "string",
-      description: "Replacement FAQ title. Omit to keep the current title.",
+      description: "Replacement FAQ resource title. Omit to keep the current title.",
     },
     url: { type: "string" },
     resourceId: { type: "string" },
+    pairIndex: {
+      type: "integer",
+      minimum: 0,
+      description:
+        "For update_faq, the pair index from read_knowledge. Equal to the current length appends a pair.",
+    },
+    question: { type: "string" },
+    answer: { type: "string" },
     description: { type: "string" },
     reason: {
       type: "string",
       description: "Why this change should be applied.",
-    },
-    pairs: {
-      type: "array",
-      items: {
-        type: "object",
-        required: ["question", "answer"],
-        properties: {
-          question: { type: "string" },
-          answer: { type: "string" },
-        },
-      },
     },
   },
 });
@@ -197,7 +196,7 @@ export function buildSidechatKnowledgeTools(options: SidechatKnowledgeToolOption
     [APPLY_KNOWLEDGE_CHANGE_TOOL_NAME]: dynamicTool({
       title: "Apply knowledge change",
       description:
-        "Propose a knowledge-base change for the human to approve: create or update an FAQ, add a webpage, or reindex. The change is never applied until the human approves the card. For update_faq, title locates the current FAQ. Use nextTitle only to rename it.",
+        "Propose a knowledge-base change for the human to approve: create or update one FAQ pair, add a webpage, or reindex. The change is never applied until the human approves the card. update_faq writes one pair at pairIndex. create_faq takes one question and answer.",
       inputSchema: applyInputSchema,
       async needsApproval(input, context) {
         if (!isRecord(input)) return false;

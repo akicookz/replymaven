@@ -15,6 +15,8 @@ export interface KnowledgeChangePreview {
   url: string | null;
   type: KnowledgeChangeType;
   resourceId: string | null;
+  pairIndex: number | null;
+  pairQuestion: string | null;
   before: string;
   after: string;
   reason: string | null;
