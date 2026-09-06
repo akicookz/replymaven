@@ -31,6 +31,7 @@ import {
 import ProfileSetupDialog from "@/components/ProfileSetupDialog";
 import { DashboardCommandProvider } from "@/components/commands/DashboardCommandProvider";
 import { signOut, useSession } from "@/lib/auth-client";
+import { resetFirstPartyPostHog } from "@/lib/posthog";
 import { cn } from "@/lib/utils";
 import { useSubscription } from "@/hooks/use-subscription";
 import { getTrialDaysRemaining, usagePercent } from "@/lib/plan";
@@ -181,6 +182,7 @@ function Layout() {
   }
 
   async function handleSignOut() {
+    resetFirstPartyPostHog();
     await signOut();
     navigate("/");
   }

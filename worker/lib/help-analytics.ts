@@ -20,10 +20,18 @@ export type HelpAnalyticsProvider = (typeof HELP_ANALYTICS_PROVIDERS)[number];
 export type PosthogHost = "us" | "eu";
 
 export type HelpAnalyticsEmbed =
-  | { provider: "posthog"; apiKey: string; host: PosthogHost }
+  | {
+      provider: "posthog";
+      apiKey: string;
+      host: PosthogHost;
+      // First-party ReplyMaven docs only. Tenant help embeds never set this.
+      sessionRecording?: boolean;
+    }
   | { provider: "gtag"; measurementId: string }
   | { provider: "meta"; pixelId: string }
   | { provider: "custom"; src: string };
+
+export const FIRST_PARTY_POSTHOG_PROJECT_SLUG = "replymaven";
 
 export interface HelpAnalyticsScript {
   src?: string;
@@ -123,7 +131,13 @@ export function buildHelpAnalyticsScripts(
   const scripts: HelpAnalyticsScript[] = [];
   for (const embed of embeds) {
     if (embed.provider === "posthog") {
-      scripts.push({ js: posthogInitScript(embed.apiKey, embed.host) });
+      scripts.push({
+        js: posthogInitScript(
+          embed.apiKey,
+          embed.host,
+          embed.sessionRecording === true,
+        ),
+      });
       continue;
     }
     if (embed.provider === "gtag") {
@@ -189,8 +203,42 @@ function sanitizeHelpAnalyticsEmbed(
   return null;
 }
 
-function posthogInitScript(apiKey: string, host: PosthogHost): string {
-  return `${POSTHOG_STUB}posthog.init(${JSON.stringify(apiKey)},{api_host:${JSON.stringify(POSTHOG_API_HOSTS[host])},disable_session_recording:true});`;
+export function withFirstPartyPosthog(
+  analytics: HelpAnalyticsEmbed[],
+  options: {
+    projectSlug: string;
+    apiKey: string | undefined;
+    host: string | undefined;
+  },
+): HelpAnalyticsEmbed[] {
+  if (options.projectSlug !== FIRST_PARTY_POSTHOG_PROJECT_SLUG) {
+    return analytics;
+  }
+  const apiKey = options.apiKey?.trim() ?? "";
+  if (!POSTHOG_API_KEY_RE.test(apiKey)) return analytics;
+  const host: PosthogHost =
+    options.host === POSTHOG_API_HOSTS.eu ? "eu" : "us";
+  return [
+    { provider: "posthog", apiKey, host, sessionRecording: true },
+    ...analytics.filter((embed) => embed.provider !== "posthog"),
+  ];
+}
+
+function posthogInitScript(
+  apiKey: string,
+  host: PosthogHost,
+  sessionRecording = false,
+): string {
+  if (!sessionRecording) {
+    return `${POSTHOG_STUB}posthog.init(${JSON.stringify(apiKey)},{api_host:${JSON.stringify(POSTHOG_API_HOSTS[host])},disable_session_recording:true});`;
+  }
+  const config = {
+    api_host: POSTHOG_API_HOSTS[host],
+    defaults: "2026-01-30",
+    person_profiles: "identified_only",
+    session_recording: { maskAllInputs: true },
+  };
+  return `${POSTHOG_STUB}posthog.init(${JSON.stringify(apiKey)},${JSON.stringify(config)});`;
 }
 
 function gtagInitScript(measurementId: string): string {

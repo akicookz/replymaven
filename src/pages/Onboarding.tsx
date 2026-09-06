@@ -20,6 +20,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/Logo";
 import { signOut } from "@/lib/auth-client";
+import { resetFirstPartyPostHog } from "@/lib/posthog";
 import { PricingCardsSelect, BillingToggle, getCtaLabel } from "@/components/PricingCards";
 import {
   Select,
@@ -1245,6 +1246,7 @@ function OnboardingHeader() {
   const navigate = useNavigate();
 
   async function handleSignOut() {
+    resetFirstPartyPostHog();
     await signOut();
     navigate("/");
   }

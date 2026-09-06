@@ -173,7 +173,10 @@ import { isReturningVisitorGap, toToolDefinition } from "./chat-runtime/types";
 import { logError, logWarn } from "./observability";
 import { slugify } from "./lib/slugify";
 import { parseHelpTopNav } from "./lib/help-top-nav";
-import { parseHelpAnalytics } from "./lib/help-analytics";
+import {
+  parseHelpAnalytics,
+  withFirstPartyPosthog,
+} from "./lib/help-analytics";
 import {
   handleConversationCustomer,
   handleCreateCustomer,
@@ -8291,7 +8294,14 @@ async function beginPublicHelpRequest(c: Context<HonoAppContext>): Promise<
 
   return {
     ok: true,
-    page,
+    page: {
+      ...page,
+      analytics: withFirstPartyPosthog(page.analytics, {
+        projectSlug: page.project.slug,
+        apiKey: c.env.POSTHOG_PROJECT_API_KEY,
+        host: c.env.POSTHOG_HOST,
+      }),
+    },
     noindex: hostedHelpShouldNoindex({
       ownDocsDispatch,
       proxyPass,

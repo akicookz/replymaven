@@ -849,6 +849,8 @@ After a conversation closes:
 Defined in `wrangler.jsonc` vars:
 - `BETTER_AUTH_URL` -- auth base URL (`http://localhost:5173` in dev, `https://replymaven.com` in prod)
 - `AI_MODEL` -- AI model identifier (`gemini-3-flash-preview` or `gpt-5.6-terra`, default `gemini-3-flash-preview`)
+- `POSTHOG_PROJECT_API_KEY` -- public PostHog project token (`phc_...`) for first-party session replay on `/docs` (Worker HTML inject). The SPA (landing, onboarding) uses the same public token in `src/lib/posthog.ts`; the browser cannot read Wrangler vars.
+- `POSTHOG_HOST` -- PostHog ingest host (`https://us.i.posthog.com`) for the `/docs` inject
 
 Secrets (via `.dev.vars` locally, `wrangler secret put` for production):
 - `BETTER_AUTH_SECRET`
