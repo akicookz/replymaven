@@ -767,7 +767,16 @@ export const mcpAuthModeSchema = z.enum([
 export const createProjectMcpConnectionSchema = z
   .object({
     presetKey: z
-      .enum(["posthog", "stripe", "slack", "attio", "linear"])
+      .enum([
+        "posthog",
+        "stripe",
+        "slack",
+        "attio",
+        "linear",
+        "sentry",
+        "cloudflare-observability",
+        "vercel-observability",
+      ])
       .optional(),
     name: z.string().trim().min(1).max(100).optional(),
     url: z.string().trim().min(1).max(2048).optional(),

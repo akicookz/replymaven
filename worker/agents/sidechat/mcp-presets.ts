@@ -5,7 +5,10 @@ export type McpPresetKey =
   | "stripe"
   | "slack"
   | "attio"
-  | "linear";
+  | "linear"
+  | "sentry"
+  | "cloudflare-observability"
+  | "vercel-observability";
 
 export type McpAuthMode = "oauth" | "bearer";
 
@@ -54,6 +57,27 @@ const MCP_PRESETS: readonly McpPreset[] = Object.freeze([
     url: "https://mcp.linear.app/mcp",
     auth: Object.freeze(["oauth"] satisfies McpAuthMode[]),
     icon: "/integrations/linear.svg",
+  }),
+  Object.freeze({
+    key: "sentry",
+    label: "Sentry",
+    url: "https://mcp.sentry.dev/mcp",
+    auth: Object.freeze(["oauth"] satisfies McpAuthMode[]),
+    icon: "/integrations/sentry.svg",
+  }),
+  Object.freeze({
+    key: "cloudflare-observability",
+    label: "Cloudflare Observability",
+    url: "https://observability.mcp.cloudflare.com/mcp",
+    auth: Object.freeze(["oauth"] satisfies McpAuthMode[]),
+    icon: "/integrations/cloudflare.svg",
+  }),
+  Object.freeze({
+    key: "vercel-observability",
+    label: "Vercel Observability",
+    url: "https://mcp.vercel.com",
+    auth: Object.freeze(["oauth"] satisfies McpAuthMode[]),
+    icon: "/integrations/vercel.svg",
   }),
 ]);
 
