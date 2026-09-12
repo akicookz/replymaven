@@ -141,11 +141,33 @@ function policyFromConnection(connection: McpConnection): ToolPolicyInput[] {
   }));
 }
 
+function isMcpLinked(connection: McpConnection | undefined): boolean {
+  if (!connection) return false;
+  return connection.state === "connecting" ||
+    connection.state === "connected" ||
+    connection.state === "discovering" ||
+    connection.state === "ready";
+}
+
 function isConnectionSettling(connection: McpConnection | undefined): boolean {
   if (!connection || connection.issue) return false;
   return connection.state === "connecting" ||
-    connection.state === "connected" ||
-    connection.state === "discovering";
+    connection.state === "discovering" ||
+    (connection.state === "connected" && connection.tools.length === 0);
+}
+
+function connectionCardStatus(
+  connection: McpConnection | undefined,
+  settling: boolean,
+): "Connected" | "Connecting" | "Connect" {
+  if (isMcpLinked(connection)) return "Connected";
+  if (settling) return "Connecting";
+  return "Connect";
+}
+
+function emptyToolsCopy(connection: McpConnection): string {
+  if (isConnectionSettling(connection)) return "Loading tools.";
+  return "No tools discovered yet. Refresh to try again.";
 }
 
 function safetyForTool(tool: McpTool): McpToolSafety {
@@ -255,7 +277,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
       void queryClient.invalidateQueries({ queryKey });
       if (connection.authUrl) {
         window.location.assign(connection.authUrl);
-      } else if (connection.state === "ready") {
+      } else if (isMcpLinked(connection)) {
         setExpandedConnectionId(connection.id);
       } else if (input.presetKey) {
         toast.error(`Could not finish connecting ${connection.name}.`);
@@ -370,7 +392,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
     preset: McpPreset,
     connection: McpConnection | undefined,
   ): void {
-    if (connection?.state === "ready") {
+    if (connection && isMcpLinked(connection)) {
       toggleConnection(connection);
       return;
     }
@@ -385,7 +407,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
           const refreshed = (result as { connection?: McpConnection }).connection;
           if (refreshed?.authUrl) {
             window.location.assign(refreshed.authUrl);
-          } else if (refreshed?.state === "ready") {
+          } else if (refreshed && isMcpLinked(refreshed)) {
             setExpandedConnectionId(refreshed.id);
           } else {
             toast.error(`Could not finish connecting ${preset.label}.`);
@@ -398,7 +420,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
   }
 
   function activateCustomConnection(connection: McpConnection): void {
-    if (connection.state === "ready") {
+    if (isMcpLinked(connection)) {
       toggleConnection(connection);
       return;
     }
@@ -412,7 +434,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
         const refreshed = (result as { connection?: McpConnection }).connection;
         if (refreshed?.authUrl) {
           window.location.assign(refreshed.authUrl);
-        } else if (refreshed?.state === "ready") {
+        } else if (refreshed && isMcpLinked(refreshed)) {
           setExpandedConnectionId(refreshed.id);
         } else {
           toast.error(`Could not finish connecting ${connection.name}.`);
@@ -624,9 +646,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
 
         {connection.tools.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            {connection.issue === "tool_discovery_failed"
-              ? "Tool discovery failed. Refresh to try again."
-              : "No tools discovered yet."}
+            {emptyToolsCopy(connection)}
           </p>
         ) : (
           <div className="space-y-4">
@@ -828,9 +848,11 @@ function McpConnections({ projectId }: McpConnectionsProps) {
     connection: McpConnection | undefined,
     onActivate: () => void,
   ) {
-    const connected = connection?.state === "ready";
+    const connected = isMcpLinked(connection);
     const settling = isConnectionSettling(connection);
-    const expanded = connected && expandedConnectionId === connection.id;
+    const expanded = Boolean(
+      connected && connection && expandedConnectionId === connection.id,
+    );
     const busy =
       (connect.isPending && connect.variables?.presetKey === key) ||
       (refresh.isPending && refresh.variables === connection?.id) ||
@@ -846,7 +868,11 @@ function McpConnections({ projectId }: McpConnectionsProps) {
         <button
           type="button"
           aria-expanded={connected ? expanded : undefined}
-          aria-controls={connected ? `mcp-connection-${connection.id}` : undefined}
+          aria-controls={
+            connected && connection
+              ? `mcp-connection-${connection.id}`
+              : undefined
+          }
           disabled={!connected && (!data?.canManage || settling)}
           onClick={onActivate}
           className="flex min-h-14 w-full min-w-0 items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default disabled:opacity-70"
@@ -869,7 +895,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
             )}
           >
             {busy && <Loader2 className="size-3.5 animate-spin" />}
-            {connected ? "Connected" : settling ? "Connecting" : "Connect"}
+            {connectionCardStatus(connection, settling)}
           </span>
         </button>
         {expanded && connection && renderConnectionSettings(connection)}

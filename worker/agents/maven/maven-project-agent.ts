@@ -325,9 +325,28 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
   constructor(ctx: DurableObjectState, env: AppEnv) {
     super(ctx, env);
     this.mcp.configureOAuthCallback({
-      successRedirect:
-        `/app/projects/${encodeURIComponent(this.name)}/quick-actions?tab=tools`,
+      successRedirect: this.mcpOAuthReturnPath(),
+      customHandler: (result) => this.finishMcpOAuthCallback(result.authSuccess),
     });
+  }
+
+  private mcpOAuthReturnPath(): string {
+    return `/app/projects/${encodeURIComponent(this.name)}/support-chat/tools`;
+  }
+
+  private finishMcpOAuthCallback(authSuccess: boolean): Response {
+    if (authSuccess) {
+      this.ctx.waitUntil(
+        this.mcp.waitForConnections({ timeout: 30_000 }).then(
+          () => undefined,
+          () => undefined,
+        ),
+      );
+    }
+    return Response.redirect(
+      new URL(this.mcpOAuthReturnPath(), this.env.BETTER_AUTH_URL),
+      302,
+    );
   }
 
   createMcpOAuthProvider(callbackUrl: string): AgentMcpOAuthProvider {
@@ -2102,7 +2121,6 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     connectionId: string,
     refreshReadyCatalog: boolean,
   ): Promise<void> {
-    const server = this.getMcpServers().servers[connectionId];
     const safetyNeedsSync = this.sql<{ pending: number }>`
       SELECT 1 AS pending
       FROM sidechat_mcp_tool_policy
@@ -2111,6 +2129,15 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
         AND safety IS NULL
       LIMIT 1
     `.length > 0;
+    let server = this.getMcpServers().servers[connectionId];
+    if (server?.state === "connecting") {
+      try {
+        await this.mcp.establishConnection(connectionId);
+      } catch {
+        // List must still return the other connections.
+      }
+      server = this.getMcpServers().servers[connectionId];
+    }
     if (
       server?.state === "connected" ||
       ((refreshReadyCatalog || safetyNeedsSync) && server?.state === "ready")
@@ -2120,8 +2147,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
           timeoutMs: 30_000,
         });
       } catch {
-        // The safe connection view below reports the discovery issue without
-        // exposing provider errors or failing the entire project catalog.
+        // List must still return the other connections.
       }
     }
     if (this.getMcpServers().servers[connectionId]?.state === "ready") {
@@ -2654,6 +2680,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     const native = this.getMcpServers().servers[connectionId] as
       | NativeMcpServer
       | undefined;
+    const tools = this.readMcpToolPolicies(connectionId);
     return {
       id: metadata.id,
       name: metadata.name,
@@ -2664,10 +2691,10 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       ...(authUrl || native?.auth_url
         ? { authUrl: authUrl ?? native?.auth_url ?? undefined }
         : {}),
-      ...(native?.state === "connected"
+      ...(native?.state === "connected" && tools.length === 0
         ? { issue: "tool_discovery_failed" as const }
         : {}),
-      tools: this.readMcpToolPolicies(connectionId),
+      tools,
     };
   }
 

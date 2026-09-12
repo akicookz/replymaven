@@ -180,7 +180,13 @@ export function validateMcpCallbackHost(value: string): string {
 export function classifyMcpToolAccess(
   annotations: McpToolAnnotations | undefined,
 ): "read" | "write" {
-  return classifyMcpToolSafety(annotations) === "read" ? "read" : "write";
+  return defaultMcpToolAccess(classifyMcpToolSafety(annotations));
+}
+
+export function defaultMcpToolAccess(
+  safety: "read" | "write" | "destructive",
+): "read" | "write" {
+  return safety === "read" ? "read" : "write";
 }
 
 export function classifyMcpToolSafety(
@@ -307,7 +313,11 @@ export async function normalizeMcpCatalog(
     });
     const previous = configuredByName.get(tool.name);
     const previousIsCurrent =
-      previous?.catalogFingerprint === catalogFingerprint;
+      previous !== undefined &&
+      previous.catalogFingerprint === catalogFingerprint;
+    const safety = options.forceReadOnly
+      ? "read"
+      : classifyMcpToolSafety(annotations);
     normalized.push({
       connectionId,
       toolName: tool.name,
@@ -317,10 +327,10 @@ export async function normalizeMcpCatalog(
       inputSchema,
       catalogFingerprint,
       audience: "sidechat",
-      safety: options.forceReadOnly
-        ? "read"
-        : classifyMcpToolSafety(annotations),
-      access: previousIsCurrent ? previous.access : "write",
+      safety,
+      access: previousIsCurrent
+        ? previous.access
+        : defaultMcpToolAccess(safety),
       enabled: previousIsCurrent ? previous.enabled : true,
     });
   }
