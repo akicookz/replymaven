@@ -48,6 +48,7 @@ interface ReadingPaneProps {
   onStartSidechat: () => void;
   /** Sidechat currently constrains this pane in the shared split layout. */
   sidechatOpen: boolean;
+  backgroundLocked?: boolean;
   sidechatExists: boolean;
   sidechatStatus: SidechatPresentationStatus;
   publicComposerFocusRequest: number;
@@ -90,6 +91,7 @@ export default function ReadingPane({
   onBack,
   onStartSidechat,
   sidechatOpen,
+  backgroundLocked = false,
   sidechatExists,
   sidechatStatus,
   publicComposerFocusRequest,
@@ -179,11 +181,14 @@ export default function ReadingPane({
   }, [highlightMessageId, messages.length, conversation.id]);
 
   return (
-    <div className={cn(
-      "glass-reading h-full min-w-0 flex-1 flex flex-col overflow-hidden",
-      sidechatOpen && "rounded-tr-2xl rounded-br-2xl",
-      className,
-    )}>
+    <div
+      inert={backgroundLocked ? true : undefined}
+      className={cn(
+        "glass-reading flex h-full min-w-0 flex-1 flex-col overflow-hidden",
+        sidechatOpen && "rounded-tr-2xl rounded-br-2xl",
+        className,
+      )}
+    >
       {/* Header: toolbar row + user bar (fixed; thread scrolls below it) */}
       <ReadingHeader
         conversation={conversation}

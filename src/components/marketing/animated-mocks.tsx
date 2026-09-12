@@ -75,7 +75,7 @@ function InboxFrame({
   return (
     <div
       className={cn(
-        "flex h-[640px] min-w-0 overflow-hidden bg-background",
+        "relative flex h-[640px] min-w-0 overflow-hidden bg-background",
         className,
       )}
     >

@@ -2875,7 +2875,6 @@ function Conversations() {
           />
         )}
         <FocusSidechatLayout
-          sidechatOpen={sidechatOpen}
           focusView={focusView}
           sidechatPane={sidechatPane}
         />
@@ -2888,7 +2887,7 @@ function Conversations() {
     // The brief's shell is `flex h-screen min-w-0`; the negative margins +
     // overflow-hidden escape the Layout's `p-4 md:p-8` Outlet padding so the
     // inbox renders full-bleed (matching the prior page behavior).
-    <div className="-m-4 md:-m-8 flex h-screen min-w-0 overflow-hidden">
+    <div className="relative -m-4 md:-m-8 flex h-screen min-w-0 overflow-hidden">
       <MessageList
         filter={filter}
         conversations={conversations}
@@ -2954,6 +2953,7 @@ function Conversations() {
           onBack={() => setSelectedConvo(null)}
           onStartSidechat={handleStartSidechat}
           sidechatOpen={sidechatOpen}
+          backgroundLocked={sidechatOpen && isMobileViewport}
           sidechatExists={selectedSidechatExists}
           sidechatStatus={selectedSidechatStatus}
           publicComposerFocusRequest={publicComposerFocusRequest}
@@ -2968,7 +2968,6 @@ function Conversations() {
           activeMatchId={threadSearchActiveMatchId}
           className={cn(
             selectedIds.size > 0 && "hidden md:flex",
-            sidechatOpen && "hidden md:flex",
           )}
           // `?msg=` deep-link scroll+pulse target.
           highlightMessageId={highlightMsgId}
