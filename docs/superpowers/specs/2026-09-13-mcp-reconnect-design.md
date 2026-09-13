@@ -66,3 +66,12 @@ Run `bunx tsc -b --force`, lint, and the production build. Record existing failu
 Use a local authenticated browser and a local MCP OAuth fixture if needed. Exercise Connect vs Reconnect, double-click prevention, failed authorization followed by a fresh attempt, old callback rejection, and permission preservation after successful reconnect. Do not use production Stripe consent or change production connections for validation. Verify the same connection ID and saved settings before and after the flow. If local authentication or services prevent a check, report that limit precisely.
 
 No push, deploy, migration, or production connection change is authorized by this implementation request.
+
+## Implementation validation
+
+- Backend checkpoint: `8cd42fb`.
+- Forced TypeScript check and production build pass. Lint still reports the pre-existing 8 errors and 25 warnings, including the old nested worktree. No tests were written.
+- Authenticated local browser: verified Connect for an unsaved preset, Reconnect for a saved pending connection, and the Reconnect action in a working connection's menu.
+- A reconnect of the local PostHog connection retained its exact application ID and all 326 tool policies, including one disabled tool. Application metadata and permission rows matched the pre-reconnect snapshot. The local connection had no always-allow grant rows, so grant preservation was reviewed in code only.
+- The resulting attempt had a state value, PKCE challenge, and the local callback URL. An invalid local callback returned only the bounded `expired` category and left the pending state and PKCE unchanged. The browser displayed the expiry toast and removed its query parameter.
+- Automatic approval review blocked opening the PostHog authorization origin because it treated that as a production authorization flow. No provider consent was completed. Successful token exchange, permission preservation after successful discovery, old-attempt replay across multiple fresh attempts, and eviction recovery remain unverified at runtime. This does not establish a fix for the original Stripe token-exchange failure.

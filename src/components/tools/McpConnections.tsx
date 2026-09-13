@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -159,10 +159,25 @@ function isConnectionSettling(connection: McpConnection | undefined): boolean {
 function connectionCardStatus(
   connection: McpConnection | undefined,
   settling: boolean,
-): "Connected" | "Connecting" | "Connect" {
+  reconnecting: boolean,
+): "Connected" | "Connecting" | "Reconnecting" | "Reconnect" | "Connect" {
+  if (reconnecting) return "Reconnecting";
   if (isMcpLinked(connection)) return "Connected";
   if (settling) return "Connecting";
+  if (connection?.authMode === "oauth") return "Reconnect";
   return "Connect";
+}
+
+function oauthErrorMessage(category: string): string {
+  if (category === "expired") return "Authorization expired. Reconnect to try again.";
+  if (category === "denied") return "Authorization was cancelled. Reconnect to try again.";
+  return "MCP authorization failed. Reconnect to try again.";
+}
+
+function reconnectErrorMessage(message: string): string {
+  if (message === "mcp_reconnect_failed") return "Could not reconnect MCP server. Try again.";
+  if (message === "oauth_reconnect_unsupported") return "This connection does not use OAuth. Refresh tools instead.";
+  return message;
 }
 
 function emptyToolsCopy(connection: McpConnection): string {
@@ -248,6 +263,14 @@ function McpConnections({ projectId }: McpConnectionsProps) {
   const [formError, setFormError] = useState<string | null>(null);
 
   const queryKey = ["sidechat-mcp", projectId] as const;
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const category = url.searchParams.get("mcp_oauth_error");
+    if (!category) return;
+    toast.error(oauthErrorMessage(category));
+    url.searchParams.delete("mcp_oauth_error");
+    window.history.replaceState(window.history.state, "", url);
+  }, []);
   const { data, isLoading, isError } = useQuery<McpConnectionsResponse>({
     queryKey,
     queryFn: async () => {
@@ -325,6 +348,26 @@ function McpConnections({ projectId }: McpConnectionsProps) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey }),
   });
 
+  const reconnect = useMutation({
+    mutationFn: async (connectionId: string) => {
+      const response = await fetch(
+        `/api/projects/${projectId}/sidechat/mcp/connections/${connectionId}/reconnect`,
+        { method: "POST" },
+      );
+      if (!response.ok) throw await parseError(response, "Could not reconnect server");
+      return response.json() as Promise<{ connection: McpConnection }>;
+    },
+    onSuccess: ({ connection }) => {
+      void queryClient.invalidateQueries({ queryKey });
+      if (connection.authUrl) {
+        window.location.assign(connection.authUrl);
+      } else if (isMcpLinked(connection)) {
+        setExpandedConnectionId(connection.id);
+      }
+    },
+    onError: (error: Error) => toast.error(reconnectErrorMessage(error.message)),
+  });
+
   const disconnect = useMutation({
     mutationFn: async (connectionId: string) => {
       const response = await fetch(
@@ -396,24 +439,9 @@ function McpConnections({ projectId }: McpConnectionsProps) {
       toggleConnection(connection);
       return;
     }
-    if (!data?.canManage || connect.isPending || refresh.isPending) return;
-    if (connection?.authUrl) {
-      window.location.assign(connection.authUrl);
-      return;
-    }
+    if (!data?.canManage || connect.isPending || refresh.isPending || reconnect.isPending) return;
     if (connection) {
-      refresh.mutate(connection.id, {
-        onSuccess: (result) => {
-          const refreshed = (result as { connection?: McpConnection }).connection;
-          if (refreshed?.authUrl) {
-            window.location.assign(refreshed.authUrl);
-          } else if (refreshed && isMcpLinked(refreshed)) {
-            setExpandedConnectionId(refreshed.id);
-          } else {
-            toast.error(`Could not finish connecting ${preset.label}.`);
-          }
-        },
-      });
+      reconnect.mutate(connection.id);
       return;
     }
     connect.mutate({ presetKey: preset.key, authMode: "oauth" });
@@ -424,9 +452,9 @@ function McpConnections({ projectId }: McpConnectionsProps) {
       toggleConnection(connection);
       return;
     }
-    if (!data?.canManage || refresh.isPending) return;
-    if (connection.authUrl) {
-      window.location.assign(connection.authUrl);
+    if (!data?.canManage || refresh.isPending || reconnect.isPending) return;
+    if (connection.authMode === "oauth") {
+      reconnect.mutate(connection.id);
       return;
     }
     refresh.mutate(connection.id, {
@@ -548,6 +576,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
     (authMode !== "headers" || customHeaders.trim().length > 0);
 
   function renderConnectionSettings(connection: McpConnection) {
+    const reconnecting = reconnect.isPending && reconnect.variables === connection.id;
     const policies = policyDrafts[connection.id] ?? policyFromConnection(connection);
     const normalizedSearch = toolSearch.trim().toLowerCase();
     const filteredTools = connection.tools.filter((tool) =>
@@ -593,7 +622,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
                 <Button
                   type="button"
                   size="sm"
-                  disabled={savePolicy.isPending}
+                  disabled={savePolicy.isPending || reconnecting}
                   onClick={() => savePolicy.mutate({
                     connectionId: connection.id,
                     tools: policies,
@@ -607,7 +636,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
                 type="button"
                 size="sm"
                 variant="outline"
-                disabled={disconnect.isPending}
+                disabled={disconnect.isPending || reconnecting}
                 onClick={() => disconnect.mutate(connection.id)}
               >
                 Disconnect
@@ -624,15 +653,24 @@ function McpConnections({ projectId }: McpConnectionsProps) {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="min-w-44">
                   <DropdownMenuItem
-                    disabled={refresh.isPending}
+                    disabled={refresh.isPending || reconnecting}
                     onSelect={() => refresh.mutate(connection.id)}
                   >
                     <RefreshCw className={cn(refresh.isPending && "animate-spin")} />
                     Refresh tools
                   </DropdownMenuItem>
+                  {connection.authMode === "oauth" && (
+                    <DropdownMenuItem
+                      disabled={reconnect.isPending}
+                      onSelect={() => reconnect.mutate(connection.id)}
+                    >
+                      <RefreshCw className={cn(reconnect.isPending && "animate-spin")} />
+                      Reconnect
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem
                     variant="destructive"
-                    disabled={disconnect.isPending}
+                    disabled={disconnect.isPending || reconnecting}
                     onSelect={() => disconnect.mutate(connection.id)}
                   >
                     <Trash2 />
@@ -856,6 +894,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
     const busy =
       (connect.isPending && connect.variables?.presetKey === key) ||
       (refresh.isPending && refresh.variables === connection?.id) ||
+      (reconnect.isPending && reconnect.variables === connection?.id) ||
       settling;
     return (
       <div
@@ -873,7 +912,10 @@ function McpConnections({ projectId }: McpConnectionsProps) {
               ? `mcp-connection-${connection.id}`
               : undefined
           }
-          disabled={!connected && (!data?.canManage || settling)}
+          disabled={
+            (!connected && (!data?.canManage || settling)) ||
+            (reconnect.isPending && reconnect.variables === connection?.id)
+          }
           onClick={onActivate}
           className="flex min-h-14 w-full min-w-0 items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default disabled:opacity-70"
         >
@@ -895,7 +937,11 @@ function McpConnections({ projectId }: McpConnectionsProps) {
             )}
           >
             {busy && <Loader2 className="size-3.5 animate-spin" />}
-            {connectionCardStatus(connection, settling)}
+            {connectionCardStatus(
+              connection,
+              settling,
+              reconnect.isPending && reconnect.variables === connection?.id,
+            )}
           </span>
         </button>
         {expanded && connection && renderConnectionSettings(connection)}
