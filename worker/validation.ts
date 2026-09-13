@@ -773,6 +773,7 @@ export const createProjectMcpConnectionSchema = z
         "slack",
         "attio",
         "linear",
+        "github",
         "sentry",
         "cloudflare-observability",
         "vercel-observability",

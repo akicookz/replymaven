@@ -6,6 +6,7 @@ export type McpPresetKey =
   | "slack"
   | "attio"
   | "linear"
+  | "github"
   | "sentry"
   | "cloudflare-observability"
   | "vercel-observability";
@@ -57,6 +58,13 @@ const MCP_PRESETS: readonly McpPreset[] = Object.freeze([
     url: "https://mcp.linear.app/mcp",
     auth: Object.freeze(["oauth"] satisfies McpAuthMode[]),
     icon: "/integrations/linear.svg",
+  }),
+  Object.freeze({
+    key: "github",
+    label: "GitHub",
+    url: "https://api.githubcopilot.com/mcp/",
+    auth: Object.freeze(["oauth"] satisfies McpAuthMode[]),
+    icon: "/integrations/github.svg",
   }),
   Object.freeze({
     key: "sentry",
