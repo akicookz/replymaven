@@ -328,7 +328,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
   initialState: MavenProjectState = { sidechats: {} };
   private readonly sidechatRegistrationLocks = new Map<string, Promise<void>>();
   private directory?: ConversationDirectory;
-  private readOnlyMcpOAuthConnections?: Set<string> = new Set<string>();
+  private readonly readOnlyMcpOAuthConnections = new Set<string>();
   private mcpOperationTail: Promise<void> = Promise.resolve();
 
   constructor(ctx: DurableObjectState, env: AppEnv) {
@@ -348,14 +348,6 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     authSuccess: boolean,
     authError?: string,
   ): Response {
-    if (authSuccess) {
-      this.ctx.waitUntil(
-        this.mcp.waitForConnections({ timeout: 30_000 }).then(
-          () => undefined,
-          () => undefined,
-        ),
-      );
-    }
     const target = new URL(this.mcpOAuthReturnPath(), this.env.BETTER_AUTH_URL);
     if (!authSuccess) {
       target.searchParams.set("mcp_oauth_error", mcpOAuthErrorCategory(authError));
@@ -372,13 +364,8 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     );
   }
 
-  private readOnlyMcpOAuthConnectionIds(): Set<string> {
-    this.readOnlyMcpOAuthConnections ??= new Set<string>();
-    return this.readOnlyMcpOAuthConnections;
-  }
-
   private isReadOnlyMcpOAuthConnection(serverId: string): boolean {
-    if (this.readOnlyMcpOAuthConnectionIds().has(serverId)) return true;
+    if (this.readOnlyMcpOAuthConnections.has(serverId)) return true;
     this.ensureMcpApplicationSchema();
     const metadata = this.readMcpConnectionMetadata(serverId);
     return Boolean(
@@ -2060,7 +2047,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     const requestedId = `mcp-${crypto.randomUUID()}`;
     const preset = input.presetKey ? getMcpPreset(input.presetKey) : null;
     if (preset?.readOnly) {
-      this.readOnlyMcpOAuthConnectionIds().add(requestedId);
+      this.readOnlyMcpOAuthConnections.add(requestedId);
     }
     const headers = this.mcpTransportHeaders(input);
     let result: AddMcpServerResult;
@@ -2078,7 +2065,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       await this.removeMcpServer(requestedId).catch(() => undefined);
       throw error;
     } finally {
-      this.readOnlyMcpOAuthConnectionIds().delete(requestedId);
+      this.readOnlyMcpOAuthConnections.delete(requestedId);
     }
     if (result.state === "authenticating" && input.authMode !== "oauth") {
       await this.removeMcpServer(result.id);
@@ -2175,31 +2162,21 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     const provider = this.createMcpOAuthProvider(callbackUrl);
     provider.serverId = connectionId;
     await provider.invalidateConnectionOAuthState();
-    const preset = metadata.preset_key ? getMcpPreset(metadata.preset_key) : null;
-    if (preset?.readOnly) {
-      this.readOnlyMcpOAuthConnectionIds().add(connectionId);
+    const result = await this.addMcpServer(metadata.name, metadata.url, {
+      id: connectionId,
+      callbackHost: callbackOrigin,
+      callbackPath: `/api/sidechat/mcp/oauth/${encodeURIComponent(this.name)}`,
+      transport: { type: "auto" },
+    });
+    if (result.state === "ready") {
+      await this.syncMcpCatalog(connectionId);
     }
-    try {
-      const result = await this.addMcpServer(metadata.name, metadata.url, {
-        id: connectionId,
-        callbackHost: callbackOrigin,
-        callbackPath: `/api/sidechat/mcp/oauth/${encodeURIComponent(this.name)}`,
-        transport: { type: "auto" },
-      });
-      if (result.state === "ready") {
-        await this.syncMcpCatalog(connectionId);
-      }
-      const connection = this.buildMcpConnectionView(
-        connectionId,
-        result.state === "authenticating" ? result.authUrl : undefined,
-      );
-      if (!connection) throw new Error("MCP connection metadata unavailable");
-      return connection;
-    } finally {
-      if (preset?.readOnly) {
-        this.readOnlyMcpOAuthConnectionIds().delete(connectionId);
-      }
-    }
+    const connection = this.buildMcpConnectionView(
+      connectionId,
+      result.state === "authenticating" ? result.authUrl : undefined,
+    );
+    if (!connection) throw new Error("MCP connection metadata unavailable");
+    return connection;
   }
 
   private async reconcileMcpCatalog(
@@ -2507,7 +2484,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
   private async runExclusiveMcpOperation<T>(
     operation: () => Promise<T>,
   ): Promise<T> {
-    const previous = this.mcpOperationTail ?? Promise.resolve();
+    const previous = this.mcpOperationTail;
     let release = (): void => undefined;
     const current = new Promise<void>((resolve) => {
       release = resolve;
