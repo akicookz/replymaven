@@ -75,3 +75,9 @@ No push, deploy, migration, or production connection change is authorized by thi
 - A reconnect of the local PostHog connection retained its exact application ID and all 326 tool policies, including one disabled tool. Application metadata and permission rows matched the pre-reconnect snapshot. The local connection had no always-allow grant rows, so grant preservation was reviewed in code only.
 - The resulting attempt had a state value, PKCE challenge, and the local callback URL. An invalid local callback returned only the bounded `expired` category and left the pending state and PKCE unchanged. The browser displayed the expiry toast and removed its query parameter.
 - Automatic approval review blocked opening the PostHog authorization origin because it treated that as a production authorization flow. No provider consent was completed. Successful token exchange, permission preservation after successful discovery, old-attempt replay across multiple fresh attempts, and eviction recovery remain unverified at runtime. This does not establish a fix for the original Stripe token-exchange failure.
+
+### Approved live verification
+
+The user subsequently approved the live PostHog check and its requested read-only permissions. Authorization was limited to `LaunchFast / ReplyMaven`. The provider returned through the local callback successfully, the saved authorization URL was cleared, and the browser showed PostHog Connected.
+
+The application connection ID and metadata stayed unchanged. All 326 prior tool definitions retained their fingerprints, enabled settings, and access settings. Discovery added 11 tools, for 337 active tools total, with none removed. There were no saved always-allow grants in this local connection. Successful token exchange and permission preservation after discovery are now verified for PostHog. This does not verify the original Stripe failure.
