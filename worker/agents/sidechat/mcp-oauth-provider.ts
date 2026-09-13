@@ -1,7 +1,15 @@
 import type { OAuthDiscoveryState } from "@modelcontextprotocol/client";
 import { DurableObjectOAuthClientProvider } from "agents";
 
-const OIDC_IDENTITY_SCOPES = new Set(["openid", "profile", "email"]);
+// offline_access grants refresh capability, not data access. The MCP client
+// appends it from authorization-server metadata after resource scopes are
+// filtered, so rejecting it here fails the whole authorization.
+const OIDC_IDENTITY_SCOPES = new Set([
+  "openid",
+  "profile",
+  "email",
+  "offline_access",
+]);
 
 function isReadOnlyOAuthScope(scope: string): boolean {
   return OIDC_IDENTITY_SCOPES.has(scope) || scope.endsWith(":read");
