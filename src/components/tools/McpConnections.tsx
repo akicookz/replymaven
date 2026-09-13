@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { ExpandableToolCard } from "./ExpandableToolCard";
 
 type McpAuthMode = "oauth" | "bearer" | "headers" | "none";
 type McpToolAccess = "read" | "write";
@@ -404,8 +405,8 @@ function McpConnections({ projectId }: McpConnectionsProps) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey }),
   });
 
-  function chooseCustom(): void {
-    setCustomOpen((current) => !current);
+  function chooseCustom(open = true): void {
+    setCustomOpen(open);
     setExpandedConnectionId(null);
     setAuthMode("none");
     setBearerToken("");
@@ -471,8 +472,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
     });
   }
 
-  function toggleConnection(connection: McpConnection): void {
-    const opening = expandedConnectionId !== connection.id;
+  function setConnectionPanel(connection: McpConnection, opening: boolean): void {
     setExpandedConnectionId(opening ? connection.id : null);
     if (opening) {
       setCustomOpen(false);
@@ -482,6 +482,10 @@ function McpConnections({ projectId }: McpConnectionsProps) {
         [connection.id]: current[connection.id] ?? policyFromConnection(connection),
       }));
     }
+  }
+
+  function toggleConnection(connection: McpConnection): void {
+    setConnectionPanel(connection, expandedConnectionId !== connection.id);
   }
 
   function permissionUpdate(
@@ -592,10 +596,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
       }))
       .filter((group) => group.tools.length > 0);
     return (
-      <div
-        id={`mcp-connection-${connection.id}`}
-        className="space-y-5 bg-muted/20 px-4 py-4"
-      >
+      <div className="space-y-5 px-4 py-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <p className="text-sm font-medium text-foreground">Connection</p>
@@ -896,62 +897,49 @@ function McpConnections({ projectId }: McpConnectionsProps) {
       (refresh.isPending && refresh.variables === connection?.id) ||
       (reconnect.isPending && reconnect.variables === connection?.id) ||
       settling;
-    return (
-      <div
-        key={key}
+    const status = (
+      <span
         className={cn(
-          "overflow-hidden rounded-xl bg-card",
-          connected ? "" : "border-2 border-dashed border-muted",
+          "flex shrink-0 items-center gap-1.5 text-xs font-medium",
+          connected ? "text-primary" : "text-muted-foreground",
         )}
       >
-        <button
-          type="button"
-          aria-expanded={connected ? expanded : undefined}
-          aria-controls={
-            connected && connection
-              ? `mcp-connection-${connection.id}`
-              : undefined
-          }
-          disabled={
-            (!connected && (!data?.canManage || settling)) ||
-            (reconnect.isPending && reconnect.variables === connection?.id)
-          }
-          onClick={onActivate}
-          className="flex min-h-14 w-full min-w-0 items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default disabled:opacity-70"
-        >
-          <div className="flex shrink-0 items-center gap-2">
-            {expanded ? (
-              <ChevronDown className="size-4 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="size-4 text-muted-foreground" />
-            )}
-            {mark}
-          </div>
-          <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-            {label}
-          </p>
-          <span
-            className={cn(
-              "flex shrink-0 items-center gap-1.5 text-xs font-medium",
-              connected ? "text-primary" : "text-muted-foreground",
-            )}
-          >
-            {busy && <Loader2 className="size-3.5 animate-spin" />}
-            {connectionCardStatus(
-              connection,
-              settling,
-              reconnect.isPending && reconnect.variables === connection?.id,
-            )}
-          </span>
-        </button>
-        {expanded && connection && renderConnectionSettings(connection)}
-      </div>
+        {busy && <Loader2 className="size-3.5 animate-spin" />}
+        {connectionCardStatus(
+          connection,
+          settling,
+          reconnect.isPending && reconnect.variables === connection?.id,
+        )}
+      </span>
+    );
+    const disabled =
+      (!connected && (!data?.canManage || settling)) ||
+      (reconnect.isPending && reconnect.variables === connection?.id);
+
+    return (
+      <ExpandableToolCard
+        key={key}
+        mark={mark}
+        title={label}
+        status={status}
+        configured={connected}
+        disabled={disabled}
+        mode={connected && connection ? "panel" : "action"}
+        open={expanded}
+        onActivate={onActivate}
+        onOpenChange={(next) => {
+          if (connection) setConnectionPanel(connection, next);
+        }}
+        panelId={connection ? `mcp-connection-${connection.id}` : undefined}
+      >
+        {connection && renderConnectionSettings(connection)}
+      </ExpandableToolCard>
     );
   }
 
   function renderCustomConnectionForm() {
     return (
-      <div id="custom-mcp-connection" className="space-y-4 bg-muted/20 px-4 py-4">
+      <div className="space-y-4 px-4 py-4">
         <p className="text-xs text-muted-foreground text-pretty">
           Credentials are sent directly to the project agent and are never shown again.
         </p>
@@ -1059,32 +1047,22 @@ function McpConnections({ projectId }: McpConnectionsProps) {
 
   function renderCustomServerCard() {
     return (
-      <div className="overflow-hidden rounded-xl border-2 border-dashed border-muted bg-card">
-        <button
-          type="button"
-          aria-expanded={customOpen}
-          aria-controls="custom-mcp-connection"
-          disabled={!data?.canManage}
-          onClick={chooseCustom}
-          className="flex min-h-14 w-full min-w-0 items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default disabled:opacity-70"
-        >
-          <div className="flex shrink-0 items-center gap-2">
-            {customOpen ? (
-              <ChevronDown className="size-4 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="size-4 text-muted-foreground" />
-            )}
-            <GenericServerMark />
-          </div>
-          <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-            Custom server
-          </p>
+      <ExpandableToolCard
+        mark={<GenericServerMark />}
+        title="Custom server"
+        status={
           <span className="shrink-0 text-xs font-medium text-muted-foreground">
             Connect
           </span>
-        </button>
-        {customOpen && data?.canManage && renderCustomConnectionForm()}
-      </div>
+        }
+        configured={false}
+        disabled={!data?.canManage}
+        open={customOpen}
+        onOpenChange={(next) => chooseCustom(next)}
+        panelId="custom-mcp-connection"
+      >
+        {data?.canManage && renderCustomConnectionForm()}
+      </ExpandableToolCard>
     );
   }
 

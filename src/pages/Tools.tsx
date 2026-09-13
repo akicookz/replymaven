@@ -34,6 +34,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { ExpandableToolCard } from "@/components/tools/ExpandableToolCard";
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
 import { MobileMenuButton } from "@/components/PageHeader";
 import McpConnections from "@/components/tools/McpConnections";
@@ -650,63 +651,45 @@ function PresetToolRow({
   }
 
   return (
-    <div
-      className={cn(
-        "bg-card rounded-xl overflow-hidden",
-        configured ? "" : "border-2 border-dashed border-muted",
-      )}
-    >
-      <div className="flex items-stretch">
-        <button
-          type="button"
-          aria-expanded={expanded}
-          aria-controls={panelId}
-          onClick={() => setExpanded((current) => !current)}
-          className="flex min-h-14 min-w-0 flex-1 items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+    <ExpandableToolCard
+      mark={
+        <div
+          className={cn(
+            "w-8 h-8 rounded-lg flex items-center justify-center",
+            configured ? preset.iconBg : "bg-muted",
+          )}
         >
-          <div className="flex items-center gap-2 shrink-0">
-            {expanded ? (
-              <ChevronDown className="w-4 h-4 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+          <Icon
+            className={cn(
+              "w-4 h-4",
+              configured ? preset.iconColor : "text-muted-foreground",
             )}
-            <div
-              className={cn(
-                "w-8 h-8 rounded-lg flex items-center justify-center",
-                configured ? preset.iconBg : "bg-muted",
-              )}
+          />
+        </div>
+      }
+      title={preset.label}
+      titleAdornment={
+        <>
+          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+            Preset
+          </Badge>
+          {!configured && (
+            <Badge
+              variant="outline"
+              className="text-[10px] px-1.5 py-0 text-warning border-warning/30"
             >
-              <Icon
-                className={cn(
-                  "w-4 h-4",
-                  configured ? preset.iconColor : "text-muted-foreground",
-                )}
-              />
-            </div>
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <p className="text-sm font-medium text-foreground truncate">
-                {preset.label}
-              </p>
-              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                Preset
-              </Badge>
-              {!configured && (
-                <Badge
-                  variant="outline"
-                  className="text-[10px] px-1.5 py-0 text-warning border-warning/30"
-                >
-                  Not configured
-                </Badge>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground truncate">
-              {preset.blurb}
-            </p>
-          </div>
-        </button>
-        {configured && (
+              Not configured
+            </Badge>
+          )}
+        </>
+      }
+      subtitle={preset.blurb}
+      configured={configured}
+      open={expanded}
+      onOpenChange={setExpanded}
+      panelId={panelId}
+      trailing={
+        configured ? (
           <div className="flex shrink-0 items-center gap-1 pr-2 sm:gap-3 sm:pr-4">
             <span className="flex size-10 shrink-0 items-center justify-center rounded-lg">
               <Switch
@@ -728,11 +711,10 @@ function PresetToolRow({
               <Trash2 className="w-4 h-4" />
             </button>
           </div>
-        )}
-      </div>
-
-      {expanded && (
-        <div id={panelId} className="px-4 py-4 space-y-3 bg-muted/20">
+        ) : undefined
+      }
+    >
+      <div className="px-4 py-4 space-y-3">
           {preset.fields.map((field) => (
             <div key={field.key} className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">
@@ -795,8 +777,7 @@ function PresetToolRow({
             {configured ? "Update" : "Save"}
           </Button>
         </div>
-      )}
-    </div>
+    </ExpandableToolCard>
   );
 }
 
@@ -1644,58 +1625,42 @@ export function ToolsPanel({
               {/* ─── Presets (2-col grid) ──────────────────────────────────── */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 items-start">
               {/* ─── Telegram Preset Tool ──────────────────────────────────── */}
-              <div
-                className={cn(
-                  "bg-card rounded-xl overflow-hidden",
-                  telegramConfigured ? "" : "border-2 border-dashed border-muted",
-                )}
-              >
-                {/* Telegram Row */}
-                <div
-                  className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors"
-                  onClick={() => setTelegramExpanded(!telegramExpanded)}
-                >
-                  <div className="flex items-center gap-2 shrink-0">
-                    {telegramExpanded ? (
-                      <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                    )}
-                    <div className={cn(
-                      "w-8 h-8 rounded-lg flex items-center justify-center",
-                      telegramConfigured ? "bg-[#229ED9]/15" : "bg-muted",
-                    )}>
-                      <Send className={cn(
-                        "w-4 h-4",
-                        telegramConfigured ? "text-[#229ED9]" : "text-muted-foreground",
-                      )} />
-                    </div>
+              <ExpandableToolCard
+                mark={
+                  <div className={cn(
+                    "w-8 h-8 rounded-lg flex items-center justify-center",
+                    telegramConfigured ? "bg-[#229ED9]/15" : "bg-muted",
+                  )}>
+                    <Send className={cn(
+                      "w-4 h-4",
+                      telegramConfigured ? "text-[#229ED9]" : "text-muted-foreground",
+                    )} />
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-foreground truncate">
-                        Telegram Handoff
-                      </p>
-                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                        Preset
+                }
+                title="Telegram Handoff"
+                titleAdornment={
+                  <>
+                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                      Preset
+                    </Badge>
+                    {!telegramConfigured && (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-warning border-warning/30">
+                        Not configured
                       </Badge>
-                      {!telegramConfigured && (
-                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-warning border-warning/30">
-                          Not configured
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {telegramConfigured
-                        ? "Live agent handoff via Telegram when the bot cannot answer"
-                        : "Set up Telegram to receive live handoff notifications"}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Telegram Config */}
-                {telegramExpanded && (
-                  <div className="px-4 py-4 space-y-4 bg-muted/20">
+                    )}
+                  </>
+                }
+                subtitle={
+                  telegramConfigured
+                    ? "Live agent handoff via Telegram when the bot cannot answer"
+                    : "Set up Telegram to receive live handoff notifications"
+                }
+                configured={telegramConfigured}
+                open={telegramExpanded}
+                onOpenChange={setTelegramExpanded}
+                panelId="telegram-preset-panel"
+              >
+                <div className="px-4 py-4 space-y-4">
                     <p className="text-xs text-muted-foreground">
                       When the bot cannot answer a question or the visitor requests a human, the conversation will be forwarded to your Telegram.
                     </p>
@@ -1795,60 +1760,45 @@ export function ToolsPanel({
                         {telegramTestResult.message}
                       </div>
                     )}
-                  </div>
-                )}
-              </div>
-
-              <div
-                className={cn(
-                  "bg-card rounded-xl overflow-hidden",
-                  slackConfigured ? "" : "border-2 border-dashed border-muted",
-                )}
-              >
-                <div
-                  className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors"
-                  onClick={() => setSlackExpanded(!slackExpanded)}
-                >
-                  <div className="flex items-center gap-2 shrink-0">
-                    {slackExpanded ? (
-                      <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                    )}
-                    <div className={cn(
-                      "w-8 h-8 rounded-lg flex items-center justify-center",
-                      slackConfigured ? "bg-[#4A154B]/15" : "bg-muted",
-                    )}>
-                      <Slack className={cn(
-                        "w-4 h-4",
-                        slackConfigured ? "text-[#4A154B]" : "text-muted-foreground",
-                      )} />
-                    </div>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-foreground truncate">
-                        Slack Handoff
-                      </p>
-                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                        Preset
-                      </Badge>
-                      {!slackConfigured && (
-                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-warning border-warning/30">
-                          Not configured
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {slackConfigured
-                        ? "Live agent handoff via Slack when the bot cannot answer"
-                        : "Set up Slack to receive live handoff notifications"}
-                    </p>
-                  </div>
                 </div>
+              </ExpandableToolCard>
 
-                {slackExpanded && (
-                  <div className="px-4 py-4 space-y-4 bg-muted/20">
+              <ExpandableToolCard
+                mark={
+                  <div className={cn(
+                    "w-8 h-8 rounded-lg flex items-center justify-center",
+                    slackConfigured ? "bg-[#4A154B]/15" : "bg-muted",
+                  )}>
+                    <Slack className={cn(
+                      "w-4 h-4",
+                      slackConfigured ? "text-[#4A154B]" : "text-muted-foreground",
+                    )} />
+                  </div>
+                }
+                title="Slack Handoff"
+                titleAdornment={
+                  <>
+                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                      Preset
+                    </Badge>
+                    {!slackConfigured && (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-warning border-warning/30">
+                        Not configured
+                      </Badge>
+                    )}
+                  </>
+                }
+                subtitle={
+                  slackConfigured
+                    ? "Live agent handoff via Slack when the bot cannot answer"
+                    : "Set up Slack to receive live handoff notifications"
+                }
+                configured={slackConfigured}
+                open={slackExpanded}
+                onOpenChange={setSlackExpanded}
+                panelId="slack-preset-panel"
+              >
+                <div className="px-4 py-4 space-y-4">
                     <p className="text-xs text-muted-foreground">
                       When the bot cannot answer a question or the visitor requests a human, the conversation will be forwarded to your Slack channel. This is separate from the send_to_slack HTTP tool.
                     </p>
@@ -1945,9 +1895,8 @@ export function ToolsPanel({
                         {slackTestResult.message}
                       </div>
                     )}
-                  </div>
-                )}
-              </div>
+                </div>
+              </ExpandableToolCard>
 
               {/* ─── Preset Tools ──────────────────────────────────────────── */}
               {TOOL_PRESETS.map((preset) => (
