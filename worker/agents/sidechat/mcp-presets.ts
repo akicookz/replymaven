@@ -6,7 +6,6 @@ export type McpPresetKey =
   | "slack"
   | "attio"
   | "linear"
-  | "github"
   | "sentry"
   | "cloudflare-observability"
   | "vercel-observability";
@@ -20,9 +19,6 @@ export interface McpPreset {
   auth: readonly McpAuthMode[];
   icon: string;
   readOnly?: boolean;
-  // Servers that omit `scopes_supported` from their protected-resource
-  // metadata leave the MCP client with no scope to request. Declare it here.
-  scope?: string;
 }
 
 const MCP_PRESETS: readonly McpPreset[] = Object.freeze([
@@ -40,7 +36,6 @@ const MCP_PRESETS: readonly McpPreset[] = Object.freeze([
     url: "https://mcp.stripe.com",
     auth: Object.freeze(["oauth"] satisfies McpAuthMode[]),
     icon: "/integrations/stripe.svg",
-    scope: "mcp",
   }),
   Object.freeze({
     key: "slack",
@@ -62,13 +57,6 @@ const MCP_PRESETS: readonly McpPreset[] = Object.freeze([
     url: "https://mcp.linear.app/mcp",
     auth: Object.freeze(["oauth"] satisfies McpAuthMode[]),
     icon: "/integrations/linear.svg",
-  }),
-  Object.freeze({
-    key: "github",
-    label: "GitHub",
-    url: "https://api.githubcopilot.com/mcp/",
-    auth: Object.freeze(["oauth"] satisfies McpAuthMode[]),
-    icon: "/integrations/github.svg",
   }),
   Object.freeze({
     key: "sentry",

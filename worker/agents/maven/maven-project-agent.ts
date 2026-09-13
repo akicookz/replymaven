@@ -320,14 +320,13 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
   private readonly sidechatRegistrationLocks = new Map<string, Promise<void>>();
   private directory?: ConversationDirectory;
   private readOnlyMcpOAuthConnections?: Set<string> = new Set<string>();
-  private pendingMcpOAuthScopes?: Map<string, string> = new Map<string, string>();
   private mcpOperationTail: Promise<void> = Promise.resolve();
 
   constructor(ctx: DurableObjectState, env: AppEnv) {
     super(ctx, env);
     this.mcp.configureOAuthCallback({
       successRedirect: this.mcpOAuthReturnPath(),
-      customHandler: (result) => this.finishMcpOAuthCallback(result),
+      customHandler: (result) => this.finishMcpOAuthCallback(result.authSuccess),
     });
   }
 
@@ -335,39 +334,19 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     return `/app/projects/${encodeURIComponent(this.name)}/support-chat/tools`;
   }
 
-  private finishMcpOAuthCallback(result: {
-    serverId?: string;
-    authSuccess: boolean;
-    authError?: string;
-  }): Response {
-    if (result.authSuccess) {
+  private finishMcpOAuthCallback(authSuccess: boolean): Response {
+    if (authSuccess) {
       this.ctx.waitUntil(
         this.mcp.waitForConnections({ timeout: 30_000 }).then(
           () => undefined,
           () => undefined,
         ),
       );
-    } else {
-      // Without this the redirect below is identical for success and failure,
-      // so a rejected token exchange is indistinguishable from a good one.
-      console.error(
-        "[mcp-oauth] callback failed",
-        JSON.stringify({
-          projectId: this.name,
-          serverId: result.serverId ?? null,
-          preset: result.serverId
-            ? this.readMcpConnectionMetadata(result.serverId)?.preset_key ?? null
-            : null,
-          error: result.authError ?? "unknown",
-        }),
-      );
     }
-    const target = new URL(
-      this.mcpOAuthReturnPath(),
-      this.env.BETTER_AUTH_URL,
+    return Response.redirect(
+      new URL(this.mcpOAuthReturnPath(), this.env.BETTER_AUTH_URL),
+      302,
     );
-    if (!result.authSuccess) target.searchParams.set("mcpAuthError", "1");
-    return Response.redirect(target, 302);
   }
 
   createMcpOAuthProvider(callbackUrl: string): AgentMcpOAuthProvider {
@@ -376,33 +355,12 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       "ReplyMaven",
       callbackUrl,
       (serverId) => this.readOnlyMcpOAuthConnectionIds().has(serverId),
-      (serverId) => this.mcpOAuthScopeForServer(serverId),
     );
   }
 
   private readOnlyMcpOAuthConnectionIds(): Set<string> {
     this.readOnlyMcpOAuthConnections ??= new Set<string>();
     return this.readOnlyMcpOAuthConnections;
-  }
-
-  private pendingMcpOAuthScopeIds(): Map<string, string> {
-    this.pendingMcpOAuthScopes ??= new Map<string, string>();
-    return this.pendingMcpOAuthScopes;
-  }
-
-  // Resolved during connect from the in-memory map (the metadata row does not
-  // exist yet) and on the OAuth callback from the persisted preset key, which
-  // survives the Durable Object being evicted while the user is at the IdP.
-  private mcpOAuthScopeForServer(serverId: string): string | undefined {
-    const pending = this.pendingMcpOAuthScopeIds().get(serverId);
-    if (pending) return pending;
-    try {
-      this.ensureMcpApplicationSchema();
-      const presetKey = this.readMcpConnectionMetadata(serverId)?.preset_key;
-      return (presetKey ? getMcpPreset(presetKey) : null)?.scope;
-    } catch {
-      return undefined;
-    }
   }
 
   private conversationDirectory(): ConversationDirectory {
@@ -2069,9 +2027,6 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     if (preset?.readOnly) {
       this.readOnlyMcpOAuthConnectionIds().add(requestedId);
     }
-    if (preset?.scope) {
-      this.pendingMcpOAuthScopeIds().set(requestedId, preset.scope);
-    }
     const headers = this.mcpTransportHeaders(input);
     let result: AddMcpServerResult;
     try {
@@ -2085,17 +2040,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
         },
       });
     } catch (error) {
-      this.pendingMcpOAuthScopeIds().delete(requestedId);
       await this.removeMcpServer(requestedId).catch(() => undefined);
-      console.error(
-        "[mcp-connect] addMcpServer failed",
-        JSON.stringify({
-          projectId: this.name,
-          preset: input.presetKey ?? null,
-          url: input.url,
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
       throw error;
     } finally {
       this.readOnlyMcpOAuthConnectionIds().delete(requestedId);
@@ -2172,24 +2117,6 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     return this.buildMcpConnectionView(connectionId);
   }
 
-  private logMcpReconcileFailure(
-    connectionId: string,
-    stage: "establish" | "discover",
-    error: unknown,
-  ): void {
-    console.error(
-      "[mcp-reconcile] failed",
-      JSON.stringify({
-        projectId: this.name,
-        connectionId,
-        stage,
-        preset: this.readMcpConnectionMetadata(connectionId)?.preset_key ?? null,
-        state: this.getMcpServers().servers[connectionId]?.state ?? null,
-        error: error instanceof Error ? error.message : String(error),
-      }),
-    );
-  }
-
   private async reconcileMcpCatalog(
     connectionId: string,
     refreshReadyCatalog: boolean,
@@ -2206,9 +2133,8 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     if (server?.state === "connecting") {
       try {
         await this.mcp.establishConnection(connectionId);
-      } catch (error) {
+      } catch {
         // List must still return the other connections.
-        this.logMcpReconcileFailure(connectionId, "establish", error);
       }
       server = this.getMcpServers().servers[connectionId];
     }
@@ -2220,9 +2146,8 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
         await this.mcp.discoverIfConnected(connectionId, {
           timeoutMs: 30_000,
         });
-      } catch (error) {
+      } catch {
         // List must still return the other connections.
-        this.logMcpReconcileFailure(connectionId, "discover", error);
       }
     }
     if (this.getMcpServers().servers[connectionId]?.state === "ready") {

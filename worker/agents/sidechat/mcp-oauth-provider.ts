@@ -1,7 +1,4 @@
-import type {
-  OAuthClientMetadata,
-  OAuthDiscoveryState,
-} from "@modelcontextprotocol/client";
+import type { OAuthDiscoveryState } from "@modelcontextprotocol/client";
 import { DurableObjectOAuthClientProvider } from "agents";
 
 const OIDC_IDENTITY_SCOPES = new Set(["openid", "profile", "email"]);
@@ -36,9 +33,6 @@ export class ReadOnlyMcpOAuthClientProvider extends DurableObjectOAuthClientProv
     clientName: string,
     callbackUrl: string,
     private readonly shouldRestrictServer: (serverId: string) => boolean,
-    private readonly resolveServerScope: (
-      serverId: string,
-    ) => string | undefined = () => undefined,
   ) {
     super(storage, clientName, callbackUrl);
   }
@@ -49,21 +43,6 @@ export class ReadOnlyMcpOAuthClientProvider extends DurableObjectOAuthClientProv
     } catch {
       return false;
     }
-  }
-
-  // The MCP client resolves scope as
-  // `requested ?? resourceMetadata.scopes_supported ?? clientMetadata.scope`.
-  // Servers that publish no `scopes_supported` (Stripe) otherwise authorize
-  // and exchange tokens with no scope at all.
-  override get clientMetadata(): OAuthClientMetadata {
-    const base = super.clientMetadata;
-    let scope: string | undefined;
-    try {
-      scope = this.resolveServerScope(this.serverId);
-    } catch {
-      scope = undefined;
-    }
-    return scope ? { ...base, scope } : base;
   }
 
   override async saveDiscoveryState(
