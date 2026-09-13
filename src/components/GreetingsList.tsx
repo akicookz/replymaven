@@ -36,9 +36,12 @@ function GreetingsList({
 
   useEffect(() => {
     if (!onPreviewChange) return;
-    onPreviewChange(
-      previewId ? greetings.filter((g) => g.id === previewId) : greetings,
-    );
+    const pinned = previewId
+      ? greetings.find((g) => g.id === previewId)
+      : undefined;
+    // The preview payload drops disabled greetings, so pinning one has to
+    // force it on or Preview looks broken for anything not already live.
+    onPreviewChange(pinned ? [{ ...pinned, enabled: true }] : greetings);
   }, [greetings, onPreviewChange, previewId]);
 
   const submitting =

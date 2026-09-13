@@ -201,7 +201,7 @@ export function WidgetPreviewPanel({
 }: WidgetPreviewPanelProps) {
   return (
     <>
-      <Card className={cn(WIDGET_CARD_CLASS_NAME, "relative overflow-hidden")}>
+      <Card className={cn(WIDGET_CARD_CLASS_NAME, "relative gap-0 overflow-hidden py-0")}>
         <CardContent className="p-0">
           <div className="pointer-events-none absolute inset-x-0 top-0 z-10 p-3">
             <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-hairline bg-background/70 p-1.5 shadow-lg backdrop-blur-md">
@@ -255,10 +255,7 @@ export function WidgetPreviewPanel({
               ) : null}
             </div>
           </div>
-          <div
-            className="rounded-xl overflow-hidden"
-            style={{ height: "min(700px, calc(100vh - 12rem))" }}
-          >
+          <div style={{ height: "min(700px, calc(100vh - 12rem))" }}>
             <iframe
               ref={iframeRef}
               srcDoc={previewHtml}
