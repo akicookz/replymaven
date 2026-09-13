@@ -33,6 +33,14 @@ import { DashboardCommandProvider } from "@/components/commands/DashboardCommand
 import { signOut, useSession } from "@/lib/auth-client";
 import { resetFirstPartyPostHog } from "@/lib/posthog";
 import { cn } from "@/lib/utils";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { useIsMobileViewport } from "@/hooks/use-media-query";
 import { useSubscription } from "@/hooks/use-subscription";
 import { getTrialDaysRemaining, usagePercent } from "@/lib/plan";
 import { canCreateProjects } from "@/lib/team-permissions";
@@ -78,6 +86,7 @@ function Layout() {
   const [collapsed, setCollapsed] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [mobileOpen, setMobileOpen] = useState(false);
+  const isMobileViewport = useIsMobileViewport();
   const [forceProfileSetup, setForceProfileSetup] = useState(false);
 
   // Open the profile setup dialog when the URL contains ?setup=profile
@@ -320,225 +329,231 @@ function Layout() {
     }
   }
 
+  const sidebarContent = (
+    <>
+          {/* Workspace name + sidebar toggle. When the rail is collapsed the
+              name hides and the toggle is the only way to re-expand. */}
+          <div
+            className={cn(
+              "flex items-center gap-1",
+              collapsed ? "h-10 justify-center px-0" : "h-10 px-2",
+            )}
+          >
+            {currentProject && projects && !collapsed && (
+              <Popover open={selectorOpen} onOpenChange={setSelectorOpen}>
+                <PopoverTrigger asChild>
+                  <button className="min-w-0 flex-1 flex h-8 items-center gap-1 rounded-md px-2 text-[13px] hover:bg-glass-button transition-colors">
+                    <span className="truncate font-semibold flex-1 text-left text-ink-1">
+                      {currentProject.name}
+                    </span>
+                    <ChevronDown
+                      className={cn(
+                        "size-3 shrink-0 text-ink-5 transition-transform",
+                        selectorOpen && "rotate-180",
+                      )}
+                      strokeWidth={1.5}
+                    />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-56 p-1">
+                  <div className="space-y-0.5">
+                    {projects.map((project) => (
+                      <button
+                        key={project.id}
+                        onClick={() => switchProject(project)}
+                        className={cn(
+                          "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left transition-colors",
+                          project.id === currentProject.id
+                            ? "bg-accent text-foreground font-medium"
+                            : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                        )}
+                      >
+                        <span className="flex-1 truncate">{project.name}</span>
+                        {project.id === currentProject.id && (
+                          <Check className="w-4 h-4 shrink-0 text-primary" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  {canCreateProjects(subData?.role) && (
+                    <Link
+                      to="/app/new-project"
+                      onClick={() => setSelectorOpen(false)}
+                      className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    >
+                      <Plus className="w-4 h-4" />
+                      New Project
+                    </Link>
+                  )}
+                </PopoverContent>
+              </Popover>
+            )}
+            {/* Mobile close button — same icon as the desktop collapse toggle */}
+            <button
+              onClick={closeMobile}
+              className="flex size-8 shrink-0 items-center justify-center rounded-md hover:bg-glass-button text-ink-5 transition-colors md:hidden"
+              aria-label="Close menu"
+            >
+              <PanelLeftClose className="size-4" strokeWidth={1.5} />
+            </button>
+            {/* Desktop collapse / expand toggle */}
+            <button
+              onClick={() => setCollapsed((c) => !c)}
+              className="hidden md:flex size-8 shrink-0 items-center justify-center rounded-md hover:bg-glass-button text-ink-5 transition-colors"
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {collapsed ? (
+                <PanelLeftOpen className="size-4" strokeWidth={1.5} />
+              ) : (
+                <PanelLeftClose className="size-4" strokeWidth={1.5} />
+              )}
+            </button>
+          </div>
+  
+          {/* Navigation */}
+          <nav className="flex-1 overflow-y-auto px-2">
+            {NAV_SECTIONS.map((section) => {
+              const items = navItems.filter((item) => item.group === section.id);
+              if (items.length === 0) return null;
+              return (
+                <NavSection key={section.id} id={section.id} label={section.label}>
+                  {items.map((item) => (
+                    <NavLink key={item.href} item={item} />
+                  ))}
+                </NavSection>
+              );
+            })}
+  
+            {!currentProject && canCreateProjects(subData?.role) && (
+              <Link
+                to="/app/onboarding"
+                className={cn(
+                  "flex h-8 items-center gap-2 rounded-md text-[13px] font-medium text-ink-4 hover:bg-glass-button hover:text-ink-1",
+                  collapsed ? "justify-center px-0" : "px-2",
+                )}
+              >
+                <Plus className="size-4" strokeWidth={1.5} />
+                {!collapsed && "Create Project"}
+              </Link>
+            )}
+          </nav>
+  
+          {/* Usage — bare bar + count above the user button; links to billing.
+              Trial and past-due states surface as a quiet suffix on the count. */}
+          {subData?.subscription && subData.limits && !collapsed && (
+            <div className="px-2">
+              <Link
+                to={currentProject ? `/app/projects/${currentProject.id}/settings?tab=billing` : "/app/account/billing"}
+                className="group block rounded-md px-2 py-1"
+              >
+                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className={cn(
+                      "h-full rounded-full transition-all",
+                      usagePercent(subData.usage.messagesUsed, subData.limits.maxMessagesPerMonth) >= 90
+                        ? "bg-destructive"
+                        : usagePercent(subData.usage.messagesUsed, subData.limits.maxMessagesPerMonth) >= 70
+                          ? "bg-yellow-500"
+                          : "bg-primary",
+                    )}
+                    style={{
+                      width: `${usagePercent(subData.usage.messagesUsed, subData.limits.maxMessagesPerMonth)}%`,
+                    }}
+                  />
+                </div>
+                <p className="mt-1.5 text-[10px] text-ink-7 transition-colors group-hover:text-ink-4">
+                  {subData.usage.messagesUsed}/{subData.limits.maxMessagesPerMonth} messages
+                  {subData.subscription.status === "trialing" &&
+                    ` · ${getTrialDaysRemaining(subData.subscription.trialEndsAt)}d trial`}
+                  {subData.subscription.status === "past_due" && " · past due"}
+                </p>
+              </Link>
+            </div>
+          )}
+  
+          {/* User */}
+          <div className="px-2 pb-2 pt-1">
+            <Popover>
+              <PopoverTrigger asChild>
+                <button className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-glass-button transition-colors">
+                  <div className="size-6 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-semibold text-primary shrink-0">
+                    {userName.charAt(0).toUpperCase()}
+                  </div>
+                  {!collapsed && (
+                    <div className="flex-1 min-w-0 text-left">
+                      <p className="text-[13px] font-medium text-ink-2 truncate">
+                        {userName}
+                      </p>
+                      <p className="text-[11px] text-ink-6 truncate">
+                        {userEmail}
+                      </p>
+                    </div>
+                  )}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent side="top" align="start" className="w-52 p-1">
+                <Link
+                  to={currentProject ? `/app/projects/${currentProject.id}/settings?tab=profile` : "/app/account"}
+                  className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                >
+                  <User className="w-4 h-4 shrink-0" />
+                  My Profile
+                </Link>
+                <Link
+                  to={currentProject ? `/app/projects/${currentProject.id}/settings?tab=team` : "/app/account/team"}
+                  className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                >
+                  <Users className="w-4 h-4 shrink-0" />
+                  Team
+                </Link>
+                <Link
+                  to={currentProject ? `/app/projects/${currentProject.id}/settings?tab=billing` : "/app/account/billing"}
+                  className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                >
+                  <CreditCard className="w-4 h-4 shrink-0" />
+                  Billing
+                </Link>
+                <div className="h-px bg-muted my-1" />
+                <button
+                  onClick={handleSignOut}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                >
+                  <LogOut className="w-4 h-4 shrink-0" />
+                  Sign Out
+                </button>
+              </PopoverContent>
+            </Popover>
+          </div>
+    </>
+  );
+
   return (
     <DashboardCommandProvider projectId={currentProject?.id ?? null}>
     <div className="flex h-screen">
-      {/* Mobile overlay */}
-      {mobileOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-black/50 md:hidden"
-          onClick={closeMobile}
-        />
-      )}
-
-      {/* Sidebar */}
-      <aside
-        className={cn(
-          "flex flex-col glass-sidebar border-r border-hairline transition-all duration-200",
-          // Desktop: static sidebar
-          "hidden md:flex",
-          collapsed ? "md:w-[68px]" : "md:w-[248px]",
-          // Mobile: slide-out overlay
-          mobileOpen
-            ? "fixed inset-y-0 left-0 z-50 flex w-[248px]"
-            : "fixed inset-y-0 left-0 z-50 -translate-x-full md:translate-x-0 md:relative",
-        )}
-      >
-        {/* Workspace name + sidebar toggle. When the rail is collapsed the
-            name hides and the toggle is the only way to re-expand. */}
-        <div
+      {isMobileViewport ? (
+        <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+          <SheetContent
+            side="left"
+            className="glass-sidebar w-[248px] gap-0 sm:max-w-[248px]"
+          >
+            <SheetHeader className="sr-only">
+              <SheetTitle>Navigation</SheetTitle>
+              <SheetDescription>Workspace projects and settings</SheetDescription>
+            </SheetHeader>
+            {sidebarContent}
+          </SheetContent>
+        </Sheet>
+      ) : (
+        <aside
           className={cn(
-            "flex items-center gap-1",
-            collapsed ? "h-10 justify-center px-0" : "h-10 px-2",
+            "hidden md:flex flex-col glass-sidebar border-r border-hairline transition-all duration-200",
+            collapsed ? "md:w-[68px]" : "md:w-[248px]",
           )}
         >
-          {currentProject && projects && !collapsed && (
-            <Popover open={selectorOpen} onOpenChange={setSelectorOpen}>
-              <PopoverTrigger asChild>
-                <button className="min-w-0 flex-1 flex h-8 items-center gap-1 rounded-md px-2 text-[13px] hover:bg-glass-button transition-colors">
-                  <span className="truncate font-semibold flex-1 text-left text-ink-1">
-                    {currentProject.name}
-                  </span>
-                  <ChevronDown
-                    className={cn(
-                      "size-3 shrink-0 text-ink-5 transition-transform",
-                      selectorOpen && "rotate-180",
-                    )}
-                    strokeWidth={1.5}
-                  />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent align="start" className="w-56 p-1">
-                <div className="space-y-0.5">
-                  {projects.map((project) => (
-                    <button
-                      key={project.id}
-                      onClick={() => switchProject(project)}
-                      className={cn(
-                        "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left transition-colors",
-                        project.id === currentProject.id
-                          ? "bg-accent text-foreground font-medium"
-                          : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                      )}
-                    >
-                      <span className="flex-1 truncate">{project.name}</span>
-                      {project.id === currentProject.id && (
-                        <Check className="w-4 h-4 shrink-0 text-primary" />
-                      )}
-                    </button>
-                  ))}
-                </div>
-                {canCreateProjects(subData?.role) && (
-                  <Link
-                    to="/app/new-project"
-                    onClick={() => setSelectorOpen(false)}
-                    className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  >
-                    <Plus className="w-4 h-4" />
-                    New Project
-                  </Link>
-                )}
-              </PopoverContent>
-            </Popover>
-          )}
-          {/* Mobile close button — same icon as the desktop collapse toggle */}
-          <button
-            onClick={closeMobile}
-            className="flex size-8 shrink-0 items-center justify-center rounded-md hover:bg-glass-button text-ink-5 transition-colors md:hidden"
-            aria-label="Close menu"
-          >
-            <PanelLeftClose className="size-4" strokeWidth={1.5} />
-          </button>
-          {/* Desktop collapse / expand toggle */}
-          <button
-            onClick={() => setCollapsed((c) => !c)}
-            className="hidden md:flex size-8 shrink-0 items-center justify-center rounded-md hover:bg-glass-button text-ink-5 transition-colors"
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {collapsed ? (
-              <PanelLeftOpen className="size-4" strokeWidth={1.5} />
-            ) : (
-              <PanelLeftClose className="size-4" strokeWidth={1.5} />
-            )}
-          </button>
-        </div>
-
-        {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto px-2">
-          {NAV_SECTIONS.map((section) => {
-            const items = navItems.filter((item) => item.group === section.id);
-            if (items.length === 0) return null;
-            return (
-              <NavSection key={section.id} id={section.id} label={section.label}>
-                {items.map((item) => (
-                  <NavLink key={item.href} item={item} />
-                ))}
-              </NavSection>
-            );
-          })}
-
-          {!currentProject && canCreateProjects(subData?.role) && (
-            <Link
-              to="/app/onboarding"
-              className={cn(
-                "flex h-8 items-center gap-2 rounded-md text-[13px] font-medium text-ink-4 hover:bg-glass-button hover:text-ink-1",
-                collapsed ? "justify-center px-0" : "px-2",
-              )}
-            >
-              <Plus className="size-4" strokeWidth={1.5} />
-              {!collapsed && "Create Project"}
-            </Link>
-          )}
-        </nav>
-
-        {/* Usage — bare bar + count above the user button; links to billing.
-            Trial and past-due states surface as a quiet suffix on the count. */}
-        {subData?.subscription && subData.limits && !collapsed && (
-          <div className="px-2">
-            <Link
-              to={currentProject ? `/app/projects/${currentProject.id}/settings?tab=billing` : "/app/account/billing"}
-              className="group block rounded-md px-2 py-1"
-            >
-              <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                <div
-                  className={cn(
-                    "h-full rounded-full transition-all",
-                    usagePercent(subData.usage.messagesUsed, subData.limits.maxMessagesPerMonth) >= 90
-                      ? "bg-destructive"
-                      : usagePercent(subData.usage.messagesUsed, subData.limits.maxMessagesPerMonth) >= 70
-                        ? "bg-yellow-500"
-                        : "bg-primary",
-                  )}
-                  style={{
-                    width: `${usagePercent(subData.usage.messagesUsed, subData.limits.maxMessagesPerMonth)}%`,
-                  }}
-                />
-              </div>
-              <p className="mt-1.5 text-[10px] text-ink-7 transition-colors group-hover:text-ink-4">
-                {subData.usage.messagesUsed}/{subData.limits.maxMessagesPerMonth} messages
-                {subData.subscription.status === "trialing" &&
-                  ` · ${getTrialDaysRemaining(subData.subscription.trialEndsAt)}d trial`}
-                {subData.subscription.status === "past_due" && " · past due"}
-              </p>
-            </Link>
-          </div>
-        )}
-
-        {/* User */}
-        <div className="px-2 pb-2 pt-1">
-          <Popover>
-            <PopoverTrigger asChild>
-              <button className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-glass-button transition-colors">
-                <div className="size-6 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-semibold text-primary shrink-0">
-                  {userName.charAt(0).toUpperCase()}
-                </div>
-                {!collapsed && (
-                  <div className="flex-1 min-w-0 text-left">
-                    <p className="text-[13px] font-medium text-ink-2 truncate">
-                      {userName}
-                    </p>
-                    <p className="text-[11px] text-ink-6 truncate">
-                      {userEmail}
-                    </p>
-                  </div>
-                )}
-              </button>
-            </PopoverTrigger>
-            <PopoverContent side="top" align="start" className="w-52 p-1">
-              <Link
-                to={currentProject ? `/app/projects/${currentProject.id}/settings?tab=profile` : "/app/account"}
-                className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-              >
-                <User className="w-4 h-4 shrink-0" />
-                My Profile
-              </Link>
-              <Link
-                to={currentProject ? `/app/projects/${currentProject.id}/settings?tab=team` : "/app/account/team"}
-                className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-              >
-                <Users className="w-4 h-4 shrink-0" />
-                Team
-              </Link>
-              <Link
-                to={currentProject ? `/app/projects/${currentProject.id}/settings?tab=billing` : "/app/account/billing"}
-                className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-              >
-                <CreditCard className="w-4 h-4 shrink-0" />
-                Billing
-              </Link>
-              <div className="h-px bg-muted my-1" />
-              <button
-                onClick={handleSignOut}
-                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-              >
-                <LogOut className="w-4 h-4 shrink-0" />
-                Sign Out
-              </button>
-            </PopoverContent>
-          </Popover>
-        </div>
-      </aside>
+          {sidebarContent}
+        </aside>
+      )}
 
       {/* Main Content */}
       <MobileSidebarContext.Provider value={sidebarCtx}>

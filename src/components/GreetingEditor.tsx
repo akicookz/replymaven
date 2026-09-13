@@ -5,10 +5,14 @@ import { ImagePositioner } from "@/components/ImagePositioner";
 import { cn } from "@/lib/utils";
 import {
   Sheet,
+  SheetBody,
+  SheetCloseButton,
   SheetContent,
   SheetDescription,
   SheetFooter,
   SheetHeader,
+  SheetHeaderActions,
+  SheetHeaderContent,
   SheetTitle,
 } from "@/components/ui/sheet";
 import {
@@ -156,19 +160,21 @@ function GreetingEditor({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="right"
-        className="w-full sm:max-w-xl flex flex-col gap-0 p-0"
-      >
-        <SheetHeader className="px-6 pt-6 pb-4">
-          <SheetTitle>{initial ? "Edit greeting" : "New greeting"}</SheetTitle>
-          <SheetDescription>
-            Pop-out card shown above the chat trigger. Add an image or CTA to
-            turn it into a rich card; otherwise it shows as a compact bubble.
-          </SheetDescription>
+      <SheetContent side="right" className="sm:max-w-xl">
+        <SheetHeader>
+          <SheetHeaderContent>
+            <SheetTitle>{initial ? "Edit greeting" : "New greeting"}</SheetTitle>
+            <SheetDescription>
+              Pop-out card shown above the chat trigger. Add an image or CTA to
+              turn it into a rich card; otherwise it shows as a compact bubble.
+            </SheetDescription>
+          </SheetHeaderContent>
+          <SheetHeaderActions>
+            <SheetCloseButton label="Close greeting editor" />
+          </SheetHeaderActions>
         </SheetHeader>
 
-        <div className="flex-1 overflow-y-auto px-6 pb-6 space-y-5">
+        <SheetBody className="px-6 py-5 space-y-5">
           <div className="flex items-center justify-between rounded-xl bg-muted/40 px-4 py-3">
             <div>
               <div className="text-sm font-medium">Enabled</div>
@@ -467,7 +473,7 @@ function GreetingEditor({
           {submitError ? (
             <div className="text-sm text-destructive">{submitError}</div>
           ) : null}
-        </div>
+        </SheetBody>
 
         <SheetFooter className="px-6 py-4 border-t border-border bg-background/80 backdrop-blur-sm">
           <Button

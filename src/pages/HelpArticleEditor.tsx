@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowLeft, Eye, ImagePlus, Loader2, RefreshCw, Settings2, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Eye, ImagePlus, Loader2, RefreshCw, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,11 +13,13 @@ import {
 } from "@/components/ui/popover";
 import {
   Sheet,
-  SheetClose,
+  SheetCloseButton,
   SheetContent,
-  SheetHeader,
-  SheetTitle,
   SheetDescription,
+  SheetHeader,
+  SheetHeaderActions,
+  SheetHeaderContent,
+  SheetTitle,
 } from "@/components/ui/sheet";
 import {
   Select,
@@ -789,15 +791,16 @@ function HelpArticleEditorPage() {
       <Sheet open={previewOpen} onOpenChange={setPreviewOpen}>
         <SheetContent
           side="right"
-          showCloseButton={false}
-          className="w-full sm:max-w-3xl lg:max-w-5xl p-0 gap-0"
+          className="sm:max-w-3xl lg:max-w-5xl"
         >
-          <SheetHeader className="flex-row items-center justify-between gap-3 px-4 py-2.5">
-            <SheetTitle className="text-sm">Preview</SheetTitle>
-            <SheetDescription className="sr-only">
-              Live preview of how this article looks to your readers.
-            </SheetDescription>
-            <div className="flex items-center gap-1">
+          <SheetHeader className="min-h-12 py-2">
+            <SheetHeaderContent>
+              <SheetTitle className="text-sm">Preview</SheetTitle>
+              <SheetDescription className="sr-only">
+                Live preview of how this article looks to your readers.
+              </SheetDescription>
+            </SheetHeaderContent>
+            <SheetHeaderActions>
               <Button
                 type="button"
                 variant="outline"
@@ -812,17 +815,8 @@ function HelpArticleEditorPage() {
                 )}
                 Refresh
               </Button>
-              <SheetClose asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label="Close preview"
-                >
-                  <X className="w-4 h-4" />
-                </Button>
-              </SheetClose>
-            </div>
+              <SheetCloseButton label="Close preview" />
+            </SheetHeaderActions>
           </SheetHeader>
           <div className="relative flex-1 min-h-0 bg-muted/30">
             {previewError ? (

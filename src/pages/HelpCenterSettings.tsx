@@ -18,9 +18,13 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
   Sheet,
+  SheetBody,
+  SheetCloseButton,
   SheetContent,
   SheetDescription,
   SheetHeader,
+  SheetHeaderActions,
+  SheetHeaderContent,
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
@@ -356,21 +360,23 @@ function HelpCenterSettings() {
                   Reverse proxy setup
                 </Button>
               </SheetTrigger>
-              <SheetContent
-                side="right"
-                className="inset-y-3 right-3 h-[calc(100%-1.5rem)] w-[calc(100%-1.5rem)] sm:max-w-xl rounded-2xl border border-border p-0 gap-0 overflow-hidden"
-              >
-                <SheetHeader className="px-6 pt-6 pb-4 pr-14">
-                  <SheetTitle>Reverse proxy setup</SheetTitle>
-                  <SheetDescription>
-                    Rewrite <code>/docs</code> on your domain to ReplyMaven
-                    with a 200. Do not 301. Send the proxy header, test the
-                    connection, then save the custom URL.
-                  </SheetDescription>
+              <SheetContent side="right" className="sm:max-w-xl">
+                <SheetHeader>
+                  <SheetHeaderContent>
+                    <SheetTitle>Reverse proxy setup</SheetTitle>
+                    <SheetDescription>
+                      Rewrite <code>/docs</code> on your domain to ReplyMaven
+                      with a 200. Do not 301. Send the proxy header, test the
+                      connection, then save the custom URL.
+                    </SheetDescription>
+                  </SheetHeaderContent>
+                  <SheetHeaderActions>
+                    <SheetCloseButton label="Close reverse proxy setup" />
+                  </SheetHeaderActions>
                 </SheetHeader>
-                <div className="flex-1 overflow-y-auto px-6 pb-6">
+                <SheetBody className="px-6 py-6">
                   <ProxySetupBody projectSlug={project.slug} />
-                </div>
+                </SheetBody>
               </SheetContent>
             </Sheet>
           )}

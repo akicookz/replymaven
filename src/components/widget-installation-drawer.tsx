@@ -9,15 +9,17 @@ import {
   Loader2,
   RotateCcw,
   ShieldCheck,
-  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
-  SheetClose,
+  SheetBody,
+  SheetCloseButton,
   SheetContent,
   SheetDescription,
   SheetHeader,
+  SheetHeaderActions,
+  SheetHeaderContent,
   SheetTitle,
 } from "@/components/ui/sheet";
 import { WidgetSectionCard } from "@/components/WidgetSettings";
@@ -107,25 +109,20 @@ export function WidgetInstallationDrawer({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="right"
-        showCloseButton={false}
-        className="w-full gap-0 overflow-hidden p-0 sm:max-w-2xl"
-      >
-        <SheetHeader className="relative px-6 pb-4 pt-6 pr-16">
-          <SheetTitle className="text-balance text-lg">Installation</SheetTitle>
-          <SheetDescription className="text-pretty">
-            Install the widget and securely connect signed customer identity.
-          </SheetDescription>
-          <SheetClose
-            className="absolute right-4 top-4 flex size-10 items-center justify-center rounded-xl text-muted-foreground transition-[background-color,color,scale] hover:bg-muted hover:text-foreground active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label="Close Installation"
-          >
-            <X className="size-4" />
-          </SheetClose>
+      <SheetContent side="right" className="sm:max-w-2xl">
+        <SheetHeader>
+          <SheetHeaderContent>
+            <SheetTitle className="text-lg">Installation</SheetTitle>
+            <SheetDescription>
+              Install the widget and securely connect signed customer identity.
+            </SheetDescription>
+          </SheetHeaderContent>
+          <SheetHeaderActions>
+            <SheetCloseButton label="Close Installation" />
+          </SheetHeaderActions>
         </SheetHeader>
 
-        <div className="flex-1 space-y-6 overflow-y-auto px-6 pb-8">
+        <SheetBody className="space-y-6 px-6 py-6">
           <WidgetSectionCard
             title="Embed Code"
             description="Add this script tag just before your site's closing body tag."
@@ -264,7 +261,7 @@ export function WidgetInstallationDrawer({
               </ul>
             </div>
           </WidgetSectionCard>
-        </div>
+        </SheetBody>
       </SheetContent>
     </Sheet>
   );
