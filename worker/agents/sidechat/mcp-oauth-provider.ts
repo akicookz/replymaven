@@ -28,6 +28,7 @@ export function restrictOAuthDiscoveryToReadScopes(
 }
 
 export class ReadOnlyMcpOAuthClientProvider extends DurableObjectOAuthClientProvider {
+  private readonly configuredClientName: string;
   constructor(
     storage: DurableObjectStorage,
     clientName: string,
@@ -35,13 +36,25 @@ export class ReadOnlyMcpOAuthClientProvider extends DurableObjectOAuthClientProv
     private readonly shouldRestrictServer: (serverId: string) => boolean,
   ) {
     super(storage, clientName, callbackUrl);
+    this.configuredClientName = clientName;
   }
 
   private shouldRestrictCurrentServer(): boolean {
     try {
       return this.shouldRestrictServer(this.serverId);
     } catch {
-      return false;
+      return true;
+    }
+  }
+
+  async invalidateConnectionOAuthState(): Promise<void> {
+    const serverId = this.serverId;
+    const prefix = `/${this.configuredClientName}/${serverId}/`;
+    while (true) {
+      const entries = await this.storage.list({ prefix, limit: 128 });
+      const keys = [...entries.keys()];
+      if (keys.length === 0) return;
+      await this.storage.delete(keys);
     }
   }
 

@@ -1,6 +1,5 @@
 import {
   Agent,
-  type AgentMcpOAuthProvider,
   type Connection,
   type ConnectionContext,
 } from "agents";
@@ -86,6 +85,7 @@ import {
   normalizeMcpCatalog,
   normalizeMcpToolResult,
   type DiscoveredMcpTool,
+  validateMcpCallbackHost,
   validateMcpServerUrl,
 } from "../sidechat/mcp-policy";
 import { ReadOnlyMcpOAuthClientProvider } from "../sidechat/mcp-oauth-provider";
@@ -268,6 +268,15 @@ function readMcpPresetKey(value: string | null): McpPresetKey | null {
   return value && getMcpPreset(value) ? (value as McpPresetKey) : null;
 }
 
+function mcpOAuthErrorCategory(authError: string | undefined): "expired" | "denied" | "failed" {
+  const message = authError?.toLowerCase() ?? "";
+  if (message.includes("expired") || message.includes("state") || message.includes("used")) {
+    return "expired";
+  }
+  if (message.includes("denied")) return "denied";
+  return "failed";
+}
+
 function parseMcpToolPolicy(row: McpToolPolicyRow): SidechatToolDescriptor | null {
   const safety = row.safety === "read" ||
       row.safety === "write" ||
@@ -326,7 +335,8 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     super(ctx, env);
     this.mcp.configureOAuthCallback({
       successRedirect: this.mcpOAuthReturnPath(),
-      customHandler: (result) => this.finishMcpOAuthCallback(result.authSuccess),
+      customHandler: (result) =>
+        this.finishMcpOAuthCallback(result.authSuccess, result.authError),
     });
   }
 
@@ -334,7 +344,10 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     return `/app/projects/${encodeURIComponent(this.name)}/support-chat/tools`;
   }
 
-  private finishMcpOAuthCallback(authSuccess: boolean): Response {
+  private finishMcpOAuthCallback(
+    authSuccess: boolean,
+    authError?: string,
+  ): Response {
     if (authSuccess) {
       this.ctx.waitUntil(
         this.mcp.waitForConnections({ timeout: 30_000 }).then(
@@ -343,24 +356,46 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
         ),
       );
     }
-    return Response.redirect(
-      new URL(this.mcpOAuthReturnPath(), this.env.BETTER_AUTH_URL),
-      302,
-    );
+    const target = new URL(this.mcpOAuthReturnPath(), this.env.BETTER_AUTH_URL);
+    if (!authSuccess) {
+      target.searchParams.set("mcp_oauth_error", mcpOAuthErrorCategory(authError));
+    }
+    return Response.redirect(target, 302);
   }
 
-  createMcpOAuthProvider(callbackUrl: string): AgentMcpOAuthProvider {
+  createMcpOAuthProvider(callbackUrl: string): ReadOnlyMcpOAuthClientProvider {
     return new ReadOnlyMcpOAuthClientProvider(
       this.ctx.storage,
       "ReplyMaven",
       callbackUrl,
-      (serverId) => this.readOnlyMcpOAuthConnectionIds().has(serverId),
+      (serverId) => this.isReadOnlyMcpOAuthConnection(serverId),
     );
   }
 
   private readOnlyMcpOAuthConnectionIds(): Set<string> {
     this.readOnlyMcpOAuthConnections ??= new Set<string>();
     return this.readOnlyMcpOAuthConnections;
+  }
+
+  private isReadOnlyMcpOAuthConnection(serverId: string): boolean {
+    if (this.readOnlyMcpOAuthConnectionIds().has(serverId)) return true;
+    this.ensureMcpApplicationSchema();
+    const metadata = this.readMcpConnectionMetadata(serverId);
+    return Boolean(
+      metadata?.preset_key && getMcpPreset(metadata.preset_key)?.readOnly === true,
+    );
+  }
+
+  override async fetch(request: Request): Promise<Response> {
+    const callbackPath = `/api/sidechat/mcp/oauth/${encodeURIComponent(this.name)}`;
+    if (new URL(request.url).pathname !== callbackPath) {
+      return super.fetch(request);
+    }
+    return this.runExclusiveMcpOperation(async () => {
+      const response = await super.fetch(request);
+      await this.mcp.waitForConnections().catch(() => undefined);
+      return response;
+    });
   }
 
   private conversationDirectory(): ConversationDirectory {
@@ -2115,6 +2150,56 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     if (!server) return this.buildMcpConnectionView(connectionId);
     await this.reconcileMcpCatalog(connectionId, true);
     return this.buildMcpConnectionView(connectionId);
+  }
+
+  async reconnectMcp(connectionId: string): Promise<McpConnectionView | null> {
+    return this.runExclusiveMcpOperation(() =>
+      this.reconnectMcpUnlocked(connectionId),
+    );
+  }
+
+  private async reconnectMcpUnlocked(
+    connectionId: string,
+  ): Promise<McpConnectionView | null> {
+    this.ensureMcpApplicationSchema();
+    const metadata = this.readMcpConnectionMetadata(connectionId);
+    if (!metadata) return null;
+    if (metadata.auth_mode !== "oauth") {
+      throw new Error("Only OAuth connections support reconnect");
+    }
+
+    const callbackOrigin = validateMcpCallbackHost(this.env.BETTER_AUTH_URL);
+    const callbackUrl = `${callbackOrigin}/api/sidechat/mcp/oauth/${encodeURIComponent(this.name)}`;
+    await this.mcp.waitForConnections();
+    await this.removeMcpServer(connectionId);
+    const provider = this.createMcpOAuthProvider(callbackUrl);
+    provider.serverId = connectionId;
+    await provider.invalidateConnectionOAuthState();
+    const preset = metadata.preset_key ? getMcpPreset(metadata.preset_key) : null;
+    if (preset?.readOnly) {
+      this.readOnlyMcpOAuthConnectionIds().add(connectionId);
+    }
+    try {
+      const result = await this.addMcpServer(metadata.name, metadata.url, {
+        id: connectionId,
+        callbackHost: callbackOrigin,
+        callbackPath: `/api/sidechat/mcp/oauth/${encodeURIComponent(this.name)}`,
+        transport: { type: "auto" },
+      });
+      if (result.state === "ready") {
+        await this.syncMcpCatalog(connectionId);
+      }
+      const connection = this.buildMcpConnectionView(
+        connectionId,
+        result.state === "authenticating" ? result.authUrl : undefined,
+      );
+      if (!connection) throw new Error("MCP connection metadata unavailable");
+      return connection;
+    } finally {
+      if (preset?.readOnly) {
+        this.readOnlyMcpOAuthConnectionIds().delete(connectionId);
+      }
+    }
   }
 
   private async reconcileMcpCatalog(

@@ -21,6 +21,7 @@ interface ProjectMcpParent {
   connectMcp(input: ConnectProjectMcpInput): Promise<McpConnectionView>;
   listMcpConnections(): Promise<McpConnectionView[]>;
   refreshMcpCatalog(connectionId: string): Promise<McpConnectionView | null>;
+  reconnectMcp(connectionId: string): Promise<McpConnectionView | null>;
   disconnectMcp(connectionId: string): Promise<boolean>;
   updateMcpToolPolicy(
     connectionId: string,
@@ -276,6 +277,29 @@ export async function handleRefreshProjectMcp(
       : errorResponse("not_found", 404);
   } catch {
     return errorResponse("mcp_unavailable", 502);
+  }
+}
+
+export async function handleReconnectProjectMcp(
+  options: ConnectionProjectMcpOptions,
+): Promise<Response> {
+  const denied = await authorizeProject(options, true);
+  if (denied) return denied;
+  if (!validConnectionId(options.connectionId)) {
+    return errorResponse("invalid_connection", 400);
+  }
+
+  try {
+    const parent = await options.getParent();
+    const connection = await parent.reconnectMcp(options.connectionId);
+    return connection
+      ? Response.json({ connection: safeConnection(connection) })
+      : errorResponse("not_found", 404);
+  } catch (error) {
+    if (error instanceof Error && error.message === "Only OAuth connections support reconnect") {
+      return errorResponse("oauth_reconnect_unsupported", 400);
+    }
+    return errorResponse("mcp_reconnect_failed", 502);
   }
 }
 

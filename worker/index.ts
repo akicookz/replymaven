@@ -215,6 +215,7 @@ import {
   handleGrantProjectToolAlwaysAllow,
   handleMcpOAuthCallback,
   handleRefreshProjectMcp,
+  handleReconnectProjectMcp,
   handleUpdateProjectMcpPolicy,
   handleRevokeProjectToolAlwaysAllow,
 } from "./routes/project-mcp-handlers";
@@ -2903,6 +2904,21 @@ const app = new Hono<HonoAppContext>()
       const actor = getSidechatRouteActor(c);
       const projectId = c.req.param("projectId");
       return handleRefreshProjectMcp({
+        actor,
+        projectId,
+        connectionId: c.req.param("connectionId"),
+        projectService: new ProjectService(c.get("db")),
+        getParent: () =>
+          getAgentByName(c.env.MAVEN_PROJECT_AGENT, projectId),
+      });
+    },
+  )
+  .post(
+    "/api/projects/:projectId/sidechat/mcp/connections/:connectionId/reconnect",
+    async (c) => {
+      const actor = getSidechatRouteActor(c);
+      const projectId = c.req.param("projectId");
+      return handleReconnectProjectMcp({
         actor,
         projectId,
         connectionId: c.req.param("connectionId"),
