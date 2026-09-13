@@ -20,6 +20,9 @@ export interface McpPreset {
   auth: readonly McpAuthMode[];
   icon: string;
   readOnly?: boolean;
+  // Servers that omit `scopes_supported` from their protected-resource
+  // metadata leave the MCP client with no scope to request. Declare it here.
+  scope?: string;
 }
 
 const MCP_PRESETS: readonly McpPreset[] = Object.freeze([
@@ -37,6 +40,7 @@ const MCP_PRESETS: readonly McpPreset[] = Object.freeze([
     url: "https://mcp.stripe.com",
     auth: Object.freeze(["oauth"] satisfies McpAuthMode[]),
     icon: "/integrations/stripe.svg",
+    scope: "mcp",
   }),
   Object.freeze({
     key: "slack",
