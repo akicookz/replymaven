@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Image, Upload, X } from "lucide-react";
+import { Image, Trash2, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ImagePositioner } from "@/components/ImagePositioner";
 import { cn } from "@/lib/utils";
@@ -86,6 +86,7 @@ interface GreetingEditorProps {
   authors: AuthorOption[];
   uploadImage: (file: File) => Promise<string>;
   onSubmit: (form: GreetingFormState) => Promise<void>;
+  onDelete?: () => void | Promise<void>;
   submitting: boolean;
 }
 
@@ -96,6 +97,7 @@ function GreetingEditor({
   authors,
   uploadImage,
   onSubmit,
+  onDelete,
   submitting,
 }: GreetingEditorProps) {
   const [form, setForm] = useState<GreetingFormState>(emptyForm());
@@ -470,20 +472,46 @@ function GreetingEditor({
             />
           </div>
 
+          {onDelete ? (
+            <div className="space-y-2 border-t border-border pt-5">
+              <label className="text-sm font-medium text-foreground">
+                Delete greeting
+              </label>
+              <p className="text-xs text-muted-foreground">
+                Removes this greeting for every visitor. This cannot be undone.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={submitting}
+                onClick={() => void onDelete()}
+                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              >
+                <Trash2 className="mr-2 size-4" />
+                Delete greeting
+              </Button>
+            </div>
+          ) : null}
+
           {submitError ? (
             <div className="text-sm text-destructive">{submitError}</div>
           ) : null}
         </SheetBody>
 
-        <SheetFooter className="px-6 py-4 border-t border-border bg-background/80 backdrop-blur-sm">
+        <SheetFooter className="grid grid-cols-1 gap-2 px-6 py-4 sm:grid-cols-2">
           <Button
             variant="ghost"
             onClick={() => onOpenChange(false)}
             disabled={submitting}
+            className="order-2 w-full sm:order-1"
           >
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={submitting || uploading}>
+          <Button
+            onClick={handleSubmit}
+            disabled={submitting || uploading}
+            className="order-1 w-full sm:order-2"
+          >
             {submitting ? "Saving..." : initial ? "Save changes" : "Create greeting"}
           </Button>
         </SheetFooter>

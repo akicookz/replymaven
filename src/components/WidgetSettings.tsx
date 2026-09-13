@@ -3,7 +3,6 @@ import {
   AlertCircle,
   CheckCircle2,
   Copy,
-  Globe,
   RotateCcw,
   Save,
 } from "lucide-react";
@@ -202,73 +201,60 @@ export function WidgetPreviewPanel({
 }: WidgetPreviewPanelProps) {
   return (
     <>
-      <Card className={WIDGET_CARD_CLASS_NAME}>
-        <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
-          <div>
-            <CardTitle className="text-lg">Preview</CardTitle>
-            <CardDescription>
-              Review how the widget looks before publishing changes.
-            </CardDescription>
-          </div>
-          <div className="flex items-center gap-1.5">
-            {onReplay ? (
-              <button
-                onClick={onReplay}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                title="Replay greetings and intro timers"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-              </button>
-            ) : null}
-            {position !== "center-inline" ? (
-              <div className="flex gap-0.5 bg-muted/50 rounded-lg p-0.5">
-                <button
-                  onClick={() => setPreviewMode("launcher")}
-                  className={cn(
-                    "px-3 py-1 rounded-md text-xs font-medium transition-colors",
-                    previewMode === "launcher"
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                  title="Closed widget with greeting and intro popups"
-                >
-                  Launcher
-                </button>
-                <button
-                  onClick={() => setPreviewMode("open")}
-                  className={cn(
-                    "px-3 py-1 rounded-md text-xs font-medium transition-colors",
-                    previewMode === "open"
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                  title="Widget opened on its home screen"
-                >
-                  Open
-                </button>
-              </div>
-            ) : null}
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {onPagePathChange ? (
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <Globe className="w-4 h-4 text-muted-foreground shrink-0" />
+      <Card className={cn(WIDGET_CARD_CLASS_NAME, "relative overflow-hidden")}>
+        <CardContent className="p-0">
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-10 p-3">
+            <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-hairline bg-background/70 p-1.5 shadow-lg backdrop-blur-md">
+              {onPagePathChange ? (
                 <input
                   type="text"
                   value={pagePath ?? "/"}
                   onChange={(e) => onPagePathChange(e.target.value)}
                   placeholder="/pricing"
-                  className="flex-1 px-3 py-1.5 rounded-lg border border-input bg-background text-xs font-mono focus:outline-none focus:ring-2 focus:ring-ring"
+                  aria-label="Preview page path"
+                  className="min-w-0 flex-1 rounded-lg bg-muted/40 px-3 py-1.5 text-xs font-mono outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />
-              </div>
-              <p className="text-[11px] text-muted-foreground pl-6">
-                Simulate the page visitors are on to test page visibility
-                rules.
-              </p>
+              ) : null}
+              {position !== "center-inline" ? (
+                <div className="flex shrink-0 gap-0.5 rounded-lg bg-muted/50 p-0.5">
+                  <button
+                    onClick={() => setPreviewMode("launcher")}
+                    className={cn(
+                      "rounded-md px-3 py-1 text-xs font-medium transition-colors",
+                      previewMode === "launcher"
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                    title="Closed widget with greeting and intro popups"
+                  >
+                    Launcher
+                  </button>
+                  <button
+                    onClick={() => setPreviewMode("open")}
+                    className={cn(
+                      "rounded-md px-3 py-1 text-xs font-medium transition-colors",
+                      previewMode === "open"
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                    title="Widget opened on its home screen"
+                  >
+                    Open
+                  </button>
+                </div>
+              ) : null}
+              {onReplay ? (
+                <button
+                  onClick={onReplay}
+                  aria-label="Replay greetings and intro timers"
+                  title="Replay greetings and intro timers"
+                  className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+                >
+                  <RotateCcw className="size-3.5" />
+                </button>
+              ) : null}
             </div>
-          ) : null}
+          </div>
           <div
             className="rounded-xl overflow-hidden"
             style={{ height: "min(700px, calc(100vh - 12rem))" }}

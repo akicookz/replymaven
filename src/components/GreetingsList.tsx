@@ -1,8 +1,6 @@
 import { useEffect, useImperativeHandle, useMemo, useState } from "react";
 import type { Ref } from "react";
-import { Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import GreetingEditor, {
   type GreetingFormState,
 } from "@/components/GreetingEditor";
@@ -34,10 +32,14 @@ function GreetingsList({
   const greetings = greetingsApi.greetings;
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<GreetingData | null>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (onPreviewChange) onPreviewChange(greetings);
-  }, [greetings, onPreviewChange]);
+    if (!onPreviewChange) return;
+    onPreviewChange(
+      previewId ? greetings.filter((g) => g.id === previewId) : greetings,
+    );
+  }, [greetings, onPreviewChange, previewId]);
 
   const submitting =
     greetingsApi.create.isPending || greetingsApi.update.isPending;
@@ -81,12 +83,6 @@ function GreetingsList({
     setEditorOpen(false);
   }
 
-  async function toggleEnabled(g: GreetingData, enabled: boolean) {
-    await greetingsApi.update.mutateAsync({
-      id: g.id,
-      updates: { enabled },
-    });
-  }
 
   async function handleDelete(g: GreetingData) {
     if (!confirm(`Delete greeting "${g.title}"?`)) return;
@@ -115,56 +111,52 @@ function GreetingsList({
           {sorted.map((g) => (
             <li
               key={g.id}
-              className="flex items-center gap-3 rounded-xl bg-muted/40 px-3 py-2.5"
+              className="flex items-stretch gap-2 overflow-hidden rounded-xl bg-muted/40"
             >
-              <div className="w-12 h-12 rounded-lg bg-muted overflow-hidden shrink-0 flex items-center justify-center">
-                {g.imageUrl ? (
-                  <img
-                    src={g.imageUrl}
-                    alt=""
-                    className="w-full h-full object-cover"
-                    style={
-                      g.imagePosition
-                        ? { objectPosition: g.imagePosition }
-                        : undefined
-                    }
-                  />
-                ) : (
-                  <span className="text-sm font-semibold text-muted-foreground">
-                    {g.title.charAt(0).toUpperCase()}
-                  </span>
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium truncate">
-                  {g.title || "(untitled)"}
+              <button
+                type="button"
+                onClick={() => openEdit(g)}
+                className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              >
+                <div className="w-12 h-12 rounded-lg bg-muted overflow-hidden shrink-0 flex items-center justify-center">
+                  {g.imageUrl ? (
+                    <img
+                      src={g.imageUrl}
+                      alt=""
+                      className="w-full h-full object-cover"
+                      style={
+                        g.imagePosition
+                          ? { objectPosition: g.imagePosition }
+                          : undefined
+                      }
+                    />
+                  ) : (
+                    <span className="text-sm font-semibold text-muted-foreground">
+                      {g.title.charAt(0).toUpperCase()}
+                    </span>
+                  )}
                 </div>
-                <div className="text-xs text-muted-foreground truncate">
-                  {g.description ||
-                    (g.ctaText ? `CTA: ${g.ctaText}` : "Compact bubble")}
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium truncate">
+                    {g.title || "(untitled)"}
+                  </div>
+                  <div className="text-xs text-muted-foreground truncate">
+                    {g.description ||
+                      (g.ctaText ? `CTA: ${g.ctaText}` : "Compact bubble")}
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <Switch
+              </button>
+              <div className="flex shrink-0 items-center pr-3">
+                <Button
+                  type="button"
+                  variant={previewId === g.id ? "secondary" : "ghost"}
                   size="sm"
-                  checked={g.enabled}
-                  onCheckedChange={(v) => toggleEnabled(g, v)}
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => openEdit(g)}
+                  aria-pressed={previewId === g.id}
+                  onClick={() =>
+                    setPreviewId((current) => (current === g.id ? null : g.id))
+                  }
                 >
-                  <Pencil className="w-4 h-4" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleDelete(g)}
-                >
-                  <Trash2 className="w-4 h-4" />
+                  Preview
                 </Button>
               </div>
             </li>
@@ -175,6 +167,7 @@ function GreetingsList({
       <GreetingEditor
         open={editorOpen}
         onOpenChange={setEditorOpen}
+        onDelete={editing ? () => handleDelete(editing) : undefined}
         initial={editing}
         authors={authors}
         uploadImage={greetingsApi.uploadImage}
