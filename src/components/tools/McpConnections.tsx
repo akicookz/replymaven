@@ -176,7 +176,7 @@ function oauthErrorMessage(category: string): string {
 }
 
 function reconnectErrorMessage(message: string): string {
-  if (message === "mcp_reconnect_failed") return "Could not reconnect MCP server. Try again.";
+  if (message === "mcp_reconnect_failed") return "Could not reconnect. Try again.";
   if (message === "oauth_reconnect_unsupported") return "This connection does not use OAuth. Refresh tools instead.";
   return message;
 }
@@ -276,7 +276,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
     queryKey,
     queryFn: async () => {
       const response = await fetch(`/api/projects/${projectId}/sidechat/mcp/connections`);
-      if (!response.ok) throw await parseError(response, "Failed to load MCP connections");
+      if (!response.ok) throw await parseError(response, "Failed to load connectors");
       return response.json();
     },
     refetchInterval: (query) =>
@@ -290,7 +290,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input),
       });
-      if (!response.ok) throw await parseError(response, "Could not connect MCP server");
+      if (!response.ok) throw await parseError(response, "Could not connect");
       return response.json() as Promise<{ connection: McpConnection }>;
     },
     onSuccess: ({ connection }, input) => {
@@ -604,11 +604,11 @@ function McpConnections({ projectId }: McpConnectionsProps) {
               <p className="truncate text-xs text-muted-foreground">{connection.url}</p>
               <button
                 type="button"
-                aria-label="Copy MCP server URL"
+                aria-label="Copy connector URL"
                 title="Copy URL"
                 onClick={() => {
                   void navigator.clipboard.writeText(connection.url);
-                  toast.success("MCP server URL copied.");
+                  toast.success("Connector URL copied.");
                 }}
                 className="relative flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring after:absolute after:size-10 after:content-['']"
               >
@@ -1071,11 +1071,8 @@ function McpConnections({ projectId }: McpConnectionsProps) {
       <div>
         <div>
           <h2 id="mcp-connections-heading" className="text-lg font-semibold text-foreground">
-            MCP connections
+            Connectors
           </h2>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground text-pretty">
-            Connect MCP servers to private Sidechat.
-          </p>
         </div>
       </div>
 
@@ -1083,7 +1080,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
       {isError && (
         <div className="flex items-center gap-2 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
           <AlertCircle className="size-4 shrink-0" />
-          Failed to load MCP connections.
+          Failed to load connectors.
         </div>
       )}
 
@@ -1091,7 +1088,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
         <>
           {!data.canManage && (
             <p className="rounded-xl bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
-              Only project owners and admins can change MCP connections.
+              Only project owners and admins can change connectors.
             </p>
           )}
 

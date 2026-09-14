@@ -118,7 +118,7 @@ function McpConnections() {
     queryKey: ["mcp-connections"],
     queryFn: async () => {
       const res = await fetch("/api/mcp/connections");
-      if (!res.ok) throw new Error("Failed to load MCP connections");
+      if (!res.ok) throw new Error("Failed to load connected apps");
       return res.json();
     },
   });
@@ -135,7 +135,7 @@ function McpConnections() {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["mcp-connections"] });
-      toast.success("MCP connection revoked");
+      toast.success("Connected app revoked");
     },
     onError: (error: Error) => {
       toast.error(error.message);
@@ -168,12 +168,8 @@ function McpConnections() {
         <MobileMenuButton />
         <div>
           <h1 className="text-xl md:text-2xl font-bold text-foreground">
-            MCP Connections
+            Connected apps
           </h1>
-          <p className="text-xs md:text-sm text-muted-foreground mt-1">
-            Connect AI clients to your ReplyMaven workspace with secure OAuth.
-            Clients only receive the permissions you approve.
-          </p>
         </div>
       </div>
 
@@ -239,7 +235,7 @@ function McpConnections() {
         </div>
 
         {connectionsQuery.isLoading ? (
-          <div className="space-y-3" aria-label="Loading MCP connections">
+          <div className="space-y-3" aria-label="Loading connected apps">
             {[0, 1].map((item) => (
               <div key={item} className="h-24 animate-pulse rounded-xl bg-muted/40" />
             ))}

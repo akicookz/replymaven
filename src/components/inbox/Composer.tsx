@@ -98,7 +98,7 @@ export default function Composer(props: ComposerProps) {
       const response = await fetch(
         `/api/projects/${projectId}/sidechat/mcp/connections`,
       );
-      if (!response.ok) throw new Error("Failed to load MCP connections");
+      if (!response.ok) throw new Error("Failed to load connectors");
       return response.json() as Promise<{
         connections: Array<{
           id: string;

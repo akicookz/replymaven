@@ -33,7 +33,7 @@ export default function SidechatMcpAvatars({
         id="connected-tools-label"
         className="text-xs font-medium text-ink-6"
       >
-        Connected tools
+        Connections
       </Label>
       <TooltipProvider delayDuration={200}>
         <AvatarGroup className="*:data-[slot=avatar]:ring-glass-reading">

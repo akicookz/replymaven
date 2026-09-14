@@ -287,7 +287,7 @@ function Sops() {
               }
               rows={5}
               maxLength={2000}
-              placeholder='e.g. Ask for their order number. Then call the check_order tool. If the order status is "shipped", provide the tracking number and estimated delivery date. If "processing", tell them it will ship within 2-3 business days.'
+              placeholder='e.g. Ask for their order number. Then call the check_order connector. If the order status is "shipped", provide the tracking number and estimated delivery date. If "processing", tell them it will ship within 2-3 business days.'
               className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
             />
             <p className="text-xs text-muted-foreground text-right">

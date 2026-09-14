@@ -306,7 +306,7 @@ const TOOL_PRESETS: ToolPreset[] = [
         key: "endpoint",
         label: "Endpoint URL",
         placeholder: "https://api.example.com/orders",
-        help: "The bot appends ?order_id=... to this URL. Edit the tool afterwards to rename the parameter.",
+        help: "The bot appends ?order_id=... to this URL. Edit the connector afterwards to rename the parameter.",
       },
       {
         key: "headers",
@@ -518,7 +518,7 @@ function ToolPolicyFields({
             Access
           </label>
           <p className="text-xs text-pretty text-muted-foreground">
-            Choose whether this tool only reads data or can change it.
+            Choose whether this connector only reads data or can change it.
           </p>
         </div>
         <Select
@@ -844,7 +844,7 @@ export function ToolsPanel({
     queryKey: ["tools", projectId],
     queryFn: async () => {
       const res = await fetch(`/api/projects/${projectId}/tools`);
-      if (!res.ok) throw new Error("Failed to fetch tools");
+      if (!res.ok) throw new Error("Failed to fetch connectors");
       return res.json();
     },
   });
@@ -902,8 +902,8 @@ export function ToolsPanel({
         body: JSON.stringify(body),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Failed to create tool" }));
-        throw new Error((err as { error?: string }).error ?? "Failed to create tool");
+        const err = await res.json().catch(() => ({ error: "Failed to create connector" }));
+        throw new Error((err as { error?: string }).error ?? "Failed to create connector");
       }
       return res.json();
     },
@@ -935,8 +935,8 @@ export function ToolsPanel({
         body: JSON.stringify(body),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Failed to update tool" }));
-        throw new Error((err as { error?: string }).error ?? "Failed to update tool");
+        const err = await res.json().catch(() => ({ error: "Failed to update connector" }));
+        throw new Error((err as { error?: string }).error ?? "Failed to update connector");
       }
       return res.json();
     },
@@ -954,7 +954,7 @@ export function ToolsPanel({
       const res = await fetch(`/api/projects/${projectId}/tools/${id}`, {
         method: "DELETE",
       });
-      if (!res.ok) throw new Error("Failed to delete tool");
+      if (!res.ok) throw new Error("Failed to delete connector");
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tools", projectId] });
@@ -969,7 +969,7 @@ export function ToolsPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled }),
       });
-      if (!res.ok) throw new Error("Failed to toggle tool");
+      if (!res.ok) throw new Error("Failed to toggle connector");
       return res.json();
     },
     onSuccess: () => {
@@ -1209,12 +1209,8 @@ export function ToolsPanel({
             <MobileMenuButton />
             <div>
               <h1 className="text-xl md:text-2xl font-bold text-foreground">
-                Tools
+                Connectors
               </h1>
-              <p className="text-xs md:text-sm text-muted-foreground mt-1">
-                Configure external API tools your bot can call during
-                conversations.
-              </p>
             </div>
           </div>
         </div>
@@ -1225,13 +1221,13 @@ export function ToolsPanel({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold text-foreground">
-            {showLogs ? "Execution Log" : "Tools"}
+            {showLogs ? "Execution Log" : "Connectors"}
           </h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            {showLogs
-              ? "Review recent tool calls and responses."
-              : "Configure external API tools your bot can call during conversations."}
-          </p>
+          {showLogs && (
+            <p className="text-sm text-muted-foreground mt-1">
+              Review recent connector calls and responses.
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {showLogs ? (
@@ -1240,7 +1236,7 @@ export function ToolsPanel({
               onClick={() => setShowLogs(false)}
             >
               <ChevronRight className="w-4 h-4 mr-2 rotate-180" />
-              Back to Tools
+              Back to Connectors
             </Button>
           ) : (
             <>
@@ -1262,7 +1258,7 @@ export function ToolsPanel({
             disabled={(tools?.length ?? 0) >= 20}
           >
             <Plus className="w-4 h-4 mr-2" />
-            Add Tool
+            Add Connector
           </Button>
           )}
         </div>
@@ -1272,7 +1268,7 @@ export function ToolsPanel({
       {!showLogs && (tools?.length ?? 0) >= 20 && (
         <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-warning/10 text-warning text-sm">
           <AlertCircle className="w-4 h-4 shrink-0" />
-          Maximum of 20 tools reached. Delete an existing tool to add a new one.
+          Maximum of 20 connectors reached. Delete an existing connector to add a new one.
         </div>
       )}
 
@@ -1281,7 +1277,7 @@ export function ToolsPanel({
         <div className="bg-card rounded-2xl p-6 space-y-5">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-foreground">
-              {editingId ? "Edit Tool" : "New Tool"}
+              {editingId ? "Edit Connector" : "New Connector"}
             </h2>
             <button onClick={resetForm} className="p-1 rounded-lg hover:bg-muted text-muted-foreground">
               <X className="w-4 h-4" />
@@ -1343,7 +1339,7 @@ export function ToolsPanel({
                 className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
               />
               <p className="text-xs text-muted-foreground">
-                The AI uses this to decide when to call this tool. Be specific about what it does and when to use it.
+                The AI uses this to decide when to call this connector. Be specific about what it does and when to use it.
               </p>
             </div>
 
@@ -1484,7 +1480,7 @@ export function ToolsPanel({
               </div>
               {form.parameters.length === 0 && (
                 <p className="text-xs text-muted-foreground py-1">
-                  No parameters. The AI will call this tool without any input data.
+                  No parameters. The AI will call this connector without any input data.
                 </p>
               )}
               <div className="space-y-2">
@@ -1589,7 +1585,7 @@ export function ToolsPanel({
             <div className="flex gap-2 pt-2">
               <Button type="submit" disabled={createTool.isPending || updateTool.isPending}>
                 {(createTool.isPending || updateTool.isPending) && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                {editingId ? "Update Tool" : "Create Tool"}
+                {editingId ? "Update Connector" : "Create Connector"}
               </Button>
               <Button type="button" variant="outline" onClick={resetForm}>
                 Cancel
@@ -1615,7 +1611,7 @@ export function ToolsPanel({
           {isError && (
             <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-destructive/10 text-destructive text-sm">
               <AlertCircle className="w-4 h-4 shrink-0" />
-              Failed to load tools. Please try refreshing the page.
+              Failed to load connectors. Please try refreshing the page.
             </div>
           )}
 
@@ -1800,7 +1796,7 @@ export function ToolsPanel({
               >
                 <div className="px-4 py-4 space-y-4">
                     <p className="text-xs text-muted-foreground">
-                      When the bot cannot answer a question or the visitor requests a human, the conversation will be forwarded to your Slack channel. This is separate from the send_to_slack HTTP tool.
+                      When the bot cannot answer a question or the visitor requests a human, the conversation will be forwarded to your Slack channel. This is separate from the Send to Slack connector.
                     </p>
                     <div className="space-y-3">
                       <div className="space-y-1.5">
@@ -2042,7 +2038,7 @@ export function ToolsPanel({
                   {testingId === tool.id && (
                     <div className="px-4 py-4 space-y-3 bg-muted/20">
                       <div className="flex items-center justify-between">
-                        <h4 className="text-sm font-semibold text-foreground">Test Tool</h4>
+                        <h4 className="text-sm font-semibold text-foreground">Test Connector</h4>
                         <button
                           onClick={() => {
                             setTestingId(null);
@@ -2074,7 +2070,7 @@ export function ToolsPanel({
                           ))}
                         </div>
                       ) : (
-                        <p className="text-xs text-muted-foreground">This tool takes no parameters.</p>
+                        <p className="text-xs text-muted-foreground">This connector takes no parameters.</p>
                       )}
                       <Button
                         size="sm"
@@ -2261,7 +2257,7 @@ export function ToolsPanel({
                 <div className="text-center py-12">
                   <History className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
                   <p className="text-sm text-muted-foreground">
-                    No tool executions yet. Executions will appear here once your bot starts calling tools.
+                    No connector executions yet. Executions will appear here once your bot starts calling connectors.
                   </p>
                 </div>
               )}

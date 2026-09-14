@@ -31,7 +31,7 @@ const HIDDEN_GATEWAY_TOOL_NAMES = new Set([
   "describe_project_tool",
 ]);
 const LEGACY_APPROVAL_EXPIRED =
-  "This approval expired after the connected-tool upgrade. Ask Maven to retry.";
+  "This approval expired after the connector upgrade. Ask Maven to retry.";
 
 export type SafeSidechatDataPart =
   | { type: "turn-accepted"; messageId: string }
@@ -231,10 +231,10 @@ function fallbackToolPresentation(part: UIMessage["parts"][number]) {
     ? boundedString(part.title, MAX_TOOL_DISPLAY_NAME)
     : null;
   return {
-    displayName: dynamicTitle ?? "Connected tool",
+    displayName: dynamicTitle ?? "Connector",
     source: {
       kind: part.type === "dynamic-tool" ? "mcp" as const : "http" as const,
-      name: part.type === "dynamic-tool" ? "MCP" : "Custom tool",
+      name: part.type === "dynamic-tool" ? "MCP" : "Custom connector",
       icon: null,
     },
   };

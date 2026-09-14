@@ -40,13 +40,13 @@ const SIDECHAT_EMPTY_SUGGESTIONS: SidechatSuggestion[] = [
   {
     id: "lookup",
     label: "Look up this customer",
-    prompt: "Look up this customer in connected tools if you can.",
+    prompt: "Look up this customer in your connectors if you can.",
     icon: UserRoundSearch,
   },
   {
     id: "timeline",
     label: "Give me their activity timeline",
-    prompt: "Give me this customer's activity timeline from connected tools.",
+    prompt: "Give me this customer's activity timeline from your connectors.",
     icon: History,
   },
 ];
