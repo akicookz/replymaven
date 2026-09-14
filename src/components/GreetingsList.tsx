@@ -39,9 +39,23 @@ function GreetingsList({
     const pinned = previewId
       ? greetings.find((g) => g.id === previewId)
       : undefined;
-    // The preview payload drops disabled greetings, so pinning one has to
-    // force it on or Preview looks broken for anything not already live.
-    onPreviewChange(pinned ? [{ ...pinned, enabled: true }] : greetings);
+    // Pinning means "show me this one now": the payload drops disabled
+    // greetings and ones whose page rules miss the simulated path, and the
+    // widget still honours delaySeconds before painting. Override all three
+    // so the card appears immediately and stays up while it is being looked at.
+    onPreviewChange(
+      pinned
+        ? [
+            {
+              ...pinned,
+              enabled: true,
+              allowedPages: null,
+              delaySeconds: 0,
+              durationSeconds: Math.max(pinned.durationSeconds, 3600),
+            },
+          ]
+        : greetings,
+    );
   }, [greetings, onPreviewChange, previewId]);
 
   const submitting =

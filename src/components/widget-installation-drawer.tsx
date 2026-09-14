@@ -16,7 +16,6 @@ import {
   SheetBody,
   SheetCloseButton,
   SheetContent,
-  SheetDescription,
   SheetHeader,
   SheetHeaderActions,
   SheetHeaderContent,
@@ -109,13 +108,10 @@ export function WidgetInstallationDrawer({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="sm:max-w-2xl">
+      <SheetContent side="right" aria-describedby={undefined} className="sm:max-w-2xl">
         <SheetHeader>
           <SheetHeaderContent>
             <SheetTitle className="text-lg">Installation</SheetTitle>
-            <SheetDescription>
-              Install the widget and securely connect signed customer identity.
-            </SheetDescription>
           </SheetHeaderContent>
           <SheetHeaderActions>
             <SheetCloseButton label="Close Installation" />

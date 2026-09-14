@@ -365,9 +365,7 @@ function HelpCenterSettings() {
                   <SheetHeaderContent>
                     <SheetTitle>Reverse proxy setup</SheetTitle>
                     <SheetDescription>
-                      Rewrite <code>/docs</code> on your domain to ReplyMaven
-                      with a 200. Do not 301. Send the proxy header, test the
-                      connection, then save the custom URL.
+                      Rewrite <code>/docs</code> with a 200, not a 301.
                     </SheetDescription>
                   </SheetHeaderContent>
                   <SheetHeaderActions>

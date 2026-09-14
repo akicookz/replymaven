@@ -557,7 +557,7 @@ function Layout() {
 
       {/* Main Content */}
       <MobileSidebarContext.Provider value={sidebarCtx}>
-        <main className="flex-1 overflow-y-auto overflow-x-hidden">
+        <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
           <div className="p-4 md:p-8">
             <Outlet />
           </div>

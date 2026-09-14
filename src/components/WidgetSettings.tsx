@@ -121,10 +121,10 @@ export function WidgetPageShell({
         </div>
       )}
 
-      <div className={cn("grid gap-6", sidebar && "lg:grid-cols-2")}>
-        <div className="space-y-6">{children}</div>
+      <div className={cn("grid min-w-0 gap-6", sidebar && "lg:grid-cols-2")}>
+        <div className="min-w-0 space-y-6">{children}</div>
         {sidebar ? (
-          <div className="lg:sticky lg:top-6 lg:self-start space-y-4">
+          <div className="min-w-0 space-y-4 lg:sticky lg:top-6 lg:self-start">
             {sidebar}
           </div>
         ) : null}
@@ -204,7 +204,7 @@ export function WidgetPreviewPanel({
       <Card className={cn(WIDGET_CARD_CLASS_NAME, "relative gap-0 overflow-hidden py-0")}>
         <CardContent className="p-0">
           <div className="pointer-events-none absolute inset-x-0 top-0 z-10 p-3">
-            <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-hairline bg-background/70 p-1.5 shadow-lg backdrop-blur-md">
+            <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-xl border border-hairline bg-background/70 p-1.5 shadow-lg backdrop-blur-md">
               {onPagePathChange ? (
                 <input
                   type="text"
@@ -212,9 +212,10 @@ export function WidgetPreviewPanel({
                   onChange={(e) => onPagePathChange(e.target.value)}
                   placeholder="/pricing"
                   aria-label="Preview page path"
-                  className="min-w-0 flex-1 rounded-lg bg-muted/40 px-3 py-1.5 text-xs font-mono outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="min-w-0 flex-1 basis-full rounded-lg bg-muted/40 px-3 py-1.5 text-xs font-mono outline-none focus-visible:ring-2 focus-visible:ring-ring sm:basis-0"
                 />
               ) : null}
+              <div className="flex shrink-0 items-center gap-2 max-sm:w-full max-sm:justify-end">
               {position !== "center-inline" ? (
                 <div className="flex shrink-0 gap-0.5 rounded-lg bg-muted/50 p-0.5">
                   <button
@@ -253,9 +254,10 @@ export function WidgetPreviewPanel({
                   <RotateCcw className="size-3.5" />
                 </button>
               ) : null}
+              </div>
             </div>
           </div>
-          <div style={{ height: "min(700px, calc(100vh - 12rem))" }}>
+          <div className="h-[calc(100dvh-10rem)] min-h-[420px]">
             <iframe
               ref={iframeRef}
               srcDoc={previewHtml}

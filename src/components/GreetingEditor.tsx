@@ -8,7 +8,6 @@ import {
   SheetBody,
   SheetCloseButton,
   SheetContent,
-  SheetDescription,
   SheetFooter,
   SheetHeader,
   SheetHeaderActions,
@@ -162,14 +161,10 @@ function GreetingEditor({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="sm:max-w-xl">
+      <SheetContent side="right" aria-describedby={undefined} className="sm:max-w-xl">
         <SheetHeader>
           <SheetHeaderContent>
             <SheetTitle>{initial ? "Edit greeting" : "New greeting"}</SheetTitle>
-            <SheetDescription>
-              Pop-out card shown above the chat trigger. Add an image or CTA to
-              turn it into a rich card; otherwise it shows as a compact bubble.
-            </SheetDescription>
           </SheetHeaderContent>
           <SheetHeaderActions>
             <SheetCloseButton label="Close greeting editor" />
@@ -473,19 +468,21 @@ function GreetingEditor({
           </div>
 
           {onDelete ? (
-            <div className="space-y-2 border-t border-border pt-5">
-              <label className="text-sm font-medium text-foreground">
-                Delete greeting
-              </label>
-              <p className="text-xs text-muted-foreground">
-                Removes this greeting for every visitor. This cannot be undone.
-              </p>
+            <div className="flex items-center justify-between gap-4 pt-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground">
+                  Delete greeting
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  This cannot be undone.
+                </p>
+              </div>
               <Button
                 type="button"
                 variant="outline"
                 disabled={submitting}
                 onClick={() => void onDelete()}
-                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                className="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
               >
                 <Trash2 className="mr-2 size-4" />
                 Delete greeting

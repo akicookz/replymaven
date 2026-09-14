@@ -505,6 +505,31 @@ Only edit the Drizzle schema files, then run `bun run db:generate`. Never hand-w
 
 ---
 
+## UI rules
+
+Hard rules. No exceptions, no "just this once".
+
+### Never use separators or divider borders
+
+No `<Separator />`, no `border-t` / `border-b` / `border-x` used to divide one region from
+another, no `<hr>`. This includes drawer and dialog headers and footers: never put a border
+under a header or above a footer.
+
+Separate regions with spacing, or with a background shift (`bg-muted/40`, `glass-bar`) if the
+region genuinely needs to read as its own surface. Borders around a whole component are fine;
+lines drawn *between* things are not.
+
+### Never write long descriptions
+
+Prefer no description at all. Most headings do not need a subtitle, and most fields do not need
+helper text: if the label already says it, the sentence under it is noise.
+
+When a description is genuinely required, one short line. Never two lines, never a sentence
+explaining what the user can already see.
+
+Applies to `CardDescription`, `SheetDescription`, `DialogDescription`, form helper text, and
+section subtitles.
+
 ## Frontend Patterns
 
 ### Entry point (`main.tsx`)

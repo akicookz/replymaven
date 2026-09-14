@@ -83,7 +83,7 @@ function SheetHeader({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="sheet-header"
       className={cn(
-        "glass-bar flex min-h-16 shrink-0 items-center gap-3 border-b border-hairline px-4 py-3",
+        "glass-bar flex min-h-16 shrink-0 items-center gap-3 px-4 py-3",
         className
       )}
       {...props}
@@ -153,7 +153,7 @@ function SheetFooter({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="sheet-footer"
       className={cn(
-        "mt-auto flex shrink-0 items-center justify-end gap-2 border-t border-hairline px-4 py-3",
+        "mt-auto flex shrink-0 items-center justify-end gap-2 px-4 py-3",
         className
       )}
       {...props}
