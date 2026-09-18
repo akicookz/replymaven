@@ -278,14 +278,16 @@ import {
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
     x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
     more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>',
-    maximize: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M21 16v5h-5"/></svg>',
-    minimize: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v6H3M15 3v6h6M9 21v-6H3M21 15h-6v6"/></svg>',
+    maximize: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M21 3l-7 7M9 21H3v-6M3 21l7-7"/></svg>',
+    minimize: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg>',
     play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 0 0 1.52.86l10-6.5a1 1 0 0 0 0-1.72l-10-6.5A1 1 0 0 0 8 5.5Z"/></svg>',
     pause: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>',
     volume: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>',
     volumeOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="m22 9-6 6M16 9l6 6"/></svg>',
     chevronLeft:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>',
+    chevronDown:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>',
     clock:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
     aiSparkle:
@@ -575,13 +577,15 @@ import {
       cursor: pointer;
       z-index: 2;
     }
-    .rm-greeting-video:hover .rm-video-center-play,
-    .rm-greeting-video:focus-within .rm-video-center-play,
-    .rm-message-video:hover .rm-video-center-play,
-    .rm-message-video:focus-within .rm-video-center-play {
+    .rm-greeting-video:not(.playing):hover .rm-video-center-play,
+    .rm-greeting-video:not(.playing) .rm-video-center-play:focus-visible,
+    .rm-message-video:not(.playing):hover .rm-video-center-play,
+    .rm-message-video:not(.playing) .rm-video-center-play:focus-visible {
       opacity: 1;
       transform: translate(-50%, -50%) scale(1);
     }
+    .rm-greeting-video.playing .rm-video-center-play,
+    .rm-message-video.playing .rm-video-center-play { opacity: 0; pointer-events: none; }
     .rm-video-center-play:focus-visible {
       opacity: 1;
       outline: 3px solid var(--rm-accent-bg-hover, rgba(37,99,235,.25));
@@ -602,6 +606,14 @@ import {
       border-radius: 9px;
       background: rgba(15,23,42,.68);
       color: #fff;
+      opacity: 0;
+      pointer-events: auto;
+      transition: opacity .16s ease;
+    }
+    .rm-video-controls:hover,
+    .rm-video-controls:has(:focus-visible) { opacity: 1; }
+    @media (hover: none), (pointer: coarse) {
+      .rm-video-controls { opacity: 1; }
     }
     .rm-video-control,
     .rm-video-expand {
@@ -628,7 +640,7 @@ import {
     .rm-video-progress::-webkit-slider-runnable-track { height: 3px; border-radius: 999px; background: linear-gradient(to right, #fff 0%, #fff var(--rm-video-progress, 0%), rgba(255,255,255,.35) var(--rm-video-progress, 0%), rgba(255,255,255,.35) 100%); }
     .rm-video-progress::-moz-range-track { height: 3px; border: 0; border-radius: 999px; background: rgba(255,255,255,.35); }
     .rm-video-progress::-moz-range-progress { height: 3px; border-radius: 999px; background: #fff; }
-    .rm-video-progress::-webkit-slider-thumb { width: 10px; height: 10px; appearance: none; border: 0; border-radius: 50%; background: #fff; }
+    .rm-video-progress::-webkit-slider-thumb { width: 10px; height: 10px; margin-top: -3.5px; appearance: none; border: 0; border-radius: 50%; background: #fff; }
     .rm-video-progress::-moz-range-thumb { width: 10px; height: 10px; border: 0; border-radius: 50%; background: #fff; }
     .rm-video-time { min-width: 62px; color: rgba(255,255,255,.86); font-size: 10px; line-height: 1; text-align: right; font-variant-numeric: tabular-nums; }
     .rm-video-error { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; padding: 16px; background: #111827; color: #fff; font-size: 12px; text-align: center; }
@@ -642,21 +654,27 @@ import {
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 24px;
+      padding: 0;
       background: rgba(15,23,42,.82);
+      box-sizing: border-box;
+      font: inherit;
       opacity: 0;
       visibility: hidden;
       pointer-events: none;
       transition: opacity .2s ease, visibility .2s ease;
     }
     .rm-video-expanded.open { opacity: 1; visibility: visible; pointer-events: auto; }
-    .rm-video-expanded-shell { position: relative; width: min(680px, 100%); padding-top: 42px; }
+    .rm-video-expanded,
+    .rm-video-expanded * { box-sizing: border-box; }
+    .rm-video-expanded-shell { position: relative; width: 100%; height: 100dvh; }
     .rm-video-expanded-shell .rm-greeting-video,
-    .rm-video-expanded-shell .rm-message-video { width: 100%; aspect-ratio: var(--rm-video-ratio, 16 / 9); max-height: calc(100vh - 48px); }
+    .rm-video-expanded-shell .rm-message-video { width: 100%; height: 100%; aspect-ratio: auto; max-height: none; }
+    .rm-video-expanded-shell .rm-greeting-video,
+    .rm-video-expanded-shell .rm-message-video { margin: 0; border-radius: 0; }
     .rm-video-expanded-back {
       position: absolute;
-      top: 0;
-      left: 0;
+      top: 16px;
+      right: 16px;
       display: inline-flex;
       align-items: center;
       gap: 5px;
@@ -664,9 +682,12 @@ import {
       padding: 0 8px;
       border: 0;
       border-radius: 8px;
-      background: rgba(255,255,255,.1);
+      background: rgba(255,255,255,.12);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
       color: #fff;
       cursor: pointer;
+      z-index: 2;
     }
     .rm-video-expanded-back:hover,
     .rm-video-expanded-back:focus-visible { background: rgba(255,255,255,.18); outline: none; }
@@ -703,24 +724,32 @@ import {
     .rm-header-menu-button:focus-visible { background: var(--rm-bg-tertiary, #e4e4e7); outline: none; }
     .rm-greeting-menu-button svg,
     .rm-header-menu-button svg { width: 16px; height: 16px; }
-    .rm-overflow-menu { position: absolute; top: 35px; right: 0; min-width: 150px; padding: 5px; border-radius: 11px; background: var(--rm-bg, #fff); box-shadow: 0 10px 30px rgba(0,0,0,.18); display: none; }
+    .rm-overflow-menu { position: absolute; top: 35px; right: 0; min-width: 150px; padding: 5px; border: 0; border-radius: 11px; background: var(--rm-bg, #fff); box-shadow: none; display: none; }
     .rm-overflow-menu.open { display: grid; }
     .rm-overflow-menu button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 0 9px; border: 0; border-radius: 8px; background: transparent; color: var(--rm-text, #18181b); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
     .rm-overflow-menu button:hover,
     .rm-overflow-menu button:focus-visible { background: var(--rm-bg-secondary, #f4f4f5); outline: none; }
     .rm-overflow-menu svg { width: 14px; height: 14px; }
-    .rm-greeting-card.expanded { width: min(680px, calc(100vw - 24px)); max-width: 680px; }
+    .rm-greeting-card.expanded { width: min(680px, calc(100vw - 24px)); max-width: 680px; max-height: calc(100vh - 108px); display: flex; flex-direction: column; transition: opacity .35s ease, transform .35s ease; }
+    .rm-greeting-card.expanded .rm-greeting-body { min-height: 0; overflow-y: auto; }
+    .rm-greeting-card.expanded .rm-greeting-video { height: min(320px, calc((100vw - 24px) * .5625)); aspect-ratio: auto; }
+    .rm-greeting-card.expanded .rm-greeting-video.square { height: min(320px, calc(100vw - 24px)); }
     .rm-greeting-stack.expanded { width: min(680px, calc(100vw - 24px)); max-width: 680px; }
-    .rm-chat-window.expanded { width: min(680px, calc(100vw - 24px)); max-width: 680px; height: min(760px, calc(100vh - 90px)); min-height: min(760px, calc(100vh - 90px)); max-height: min(760px, calc(100vh - 90px)); }
+    .rm-greeting-stack.expanded > .rm-greeting-card:not(.expanded) {
+      display: none;
+      pointer-events: none;
+    }
+    .rm-chat-window.expanded { position: fixed; right: 16px; bottom: 16px; width: min(680px, calc(100vw - 32px)); max-width: 680px; height: auto; min-height: min(560px, calc(100vh - 32px)); max-height: calc(100vh - 32px); }
+    .rm-widget-container.bottom-left .rm-chat-window.expanded { left: 16px; right: auto; }
     @media (max-width: 480px) {
-      .rm-video-expanded { padding: 12px; }
-      .rm-video-expanded-shell { width: 100%; }
+      .rm-video-expanded { padding: 0; }
+      .rm-video-expanded-shell { width: 100%; height: 100dvh; }
       .rm-video-expanded-shell .rm-greeting-video,
-      .rm-video-expanded-shell .rm-message-video { max-height: calc(100vh - 24px); }
-      .rm-video-expanded-back { top: 0; }
+      .rm-video-expanded-shell .rm-message-video { max-height: none; }
+      .rm-video-expanded-back { top: 16px; right: 16px; }
       .rm-greeting-card.expanded,
-      .rm-greeting-stack.expanded,
-      .rm-chat-window.expanded { width: calc(100vw - 24px); max-width: calc(100vw - 24px); }
+      .rm-greeting-stack.expanded { width: calc(100vw - 24px); max-width: calc(100vw - 24px); }
+      .rm-greeting-card.expanded { max-height: calc(100dvh - 112px); }
     }
     /* Let the text rise into the faded zone so image and body melt
        together instead of stacking as two blocks. */
@@ -736,9 +765,12 @@ import {
     }
     .rm-greeting-card.compact .rm-greeting-body {
       flex-direction: row;
-      align-items: flex-start;
+      align-items: center;
       gap: 12px;
       padding: 10px 14px 10px 10px;
+    }
+    .rm-greeting-card.compact.has-author .rm-greeting-body {
+      align-items: flex-start;
     }
     .rm-greeting-card.compact {
       cursor: pointer;
@@ -951,6 +983,8 @@ import {
       left: 0;
       transform-origin: bottom left;
     }
+    .rm-chat-window.bottom-right.expanded { right: 16px; }
+    .rm-chat-window.bottom-left.expanded { left: 16px; }
     .rm-chat-window.open {
       opacity: 1;
       visibility: visible;
@@ -2391,16 +2425,37 @@ import {
         transform-origin: bottom center;
       }
       .rm-chat-window.expanded {
-        width: 100%;
-        max-width: 100%;
-        height: 100dvh;
+        top: auto;
+        right: 12px;
+        bottom: 12px;
+        left: 12px;
+        width: auto;
+        max-width: none;
+        height: auto;
         min-height: 0;
-        max-height: none;
+        max-height: calc(100dvh - 24px);
+        --rm-chat-radius: 18px !important;
+        border-radius: 18px !important;
       }
       .rm-chat-window.bottom-right,
       .rm-chat-window.bottom-left {
         right: 0;
         left: 0;
+      }
+      .rm-chat-window.bottom-right.expanded,
+      .rm-chat-window.bottom-left.expanded {
+        top: auto;
+        right: 12px;
+        bottom: 12px;
+        left: 12px;
+        width: auto;
+        max-width: none;
+        height: auto;
+        min-height: min(560px, calc(100dvh - 24px));
+        max-height: calc(100dvh - 24px);
+        --rm-chat-radius: 18px !important;
+        border-radius: 18px !important;
+        box-shadow: var(--rm-shadow);
       }
       .rm-chat-window.open ~ .rm-trigger {
         display: none;
@@ -2721,6 +2776,20 @@ import {
     .rm-widget-container.center-inline .rm-chat-window.bottom-left.open {
       transform: translateX(-50%) translateY(0);
     }
+    .rm-widget-container.center-inline .rm-chat-window.expanded.open {
+      top: auto;
+      right: auto;
+      bottom: 16px;
+      left: 50%;
+      width: min(680px, calc(100vw - 32px));
+      max-width: 680px;
+      height: auto;
+      min-height: min(560px, calc(100vh - 32px));
+      max-height: calc(100vh - 32px);
+      transform: translateX(-50%);
+      border-radius: 20px;
+      box-shadow: var(--rm-shadow);
+    }
     /* Center-inline header tweaks */
     .rm-widget-container.center-inline .rm-header {
       margin-bottom: 0;
@@ -2814,6 +2883,19 @@ import {
       .rm-widget-container.center-inline .rm-chat-window.bottom-left.open {
         transform: translateY(0);
         left: 0;
+      }
+      .rm-widget-container.center-inline .rm-chat-window.expanded.open {
+        top: auto;
+        right: 12px;
+        bottom: 12px;
+        left: 12px;
+        width: auto;
+        height: auto;
+        min-height: min(560px, calc(100dvh - 24px));
+        max-height: calc(100dvh - 24px);
+        border-radius: 18px;
+        box-shadow: var(--rm-shadow);
+        transform: none;
       }
       /* On mobile full-screen, show the input area inside the chat window */
       .rm-widget-container.center-inline .rm-chat-window.open .rm-input-area {
@@ -3289,7 +3371,7 @@ import {
   videoExpandedBack.type = "button";
   videoExpandedBack.className = "rm-video-expanded-back";
   videoExpandedBack.setAttribute("aria-label", "Close expanded video");
-  videoExpandedBack.innerHTML = ICONS.backArrow + "<span>Back</span>";
+  videoExpandedBack.innerHTML = "<span>Close</span>" + ICONS.chevronDown;
   videoExpandedBack.onclick = () => closeExpandedVideo();
   videoExpandedShell.appendChild(videoExpandedBack);
   videoExpandedOverlay.appendChild(videoExpandedShell);
@@ -3356,8 +3438,8 @@ import {
     if (icon) icon.innerHTML = playing ? ICONS.pause : ICONS.play;
     const center = player.querySelector<HTMLButtonElement>(".rm-video-center-play");
     if (center) {
-      center.innerHTML = playing ? ICONS.pause : ICONS.play;
-      center.setAttribute("aria-label", playing ? "Pause video" : "Play video");
+      center.innerHTML = ICONS.play;
+      center.setAttribute("aria-label", "Play video");
     }
     const control = player.querySelector<HTMLButtonElement>("[data-video-play]");
     if (control) control.setAttribute("aria-label", playing ? "Pause video" : "Play video");
@@ -3398,8 +3480,8 @@ import {
     const expandButton = player.querySelector<HTMLButtonElement>("[data-video-expand]");
     if (expandButton) {
       expandButton.innerHTML = ICONS.minimize;
-      expandButton.setAttribute("aria-label", "Restore video");
-      expandButton.dataset.tooltip = "Restore video";
+      expandButton.setAttribute("aria-label", "Shrink video");
+      expandButton.dataset.tooltip = "Shrink video";
     }
     setTimeout(() => {
       if (expandedVideoPlayer) videoExpandedBack.focus();
@@ -3513,6 +3595,9 @@ import {
     }
     centerPlay.onclick = togglePlay;
     play.onclick = togglePlay;
+    video.onclick = togglePlay;
+    centerPlay.addEventListener("click", (event) => event.stopPropagation());
+    controls.addEventListener("click", (event) => event.stopPropagation());
     mute.onclick = () => {
       video.muted = !video.muted;
       mute.innerHTML = video.muted ? ICONS.volumeOff : ICONS.volume;
@@ -3562,7 +3647,7 @@ import {
     const maximize = document.createElement("button");
     maximize.type = "button";
     maximize.setAttribute("role", "menuitem");
-    maximize.innerHTML = ICONS.maximize + "<span>Maximize</span>";
+    maximize.innerHTML = ICONS.maximize + "<span>Expand</span>";
     const close = document.createElement("button");
     close.type = "button";
     close.setAttribute("role", "menuitem");
@@ -3575,7 +3660,7 @@ import {
       event.stopPropagation();
       const open = !menu.classList.contains("open");
       const currentlyExpanded = getExpanded();
-      maximize.innerHTML = (currentlyExpanded ? ICONS.minimize : ICONS.maximize) + `<span>${currentlyExpanded ? "Restore" : "Maximize"}</span>`;
+      maximize.innerHTML = (currentlyExpanded ? ICONS.minimize : ICONS.maximize) + `<span>${currentlyExpanded ? "Shrink" : "Expand"}</span>`;
       menu.classList.toggle("open", open);
       trigger.setAttribute("aria-expanded", String(open));
     };
@@ -3590,7 +3675,7 @@ import {
       event.stopPropagation();
       const expanded = !getExpanded();
       onMaximize(expanded);
-      maximize.innerHTML = (expanded ? ICONS.minimize : ICONS.maximize) + `<span>${expanded ? "Restore" : "Maximize"}</span>`;
+      maximize.innerHTML = (expanded ? ICONS.minimize : ICONS.maximize) + `<span>${expanded ? "Shrink" : "Expand"}</span>`;
       closeMenu();
     };
     close.onclick = (event) => { event.stopPropagation(); closeMenu(); onClose(); };
@@ -6400,6 +6485,7 @@ import {
     const videoUrl = getGreetingVideoUrl(greeting);
     const isRich = Boolean(greeting.imageUrl) || Boolean(videoUrl) || Boolean(greeting.ctaText);
     if (!isRich) card.classList.add("compact");
+    if (!isRich && greeting.author?.name) card.classList.add("has-author");
 
     if (videoUrl) {
       card.appendChild(
