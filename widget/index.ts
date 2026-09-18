@@ -259,8 +259,6 @@ import {
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',
     externalLink:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
-    backArrow:
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>',
     // Home link icons
     link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
     docs: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
@@ -2000,31 +1998,6 @@ import {
       height: 16px;
     }
 
-    /* Chat header back button */
-    .rm-header-back {
-      background: var(--rm-bg-secondary, #f4f4f5);
-      border: none;
-      padding: 0;
-      line-height: 0;
-      color: var(--rm-text-secondary, #52525b);
-      cursor: pointer;
-      width: 32px;
-      height: 32px;
-      min-width: 32px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: background 0.2s;
-    }
-    .rm-header-back:hover {
-      background: var(--rm-bg-tertiary, #e4e4e7);
-    }
-    .rm-header-back svg {
-      width: 16px;
-      height: 16px;
-    }
-
     /* ─── Markdown in Messages ───────────────────────────────────────────── */
     .rm-message p {
       margin: 0 0 8px 0;
@@ -2772,10 +2745,6 @@ import {
       margin-bottom: 0;
       padding: 14px 16px;
     }
-    /* Hide back button in center-inline -- only X (close) button shown */
-    .rm-widget-container.center-inline .rm-header-back {
-      display: none;
-    }
     /* Center-inline messages area */
     .rm-widget-container.center-inline .rm-messages {
       padding-top: 16px;
@@ -3002,13 +2971,6 @@ import {
   const formHeader = document.createElement("div");
   formHeader.className = "rm-header";
 
-  const formHeaderBack = document.createElement("button");
-  formHeaderBack.type = "button";
-  formHeaderBack.className = "rm-header-back";
-  formHeaderBack.setAttribute("aria-label", "Back to home");
-  formHeaderBack.innerHTML = ICONS.backArrow;
-  formHeaderBack.onclick = () => showHomeScreen();
-
   const formHeaderIcon = document.createElement("div");
   formHeaderIcon.className = "rm-header-avatar";
   formHeaderIcon.innerHTML = ICONS.mail;
@@ -3034,7 +2996,6 @@ import {
     "rm-header-menu-wrap",
   );
 
-  formHeader.appendChild(formHeaderBack);
   formHeader.appendChild(formHeaderIcon);
   formHeader.appendChild(formHeaderInfo);
   formHeader.appendChild(formCloseBtn);
@@ -3053,13 +3014,6 @@ import {
   // Header
   const header = document.createElement("div");
   header.className = "rm-header";
-
-  const headerBack = document.createElement("button");
-  headerBack.type = "button";
-  headerBack.className = "rm-header-back";
-  headerBack.setAttribute("aria-label", "Back to home");
-  headerBack.innerHTML = ICONS.backArrow;
-  headerBack.onclick = () => showHomeScreen();
 
   const headerAvatar = document.createElement("div");
   headerAvatar.className = "rm-header-avatar rm-icon-avatar";
@@ -3086,7 +3040,6 @@ import {
     "rm-header-menu-wrap",
   );
 
-  header.appendChild(headerBack);
   header.appendChild(headerAvatar);
   header.appendChild(headerInfo);
   header.appendChild(closeBtn);

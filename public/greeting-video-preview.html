@@ -44,6 +44,7 @@
       </p>
       <p>Video source: <code>/replymaven-video-check.mp4</code></p>
       <button id="replay-greetings" type="button">Replay greeting</button>
+      <button id="open-contact-form" type="button">Contact form</button>
       <nav aria-label="Greeting examples">
         <a href="?greeting=video">Video</a>
         <a href="?greeting=image">Image</a>
@@ -161,7 +162,14 @@
           botName: "Maven",
           agentName: "a team member",
           contactForm: null,
-          inquiryForm: null,
+          inquiryForm: {
+            description: "Leave a note and our team will follow up.",
+            fields: [
+              { label: "Name", type: "text", required: true },
+              { label: "Email", type: "email", required: true },
+              { label: "Message", type: "textarea", required: true },
+            ],
+          },
         };
 
         const params = new URLSearchParams(window.location.search);
@@ -208,6 +216,9 @@
       document.getElementById("replay-greetings").addEventListener("click", () => {
         window.ReplyMaven?.close();
         window.ReplyMaven?.showGreetings();
+      });
+      document.getElementById("open-contact-form").addEventListener("click", () => {
+        window.ReplyMaven?.openInquiryForm();
       });
       document.addEventListener("click", (event) => {
         const target = event.target;
