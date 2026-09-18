@@ -8,10 +8,17 @@ import {
 
 export type GreetingImageAspect = "landscape" | "square";
 
+const VIDEO_EXTENSIONS = /\.(?:mp4|webm|ogv)(?:$|[?#])/i;
+
+export function isGreetingVideoUrl(url: string | null | undefined): boolean {
+  return Boolean(url && VIDEO_EXTENSIONS.test(url));
+}
+
 export interface GreetingData {
   id: string;
   enabled: boolean;
   imageUrl: string | null;
+  mediaType?: "image" | "video" | null;
   imagePosition: string | null;
   imageAspect: GreetingImageAspect | null;
   title: string;
@@ -145,6 +152,15 @@ export function useGreetings(projectId: string): UseGreetingsResult {
   });
 
   async function uploadImage(file: File): Promise<string> {
+    const allowedImage = ["image/jpeg", "image/png", "image/webp"].includes(file.type);
+    const allowedVideo = ["video/mp4", "video/webm", "video/ogg"].includes(file.type);
+    if (!allowedImage && !allowedVideo) {
+      throw new Error("Choose a JPG, PNG, WebP, MP4, WebM, or OGG file");
+    }
+    const maxBytes = allowedVideo ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      throw new Error(`File too large (max ${allowedVideo ? "50MB" : "10MB"})`);
+    }
     const formData = new FormData();
     formData.append("file", file);
 

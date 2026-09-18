@@ -98,6 +98,7 @@ interface PreviewGreetingPayload {
   id: string;
   enabled: boolean;
   imageUrl: string | null;
+  mediaType: "image" | "video" | null;
   imagePosition: string | null;
   imageAspect: "landscape" | "square" | null;
   title: string;
@@ -426,6 +427,7 @@ export function useWidgetSettings(
         id: g.id,
         enabled: g.enabled,
         imageUrl: g.imageUrl,
+        mediaType: g.mediaType ?? null,
         imagePosition: g.imagePosition,
         imageAspect: g.imageAspect,
         title: g.title,

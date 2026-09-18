@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Image, Trash2, Upload, X } from "lucide-react";
+import { Expand, Image, Pause, Play, Trash2, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ImagePositioner } from "@/components/ImagePositioner";
 import { cn } from "@/lib/utils";
@@ -22,12 +22,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import PageVisibilityInput from "@/components/PageVisibilityInput";
 import type { AuthorOption } from "@/hooks/use-widget-settings";
 import type {
   GreetingData,
   GreetingImageAspect,
 } from "@/hooks/use-greetings";
+import { isGreetingVideoUrl } from "@/hooks/use-greetings";
 
 export interface GreetingFormState {
   enabled: boolean;
@@ -78,6 +84,16 @@ function fromGreeting(g: GreetingData): GreetingFormState {
   };
 }
 
+function getMediaFrameClass(
+  hasMedia: boolean,
+  isVideo: boolean,
+  aspect: GreetingImageAspect,
+): string {
+  if (hasMedia && isVideo) return "w-full aspect-video";
+  if (hasMedia && aspect === "square") return "w-56 h-56 mx-auto";
+  return "w-full h-36";
+}
+
 interface GreetingEditorProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -103,11 +119,22 @@ function GreetingEditor({
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [videoPlaying, setVideoPlaying] = useState(false);
+  const [expandedVideoOpen, setExpandedVideoOpen] = useState(false);
+  const [expandedVideoState, setExpandedVideoState] = useState({
+    currentTime: 0,
+    muted: true,
+    playing: false,
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const expandedVideoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     if (open) {
       setForm(initial ? fromGreeting(initial) : emptyForm());
+      setVideoPlaying(false);
+      setExpandedVideoOpen(false);
       setUploadError(null);
       setSubmitError(null);
     }
@@ -120,13 +147,42 @@ function GreetingEditor({
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
+  function openExpandedVideo() {
+    const video = videoRef.current;
+    if (!video) return;
+    setExpandedVideoState({
+      currentTime: video.currentTime,
+      muted: video.muted,
+      playing: !video.paused,
+    });
+    video.pause();
+    setExpandedVideoOpen(true);
+  }
+
+  function closeExpandedVideo() {
+    const expandedVideo = expandedVideoRef.current;
+    const sourceVideo = videoRef.current;
+    if (expandedVideo && sourceVideo) {
+      const wasPlaying = !expandedVideo.paused;
+      expandedVideo.pause();
+      sourceVideo.currentTime = expandedVideo.currentTime;
+      sourceVideo.muted = expandedVideo.muted;
+      if (wasPlaying) {
+        void sourceVideo.play().catch(() => {
+          setUploadError("This video could not be played");
+        });
+      }
+    }
+    setExpandedVideoOpen(false);
+  }
+
   async function handleFile(file: File) {
     setUploading(true);
     setUploadError(null);
     try {
       const url = await uploadImage(file);
-      // A new image starts centered — the old focal point is meaningless.
       setForm((prev) => ({ ...prev, imageUrl: url, imagePosition: null }));
+      setVideoPlaying(false);
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Upload failed");
     } finally {
@@ -158,6 +214,12 @@ function GreetingEditor({
   }
 
   const isRich = Boolean(form.imageUrl) || Boolean(form.ctaText.trim());
+  const isVideo = isGreetingVideoUrl(form.imageUrl);
+  const mediaFrameClass = getMediaFrameClass(
+    Boolean(form.imageUrl),
+    isVideo,
+    form.imageAspect,
+  );
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -188,12 +250,12 @@ function GreetingEditor({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="text-sm font-medium text-foreground">
-                Image{" "}
+                Media{" "}
                 <span className="text-muted-foreground font-normal">
                   (optional)
                 </span>
               </label>
-              {form.imageUrl ? (
+              {form.imageUrl && !isVideo ? (
                 <div className="flex gap-0.5 bg-muted/50 rounded-lg p-0.5">
                   {(["landscape", "square"] as const).map((aspect) => (
                     <button
@@ -215,13 +277,23 @@ function GreetingEditor({
             </div>
             <div
               className={cn(
-                "relative rounded-xl border-2 border-border flex items-center justify-center overflow-hidden bg-muted/30",
-                form.imageUrl && form.imageAspect === "square"
-                  ? "w-56 h-56 mx-auto"
-                  : "w-full h-36",
+                "group/media relative flex items-center justify-center overflow-hidden rounded-xl bg-muted/30",
+                mediaFrameClass,
                 !form.imageUrl &&
-                  "border-dashed cursor-pointer hover:bg-muted/50 transition-colors",
+                  "cursor-pointer transition-colors hover:bg-muted/50",
               )}
+              role={form.imageUrl ? undefined : "button"}
+              tabIndex={form.imageUrl ? undefined : 0}
+              onKeyDown={
+                form.imageUrl
+                  ? undefined
+                  : (event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        fileInputRef.current?.click();
+                      }
+                    }
+              }
               onClick={
                 form.imageUrl
                   ? undefined
@@ -230,15 +302,69 @@ function GreetingEditor({
             >
               {form.imageUrl ? (
                 <>
-                  <ImagePositioner
-                    src={form.imageUrl}
-                    alt="Greeting"
-                    position={form.imagePosition}
-                    onChange={(value) => update("imagePosition", value)}
-                  />
+                  {isVideo ? (
+                    <>
+                      <video
+                        ref={videoRef}
+                        src={form.imageUrl}
+                        className="h-full w-full object-contain"
+                        muted
+                        loop
+                        playsInline
+                        controls
+                        onPlay={() => setVideoPlaying(true)}
+                        onPause={() => setVideoPlaying(false)}
+                        onEnded={() => setVideoPlaying(false)}
+                        aria-label="Greeting video preview"
+                      />
+                      <button
+                        type="button"
+                        aria-label="Play greeting video"
+                        className={cn(
+                          "absolute left-1/2 top-1/2 flex size-14 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-black/45 text-white shadow-lg backdrop-blur-sm transition-opacity duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white",
+                          videoPlaying
+                            ? "pointer-events-none opacity-0"
+                            : "opacity-0 group-hover/media:opacity-100 group-focus-within/media:opacity-100",
+                        )}
+                        onClick={() => {
+                          const video = videoRef.current;
+                          if (!video) return;
+                          if (video.paused) {
+                            void video.play().catch(() => {
+                              setUploadError("This video could not be played");
+                            });
+                          } else {
+                            video.pause();
+                          }
+                        }}
+                      >
+                        {videoPlaying ? (
+                          <Pause className="size-6 fill-current" />
+                        ) : (
+                          <Play className="ml-1 size-6 fill-current" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        title="Expand video"
+                        aria-label="Expand video"
+                        className="absolute bottom-12 right-2 flex size-9 items-center justify-center rounded-full bg-black/50 text-white shadow-sm backdrop-blur-sm transition-colors hover:bg-black/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                        onClick={openExpandedVideo}
+                      >
+                        <Expand className="size-4" />
+                      </button>
+                    </>
+                  ) : (
+                    <ImagePositioner
+                      src={form.imageUrl}
+                      alt="Greeting"
+                      position={form.imagePosition}
+                      onChange={(value) => update("imagePosition", value)}
+                    />
+                  )}
                   <button
                     type="button"
-                    title="Replace image"
+                    title="Replace media"
                     disabled={uploading}
                     className="absolute top-2 right-9 w-6 h-6 bg-black/50 rounded-full flex items-center justify-center text-white hover:bg-black/70 disabled:opacity-50"
                     onClick={() => fileInputRef.current?.click()}
@@ -247,7 +373,7 @@ function GreetingEditor({
                   </button>
                   <button
                     type="button"
-                    title="Remove image"
+                    title="Remove media"
                     className="absolute top-2 right-2 w-6 h-6 bg-black/50 rounded-full flex items-center justify-center text-white hover:bg-black/70"
                     onClick={() => {
                       setForm((prev) => ({
@@ -255,6 +381,7 @@ function GreetingEditor({
                         imageUrl: null,
                         imagePosition: null,
                       }));
+                      setVideoPlaying(false);
                     }}
                   >
                     <X className="w-3 h-3" />
@@ -268,7 +395,7 @@ function GreetingEditor({
                     <Image className="w-6 h-6" />
                   )}
                   <span className="text-xs">
-                    {uploading ? "Uploading..." : "Click to upload image"}
+                    {uploading ? "Uploading..." : "Click to upload image or video"}
                   </span>
                 </div>
               )}
@@ -276,7 +403,7 @@ function GreetingEditor({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/jpeg,image/png,image/webp"
+              accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,video/ogg"
               className="hidden"
               onChange={(e) => {
                 const file = e.target.files?.[0];
@@ -288,9 +415,9 @@ function GreetingEditor({
               <p className="text-xs text-destructive">{uploadError}</p>
             ) : (
               <p className="text-xs text-muted-foreground">
-                Recommended:{" "}
-                {form.imageAspect === "square" ? "800x800px" : "800x420px"}.
-                JPG, PNG, or WebP.
+                {isVideo
+                  ? "MP4, WebM, or OGG. Max 50MB."
+                  : `Recommended: ${form.imageAspect === "square" ? "800x800px" : "800x420px"}. JPG, PNG, or WebP.`}
               </p>
             )}
           </div>
@@ -513,6 +640,38 @@ function GreetingEditor({
           </Button>
         </SheetFooter>
       </SheetContent>
+      <Dialog
+        open={expandedVideoOpen}
+        onOpenChange={(open) => {
+          if (!open) closeExpandedVideo();
+        }}
+      >
+        <DialogContent
+          aria-describedby={undefined}
+          className="max-w-4xl border-0 bg-black/95 p-2 sm:max-w-4xl sm:p-3"
+        >
+          <DialogTitle className="sr-only">Expanded greeting video</DialogTitle>
+          <video
+            ref={expandedVideoRef}
+            src={isVideo ? form.imageUrl ?? undefined : undefined}
+            className="max-h-[80vh] w-full rounded-lg object-contain"
+            controls
+            muted={expandedVideoState.muted}
+            playsInline
+            onLoadedMetadata={(event) => {
+              const video = event.currentTarget;
+              video.currentTime = expandedVideoState.currentTime;
+              video.muted = expandedVideoState.muted;
+              if (expandedVideoState.playing) {
+                void video.play().catch(() => {
+                  setUploadError("This video could not be played");
+                });
+              }
+            }}
+            onError={() => setUploadError("This video could not be loaded")}
+          />
+        </DialogContent>
+      </Dialog>
     </Sheet>
   );
 }
