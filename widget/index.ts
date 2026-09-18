@@ -477,7 +477,18 @@ import {
       align-items: flex-start;
     }
     .rm-widget-container.center-inline .rm-greeting-stack {
-      display: none;
+      display: flex;
+      left: 50%;
+      right: auto;
+      bottom: var(--rm-panel-bottom);
+      width: min(360px, calc(100vw - (var(--rm-panel-side) * 2)));
+      max-width: 360px;
+      align-items: stretch;
+      transform: translateX(-50%);
+    }
+    .rm-widget-container.center-inline .rm-greeting-stack.expanded {
+      width: min(var(--rm-expanded-width), calc(100vw - (var(--rm-panel-side) * 2)));
+      max-width: var(--rm-expanded-width);
     }
     .rm-greeting-card {
       width: 100%;
