@@ -537,6 +537,8 @@ import {
     }
     .rm-greeting-card > .rm-greeting-image,
     .rm-greeting-card > .rm-greeting-video { border-radius: min(var(--rm-card-radius), 50%) min(var(--rm-card-radius), 50%) 0 0; }
+    .rm-greeting-card > .rm-greeting-video,
+    .rm-greeting-card > .rm-greeting-video video { background: transparent; }
     .rm-greeting-video {
       position: relative;
       width: 100%;
