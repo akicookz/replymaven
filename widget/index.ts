@@ -720,7 +720,6 @@ import {
         pointer-events: auto;
       }
     }
-    .rm-home-menu-wrap { position: absolute; top: 8px; right: 8px; z-index: 5; }
     .rm-header-menu-wrap { position: relative; margin-left: auto; flex-shrink: 0; }
     .rm-greeting-menu-button,
     .rm-header-menu-button { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 50%; background: var(--rm-bg, #fff); color: var(--rm-text-secondary, #52525b); box-shadow: 0 2px 8px rgba(0,0,0,.14); cursor: pointer; }
@@ -2404,14 +2403,6 @@ import {
         box-shadow: var(--rm-shadow);
       }
       .rm-chat-window.expanded { min-height: min(560px, var(--rm-panel-max-height)); }
-      .rm-chat-window.open ~ .rm-trigger {
-        display: none;
-      }
-      /* The launcher (the usual close affordance) is hidden above, so the home
-         view needs its own close button on mobile. */
-      .rm-home-close {
-        display: flex;
-      }
     }
 
     /* ─── Center Inline Bar ──────────────────────────────────────────────── */
@@ -2917,14 +2908,6 @@ import {
   homeAvatar.className = "rm-home-avatar rm-icon-avatar";
   homeAvatar.innerHTML = ICONS.aiSparkle;
   homeBanner.appendChild(homeAvatar);
-
-  const homeCloseBtn = createOverflowMenu(
-    () => chatWindow.classList.contains("expanded"),
-    (expanded) => chatWindow.classList.toggle("expanded", expanded),
-    () => closeChatWidget(),
-    "rm-home-menu-wrap",
-  );
-  homeBanner.appendChild(homeCloseBtn);
 
   // Home body
   const homeBody = document.createElement("div");
