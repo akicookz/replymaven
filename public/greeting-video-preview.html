@@ -206,7 +206,17 @@
     <script src="/widget-embed.js" data-project="fixture"></script>
     <script>
       document.getElementById("replay-greetings").addEventListener("click", () => {
+        window.ReplyMaven?.close();
         window.ReplyMaven?.showGreetings();
+      });
+      document.addEventListener("click", (event) => {
+        const target = event.target;
+        const cta = target instanceof Element
+          ? target.closest('a.rm-greeting-cta[href="#chat"]')
+          : null;
+        if (!cta) return;
+        event.preventDefault();
+        window.ReplyMaven?.open();
       });
     </script>
   </body>
