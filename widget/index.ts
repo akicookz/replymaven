@@ -1545,6 +1545,9 @@ import {
       width: 30px;
       height: 30px;
       min-width: 30px;
+      padding: 0;
+      line-height: 0;
+      appearance: none;
       border-radius: 50%;
       border: none;
       cursor: pointer;
@@ -1570,6 +1573,7 @@ import {
       transform: none;
     }
     .rm-send-btn svg {
+      display: block;
       width: 16px;
       height: 16px;
     }
@@ -2534,6 +2538,9 @@ import {
       height: 30px;
       border-radius: 50%;
       border: none;
+      padding: 0;
+      line-height: 0;
+      appearance: none;
       background: var(--rm-primary, #2563eb);
       color: var(--rm-brand-text, #ffffff);
       cursor: pointer;
@@ -2548,6 +2555,7 @@ import {
       transform: scale(1.05);
     }
     .rm-inline-bar-btn svg {
+      display: block;
       width: 14px;
       height: 14px;
     }
@@ -3169,6 +3177,8 @@ import {
 
   const sendBtn = document.createElement("button");
   sendBtn.className = "rm-send-btn";
+  sendBtn.type = "button";
+  sendBtn.setAttribute("aria-label", "Send message");
   sendBtn.innerHTML = ICONS.send;
 
   // Pill shell hosts the textarea with the image/send buttons pinned inside
@@ -3264,6 +3274,8 @@ import {
 
   const inlineBarBtn = document.createElement("button");
   inlineBarBtn.className = "rm-inline-bar-btn";
+  inlineBarBtn.type = "button";
+  inlineBarBtn.setAttribute("aria-label", "Open chat");
 
   const ibSendIcon = document.createElement("span");
   ibSendIcon.className = "rm-ib-icon-send";
@@ -3776,12 +3788,18 @@ import {
     // When chat is active, always show send icon (never the close icon)
     if (isOpen && isInlineBarVariant) {
       inlineBarBtn.classList.remove("show-close");
+      inlineBarBtn.setAttribute("aria-label", "Send message");
       return;
     }
     if (inlineBarExpanded && inlineBarInput.value.trim() === "") {
       inlineBarBtn.classList.add("show-close");
+      inlineBarBtn.setAttribute("aria-label", "Close composer");
     } else {
       inlineBarBtn.classList.remove("show-close");
+      inlineBarBtn.setAttribute(
+        "aria-label",
+        inlineBarInput.value.trim() ? "Send message" : "Open chat",
+      );
     }
   }
 
