@@ -277,6 +277,13 @@ import {
     paperclip:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
     x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+    more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>',
+    maximize: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M21 16v5h-5"/></svg>',
+    minimize: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v6H3M15 3v6h6M9 21v-6H3M21 15h-6v6"/></svg>',
+    play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 0 0 1.52.86l10-6.5a1 1 0 0 0 0-1.72l-10-6.5A1 1 0 0 0 8 5.5Z"/></svg>',
+    pause: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>',
+    volume: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>',
+    volumeOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="m22 9-6 6M16 9l6 6"/></svg>',
     chevronLeft:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>',
     clock:
@@ -473,7 +480,7 @@ import {
       border: 0.5px solid var(--rm-glow-border, rgba(0,0,0,0.08));
       border-radius: min(var(--rm-card-radius), 50%);
       box-shadow: 0 6px 24px rgba(0,0,0,0.12);
-      overflow: hidden;
+      overflow: visible;
       opacity: 0;
       transform: translateY(8px);
       transition: opacity 0.35s ease, transform 0.35s ease, max-height 0.35s ease;
@@ -526,6 +533,175 @@ import {
          around the configured focal point. */
       max-height: 260px;
     }
+    .rm-greeting-card > .rm-greeting-image,
+    .rm-greeting-card > .rm-greeting-video { border-radius: min(var(--rm-card-radius), 50%) min(var(--rm-card-radius), 50%) 0 0; }
+    .rm-greeting-video {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      overflow: hidden;
+      background: var(--rm-bg-secondary, #f4f4f5);
+    }
+    .rm-greeting-video.square {
+      aspect-ratio: 1 / 1;
+    }
+    .rm-greeting-video video,
+    .rm-message-video video {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #111827;
+    }
+    .rm-video-center-play {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 52px;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      border: 0;
+      border-radius: 50%;
+      background: rgba(15,23,42,0.58);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      color: #fff;
+      opacity: 0;
+      transform: translate(-50%, -50%) scale(.94);
+      transition: opacity .16s ease, transform .16s ease, background .16s ease;
+      cursor: pointer;
+      z-index: 2;
+    }
+    .rm-greeting-video:hover .rm-video-center-play,
+    .rm-greeting-video:focus-within .rm-video-center-play,
+    .rm-message-video:hover .rm-video-center-play,
+    .rm-message-video:focus-within .rm-video-center-play {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
+    .rm-video-center-play:focus-visible {
+      opacity: 1;
+      outline: 3px solid var(--rm-accent-bg-hover, rgba(37,99,235,.25));
+      outline-offset: 3px;
+      transform: translate(-50%, -50%) scale(1);
+    }
+    .rm-video-center-play svg { width: 22px; height: 22px; }
+    .rm-video-controls {
+      position: absolute;
+      right: 8px;
+      bottom: 8px;
+      left: 8px;
+      z-index: 3;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 7px;
+      border-radius: 9px;
+      background: rgba(15,23,42,.68);
+      color: #fff;
+    }
+    .rm-video-control,
+    .rm-video-expand {
+      width: 26px;
+      height: 26px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 26px;
+      padding: 0;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+    }
+    .rm-video-control:hover,
+    .rm-video-control:focus-visible,
+    .rm-video-expand:hover,
+    .rm-video-expand:focus-visible { background: rgba(255,255,255,.16); outline: none; }
+    .rm-video-control svg,
+    .rm-video-expand svg { width: 15px; height: 15px; }
+    .rm-video-progress { flex: 1; min-width: 24px; height: 16px; appearance: none; border: 0; border-radius: 4px; background: transparent; cursor: pointer; }
+    .rm-video-progress::-webkit-slider-runnable-track { height: 3px; border-radius: 999px; background: linear-gradient(to right, #fff 0%, #fff var(--rm-video-progress, 0%), rgba(255,255,255,.35) var(--rm-video-progress, 0%), rgba(255,255,255,.35) 100%); }
+    .rm-video-progress::-moz-range-track { height: 3px; border: 0; border-radius: 999px; background: rgba(255,255,255,.35); }
+    .rm-video-progress::-moz-range-progress { height: 3px; border-radius: 999px; background: #fff; }
+    .rm-video-progress::-webkit-slider-thumb { width: 10px; height: 10px; appearance: none; border: 0; border-radius: 50%; background: #fff; }
+    .rm-video-progress::-moz-range-thumb { width: 10px; height: 10px; border: 0; border-radius: 50%; background: #fff; }
+    .rm-video-time { min-width: 62px; color: rgba(255,255,255,.86); font-size: 10px; line-height: 1; text-align: right; font-variant-numeric: tabular-nums; }
+    .rm-video-error { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; padding: 16px; background: #111827; color: #fff; font-size: 12px; text-align: center; }
+    .rm-video-error.visible { display: flex; }
+    .rm-message-video { position: relative; width: min(300px, 100%); aspect-ratio: 16 / 9; margin: -2px 0 8px; overflow: hidden; border-radius: 10px; background: #111827; }
+    .rm-message-video .rm-video-controls { right: 6px; bottom: 6px; left: 6px; }
+    .rm-video-expanded {
+      position: fixed;
+      z-index: 1000002;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: rgba(15,23,42,.82);
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transition: opacity .2s ease, visibility .2s ease;
+    }
+    .rm-video-expanded.open { opacity: 1; visibility: visible; pointer-events: auto; }
+    .rm-video-expanded-shell { position: relative; width: min(680px, 100%); padding-top: 42px; }
+    .rm-video-expanded-shell .rm-greeting-video,
+    .rm-video-expanded-shell .rm-message-video { width: 100%; aspect-ratio: var(--rm-video-ratio, 16 / 9); max-height: calc(100vh - 48px); }
+    .rm-video-expanded-back {
+      position: absolute;
+      top: 0;
+      left: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-height: 32px;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 8px;
+      background: rgba(255,255,255,.1);
+      color: #fff;
+      cursor: pointer;
+    }
+    .rm-video-expanded-back:hover,
+    .rm-video-expanded-back:focus-visible { background: rgba(255,255,255,.18); outline: none; }
+    .rm-video-expanded-back svg { width: 15px; height: 15px; }
+    .rm-greeting-menu-wrap { position: absolute; top: 7px; right: 7px; z-index: 5; }
+    .rm-home-menu-wrap { position: absolute; top: 8px; right: 8px; z-index: 5; }
+    .rm-header-menu-wrap { position: relative; margin-left: auto; flex-shrink: 0; }
+    .rm-greeting-menu-button,
+    .rm-header-menu-button { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 9px; background: var(--rm-bg, #fff); color: var(--rm-text-secondary, #52525b); box-shadow: 0 2px 8px rgba(0,0,0,.14); cursor: pointer; }
+    .rm-header-menu-button { background: var(--rm-bg-secondary, #f4f4f5); box-shadow: none; }
+    .rm-greeting-menu-button:hover,
+    .rm-greeting-menu-button:focus-visible,
+    .rm-header-menu-button:hover,
+    .rm-header-menu-button:focus-visible { background: var(--rm-bg-tertiary, #e4e4e7); outline: none; }
+    .rm-greeting-menu-button svg,
+    .rm-header-menu-button svg { width: 16px; height: 16px; }
+    .rm-overflow-menu { position: absolute; top: 35px; right: 0; min-width: 150px; padding: 5px; border-radius: 11px; background: var(--rm-bg, #fff); box-shadow: 0 10px 30px rgba(0,0,0,.18); display: none; }
+    .rm-overflow-menu.open { display: grid; }
+    .rm-overflow-menu button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 0 9px; border: 0; border-radius: 8px; background: transparent; color: var(--rm-text, #18181b); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+    .rm-overflow-menu button:hover,
+    .rm-overflow-menu button:focus-visible { background: var(--rm-bg-secondary, #f4f4f5); outline: none; }
+    .rm-overflow-menu svg { width: 14px; height: 14px; }
+    .rm-greeting-card.expanded { width: min(680px, calc(100vw - 24px)); max-width: 680px; }
+    .rm-greeting-stack.expanded { width: min(680px, calc(100vw - 24px)); max-width: 680px; }
+    .rm-chat-window.expanded { width: min(680px, calc(100vw - 24px)); max-width: 680px; height: min(760px, calc(100vh - 90px)); min-height: min(760px, calc(100vh - 90px)); max-height: min(760px, calc(100vh - 90px)); }
+    @media (max-width: 480px) {
+      .rm-video-expanded { padding: 12px; }
+      .rm-video-expanded-shell { width: 100%; }
+      .rm-video-expanded-shell .rm-greeting-video,
+      .rm-video-expanded-shell .rm-message-video { max-height: calc(100vh - 24px); }
+      .rm-video-expanded-back { top: 0; }
+      .rm-greeting-card.expanded,
+      .rm-greeting-stack.expanded,
+      .rm-chat-window.expanded { width: calc(100vw - 24px); max-width: calc(100vw - 24px); }
+    }
     /* Let the text rise into the faded zone so image and body melt
        together instead of stacking as two blocks. */
     .rm-greeting-image + .rm-greeting-body {
@@ -548,6 +724,10 @@ import {
       cursor: pointer;
       /* The wider stack is for rich news cards; bubbles stay chat-sized. */
       max-width: 320px;
+    }
+    .rm-greeting-card.compact.expanded {
+      width: min(680px, calc(100vw - 24px));
+      max-width: 680px;
     }
     .rm-greeting-avatar {
       width: 40px;
@@ -625,7 +805,7 @@ import {
       margin-top: 10px;
       min-height: 40px;
       padding: 0 16px;
-      border-radius: min(var(--rm-btn-radius), 50%);
+      border-radius: var(--rm-btn-radius, 10px);
       background: var(--rm-primary, #2563eb);
       color: var(--rm-brand-text, #ffffff);
       font-size: 14px;
@@ -2180,6 +2360,8 @@ import {
         left: 0;
         right: 0;
         bottom: 0;
+        width: 100%;
+        max-width: 100%;
         min-height: 0;
         max-height: none;
         height: 100%;
@@ -2187,6 +2369,13 @@ import {
         border: none;
         border-radius: 0 !important;
         transform-origin: bottom center;
+      }
+      .rm-chat-window.expanded {
+        width: 100%;
+        max-width: 100%;
+        height: 100dvh;
+        min-height: 0;
+        max-height: none;
       }
       .rm-chat-window.bottom-right,
       .rm-chat-window.bottom-left {
@@ -2682,14 +2871,12 @@ import {
   homeAvatar.innerHTML = ICONS.aiSparkle;
   homeBanner.appendChild(homeAvatar);
 
-  // Close button — only visible on mobile, where the launcher button (the usual
-  // close affordance) is hidden behind the fullscreen panel.
-  const homeCloseBtn = document.createElement("button");
-  homeCloseBtn.className = "rm-home-close";
-  homeCloseBtn.type = "button";
-  homeCloseBtn.setAttribute("aria-label", "Close");
-  homeCloseBtn.innerHTML = ICONS.close;
-  homeCloseBtn.onclick = () => closeChatWidget();
+  const homeCloseBtn = createOverflowMenu(
+    () => chatWindow.classList.contains("expanded"),
+    (expanded) => chatWindow.classList.toggle("expanded", expanded),
+    () => closeChatWidget(),
+    "rm-home-menu-wrap",
+  );
   homeBanner.appendChild(homeCloseBtn);
 
   // Home body
@@ -2760,10 +2947,12 @@ import {
   formHeaderInfo.appendChild(formHeaderTitle);
   formHeaderInfo.appendChild(formHeaderSubtitle);
 
-  const formCloseBtn = document.createElement("button");
-  formCloseBtn.className = "rm-header-close";
-  formCloseBtn.innerHTML = ICONS.close;
-  formCloseBtn.onclick = () => closeChatWidget();
+  const formCloseBtn = createOverflowMenu(
+    () => chatWindow.classList.contains("expanded"),
+    (expanded) => chatWindow.classList.toggle("expanded", expanded),
+    () => closeChatWidget(),
+    "rm-header-menu-wrap",
+  );
 
   formHeader.appendChild(formHeaderBack);
   formHeader.appendChild(formHeaderIcon);
@@ -2808,10 +2997,12 @@ import {
   headerInfo.appendChild(headerTitle);
   headerInfo.appendChild(headerSubtitle);
 
-  const closeBtn = document.createElement("button");
-  closeBtn.className = "rm-header-close";
-  closeBtn.innerHTML = ICONS.close;
-  closeBtn.onclick = () => closeChatWidget();
+  const closeBtn = createOverflowMenu(
+    () => chatWindow.classList.contains("expanded"),
+    (expanded) => chatWindow.classList.toggle("expanded", expanded),
+    () => closeChatWidget(),
+    "rm-header-menu-wrap",
+  );
 
   header.appendChild(headerBack);
   header.appendChild(headerAvatar);
@@ -3041,6 +3232,7 @@ import {
     id: string;
     enabled: boolean;
     imageUrl: string | null;
+    mediaType?: "image" | "video" | null;
     imagePosition: string | null;
     imageAspect?: "landscape" | "square" | null;
     title: string;
@@ -3065,6 +3257,361 @@ import {
     string,
     ReturnType<typeof setTimeout>
   >();
+
+  const videoExpandedOverlay = document.createElement("div");
+  videoExpandedOverlay.className = "rm-video-expanded";
+  videoExpandedOverlay.setAttribute("role", "dialog");
+  videoExpandedOverlay.setAttribute("aria-modal", "true");
+  videoExpandedOverlay.setAttribute("aria-label", "Expanded video");
+  const videoExpandedShell = document.createElement("div");
+  videoExpandedShell.className = "rm-video-expanded-shell";
+  const videoExpandedBack = document.createElement("button");
+  videoExpandedBack.type = "button";
+  videoExpandedBack.className = "rm-video-expanded-back";
+  videoExpandedBack.setAttribute("aria-label", "Close expanded video");
+  videoExpandedBack.innerHTML = ICONS.backArrow + "<span>Back</span>";
+  videoExpandedBack.onclick = () => closeExpandedVideo();
+  videoExpandedShell.appendChild(videoExpandedBack);
+  videoExpandedOverlay.appendChild(videoExpandedShell);
+  document.body.appendChild(videoExpandedOverlay);
+  let expandedVideoPlayer: HTMLElement | null = null;
+  let expandedVideoPlaceholder: Comment | null = null;
+  let expandedVideoOwner: HTMLElement | null = null;
+  let lastVideoFocus: HTMLElement | null = null;
+
+  function isVideoUrl(value: string): boolean {
+    return /\.(mp4|webm|ogv)(?:$|[?#])/i.test(value);
+  }
+
+  function getGreetingVideoUrl(greeting: GreetingPublic): string | null {
+    if (
+      greeting.mediaType === "video" &&
+      typeof greeting.imageUrl === "string" &&
+      greeting.imageUrl.trim()
+    ) {
+      return greeting.imageUrl.trim();
+    }
+    if (typeof greeting.imageUrl === "string" && isVideoUrl(greeting.imageUrl)) {
+      return greeting.imageUrl;
+    }
+    return null;
+  }
+
+  function formatVideoTime(seconds: number): string {
+    if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+    const whole = Math.floor(seconds);
+    return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+  }
+
+  function pauseWidgetVideos(): void {
+    container.querySelectorAll<HTMLVideoElement>("video").forEach((video) => video.pause());
+    videoExpandedOverlay.querySelectorAll<HTMLVideoElement>("video").forEach((video) => video.pause());
+  }
+
+  function pauseGreetingVideos(): void {
+    greetingStack.querySelectorAll<HTMLVideoElement>("video").forEach((video) => video.pause());
+    if (expandedVideoOwner?.classList.contains("rm-greeting-card")) {
+      expandedVideoOwner.querySelectorAll<HTMLVideoElement>("video").forEach((video) => video.pause());
+      expandedVideoPlayer?.querySelector<HTMLVideoElement>("video")?.pause();
+    }
+  }
+
+  function suspendGreetingAutoHide(player: HTMLElement): void {
+    const card = player.closest<HTMLElement>(".rm-greeting-card");
+    const id = card?.dataset.greetingId;
+    if (!id) return;
+    const timer = greetingDurationTimers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      greetingDurationTimers.delete(id);
+    }
+  }
+
+  function setVideoPlayState(
+    player: HTMLElement,
+    video: HTMLVideoElement,
+    playing: boolean,
+  ): void {
+    const icon = player.querySelector<HTMLElement>("[data-video-play-icon]");
+    if (icon) icon.innerHTML = playing ? ICONS.pause : ICONS.play;
+    const center = player.querySelector<HTMLButtonElement>(".rm-video-center-play");
+    if (center) {
+      center.innerHTML = playing ? ICONS.pause : ICONS.play;
+      center.setAttribute("aria-label", playing ? "Pause video" : "Play video");
+    }
+    const control = player.querySelector<HTMLButtonElement>("[data-video-play]");
+    if (control) control.setAttribute("aria-label", playing ? "Pause video" : "Play video");
+    player.classList.toggle("playing", playing);
+    if (playing) video.setAttribute("data-playing", "true");
+    else video.removeAttribute("data-playing");
+  }
+
+  function syncVideoControls(player: HTMLElement, video: HTMLVideoElement): void {
+    const duration = Number.isFinite(video.duration) ? video.duration : 0;
+    const progress = duration > 0 ? video.currentTime / duration : 0;
+    const progressInput = player.querySelector<HTMLInputElement>("[data-video-progress]");
+    if (progressInput) {
+      const percent = Math.max(0, Math.min(100, progress * 100));
+      progressInput.value = String(percent);
+      progressInput.style.setProperty("--rm-video-progress", `${percent}%`);
+      progressInput.setAttribute("aria-valuenow", String(Math.round(percent)));
+    }
+    const time = player.querySelector<HTMLElement>("[data-video-time]");
+    if (time) time.textContent = `${formatVideoTime(video.currentTime)} / ${formatVideoTime(duration)}`;
+  }
+
+  function openExpandedVideo(player: HTMLElement): void {
+    if (expandedVideoPlayer) return;
+    const placeholder = document.createComment("ReplyMaven video placeholder");
+    player.parentNode?.insertBefore(placeholder, player);
+    expandedVideoPlayer = player;
+    expandedVideoPlaceholder = placeholder;
+    expandedVideoOwner = player.closest<HTMLElement>(".rm-greeting-card");
+    lastVideoFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const video = player.querySelector<HTMLVideoElement>("video");
+    if (!video) return;
+    const wasPlaying = !video.paused;
+    suspendGreetingAutoHide(player);
+    videoExpandedShell.appendChild(player);
+    videoExpandedOverlay.classList.add("open");
+    player.classList.add("expanded-player");
+    const expandButton = player.querySelector<HTMLButtonElement>("[data-video-expand]");
+    if (expandButton) {
+      expandButton.innerHTML = ICONS.minimize;
+      expandButton.setAttribute("aria-label", "Restore video");
+      expandButton.dataset.tooltip = "Restore video";
+    }
+    setTimeout(() => {
+      if (expandedVideoPlayer) videoExpandedBack.focus();
+    }, 220);
+    if (wasPlaying) void video.play().catch(() => undefined);
+  }
+
+  function closeExpandedVideo(): void {
+    if (!expandedVideoPlayer) return;
+    const player = expandedVideoPlayer;
+    const video = player.querySelector<HTMLVideoElement>("video");
+    const wasPlaying = Boolean(video && !video.paused);
+    if (expandedVideoPlaceholder?.parentNode) {
+      expandedVideoPlaceholder.parentNode.insertBefore(player, expandedVideoPlaceholder);
+    }
+    player.classList.remove("expanded-player");
+    const expandButton = player.querySelector<HTMLButtonElement>("[data-video-expand]");
+    if (expandButton) {
+      expandButton.innerHTML = ICONS.maximize;
+      expandButton.setAttribute("aria-label", "Expand video");
+      expandButton.dataset.tooltip = "Expand video";
+    }
+    videoExpandedOverlay.classList.remove("open");
+    expandedVideoPlayer = null;
+    expandedVideoPlaceholder?.remove();
+    expandedVideoPlaceholder = null;
+    expandedVideoOwner = null;
+    if (video) syncVideoControls(player, video);
+    if (video && wasPlaying) void video.play().catch(() => undefined);
+    lastVideoFocus?.focus();
+    lastVideoFocus = null;
+  }
+
+  function createVideoPlayer(
+    url: string,
+    className: string,
+    aspect: "landscape" | "square" | null,
+  ): HTMLElement {
+    const player = document.createElement("div");
+    player.className = className;
+    player.dataset.videoPlayer = "true";
+    if (aspect === "square") player.classList.add("square");
+
+    const video = document.createElement("video");
+    video.src = resolveUrl(url);
+    video.preload = "metadata";
+    video.playsInline = true;
+    video.setAttribute("aria-label", "Greeting video");
+    player.appendChild(video);
+
+    const error = document.createElement("div");
+    error.className = "rm-video-error";
+    error.textContent = "This video is not available right now.";
+    error.setAttribute("role", "status");
+    player.appendChild(error);
+
+    const centerPlay = document.createElement("button");
+    centerPlay.type = "button";
+    centerPlay.className = "rm-video-center-play";
+    centerPlay.setAttribute("aria-label", "Play video");
+    centerPlay.innerHTML = ICONS.play;
+    player.appendChild(centerPlay);
+
+    const controls = document.createElement("div");
+    controls.className = "rm-video-controls";
+    const play = document.createElement("button");
+    play.type = "button";
+    play.className = "rm-video-control";
+    play.dataset.videoPlay = "true";
+    play.setAttribute("aria-label", "Play video");
+    const playIcon = document.createElement("span");
+    playIcon.dataset.videoPlayIcon = "true";
+    playIcon.innerHTML = ICONS.play;
+    play.appendChild(playIcon);
+    const progress = document.createElement("input");
+    progress.type = "range";
+    progress.className = "rm-video-progress";
+    progress.dataset.videoProgress = "true";
+    progress.min = "0";
+    progress.max = "100";
+    progress.step = "0.1";
+    progress.value = "0";
+    progress.setAttribute("role", "slider");
+    progress.setAttribute("aria-label", "Video progress");
+    progress.setAttribute("aria-valuemin", "0");
+    progress.setAttribute("aria-valuemax", "100");
+    progress.setAttribute("aria-valuenow", "0");
+    const time = document.createElement("span");
+    time.className = "rm-video-time";
+    time.dataset.videoTime = "true";
+    time.textContent = "0:00 / 0:00";
+    const mute = document.createElement("button");
+    mute.type = "button";
+    mute.className = "rm-video-control";
+    mute.dataset.videoMute = "true";
+    mute.setAttribute("aria-label", "Mute video");
+    mute.innerHTML = ICONS.volume;
+    const expand = document.createElement("button");
+    expand.type = "button";
+    expand.className = "rm-video-expand";
+    expand.dataset.videoExpand = "true";
+    expand.dataset.tooltip = "Expand video";
+    expand.setAttribute("aria-label", "Expand video");
+    expand.innerHTML = ICONS.maximize;
+    controls.append(play, progress, time, mute, expand);
+    player.appendChild(controls);
+
+    function togglePlay(): void {
+      if (video.paused) void video.play().catch(() => error.classList.add("visible"));
+      else video.pause();
+    }
+    centerPlay.onclick = togglePlay;
+    play.onclick = togglePlay;
+    mute.onclick = () => {
+      video.muted = !video.muted;
+      mute.innerHTML = video.muted ? ICONS.volumeOff : ICONS.volume;
+      mute.setAttribute("aria-label", video.muted ? "Unmute video" : "Mute video");
+    };
+    progress.oninput = () => {
+      if (!Number.isFinite(video.duration) || video.duration <= 0) return;
+      video.currentTime = (Number(progress.value) / 100) * video.duration;
+    };
+    expand.onclick = () => {
+      if (expandedVideoPlayer === player) closeExpandedVideo();
+      else openExpandedVideo(player);
+    };
+    video.addEventListener("play", () => setVideoPlayState(player, video, true));
+    video.addEventListener("pause", () => setVideoPlayState(player, video, false));
+    video.addEventListener("ended", () => setVideoPlayState(player, video, false));
+    video.addEventListener("loadedmetadata", () => {
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        player.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+      }
+      syncVideoControls(player, video);
+    });
+    video.addEventListener("timeupdate", () => syncVideoControls(player, video));
+    video.addEventListener("play", () => suspendGreetingAutoHide(player));
+    video.addEventListener("error", () => error.classList.add("visible"));
+    video.addEventListener("loadeddata", () => error.classList.remove("visible"));
+    return player;
+  }
+
+  function createOverflowMenu(
+    getExpanded: () => boolean,
+    onMaximize: (expanded: boolean) => void,
+    onClose: () => void,
+    className = "rm-greeting-menu-wrap",
+  ): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = className;
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = className === "rm-header-menu-wrap" ? "rm-header-menu-button" : "rm-greeting-menu-button";
+    trigger.setAttribute("aria-label", "Open menu");
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.innerHTML = ICONS.more;
+    const menu = document.createElement("div");
+    menu.className = "rm-overflow-menu";
+    menu.setAttribute("role", "menu");
+    const maximize = document.createElement("button");
+    maximize.type = "button";
+    maximize.setAttribute("role", "menuitem");
+    maximize.innerHTML = ICONS.maximize + "<span>Maximize</span>";
+    const close = document.createElement("button");
+    close.type = "button";
+    close.setAttribute("role", "menuitem");
+    close.innerHTML = ICONS.close + "<span>Close</span>";
+    function closeMenu(): void {
+      menu.classList.remove("open");
+      trigger.setAttribute("aria-expanded", "false");
+    }
+    trigger.onclick = (event) => {
+      event.stopPropagation();
+      const open = !menu.classList.contains("open");
+      const currentlyExpanded = getExpanded();
+      maximize.innerHTML = (currentlyExpanded ? ICONS.minimize : ICONS.maximize) + `<span>${currentlyExpanded ? "Restore" : "Maximize"}</span>`;
+      menu.classList.toggle("open", open);
+      trigger.setAttribute("aria-expanded", String(open));
+    };
+    wrap.onkeydown = (event) => {
+      if (event.key === "Enter" || event.key === " ") event.stopPropagation();
+      if (event.key === "Escape") {
+        closeMenu();
+        trigger.focus();
+      }
+    };
+    maximize.onclick = (event) => {
+      event.stopPropagation();
+      const expanded = !getExpanded();
+      onMaximize(expanded);
+      maximize.innerHTML = (expanded ? ICONS.minimize : ICONS.maximize) + `<span>${expanded ? "Restore" : "Maximize"}</span>`;
+      closeMenu();
+    };
+    close.onclick = (event) => { event.stopPropagation(); closeMenu(); onClose(); };
+    menu.onclick = (event) => event.stopPropagation();
+    menu.append(maximize, close);
+    wrap.append(trigger, menu);
+    return wrap;
+  }
+
+  function closeAllOverflowMenus(): void {
+    document.querySelectorAll<HTMLElement>(".rm-overflow-menu.open").forEach((menu) => menu.classList.remove("open"));
+    document.querySelectorAll<HTMLElement>(".rm-greeting-menu-button[aria-expanded=true], .rm-header-menu-button[aria-expanded=true]").forEach((button) => button.setAttribute("aria-expanded", "false"));
+  }
+  document.addEventListener("click", closeAllOverflowMenus);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      if (expandedVideoPlayer) {
+        event.preventDefault();
+        closeExpandedVideo();
+      } else {
+        closeAllOverflowMenus();
+      }
+    }
+    if (event.key === "Tab" && expandedVideoPlayer) {
+      const focusables = Array.from(
+        videoExpandedOverlay.querySelectorAll<HTMLElement>(
+          "button:not([disabled]), input:not([disabled]), video, [tabindex]:not([tabindex='-1'])",
+        ),
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0]!;
+      const last = focusables[focusables.length - 1]!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+  });
 
   let placeholderTexts: string[] = ["Ask a question..."];
   let placeholderIndex = 0;
@@ -3348,6 +3895,9 @@ import {
   // ─── Visibility Tracking ─────────────────────────────────────────────────────
   document.addEventListener("visibilitychange", () => {
     isTabActive = !document.hidden;
+    if (!isTabActive) {
+      pauseWidgetVideos();
+    }
     if (isTabActive && titleOverridden) {
       document.title = originalDocTitle;
       titleOverridden = false;
@@ -4891,6 +5441,10 @@ import {
     const host = urls.length > 1 ? document.createElement("div") : msgEl;
     if (host !== msgEl) host.className = "rm-message-images";
     urls.forEach((src, i) => {
+      if (isVideoUrl(src)) {
+        host.appendChild(createVideoPlayer(src, "rm-message-video", "landscape"));
+        return;
+      }
       const img = document.createElement("img");
       img.className = "rm-message-image";
       img.src = src;
@@ -5823,10 +6377,15 @@ import {
     const bgStyle = config?.widget?.backgroundStyle || "solid";
     card.dataset.bgStyle = bgStyle;
 
-    const isRich = Boolean(greeting.imageUrl) || Boolean(greeting.ctaText);
+    const videoUrl = getGreetingVideoUrl(greeting);
+    const isRich = Boolean(greeting.imageUrl) || Boolean(videoUrl) || Boolean(greeting.ctaText);
     if (!isRich) card.classList.add("compact");
 
-    if (greeting.imageUrl) {
+    if (videoUrl) {
+      card.appendChild(
+        createVideoPlayer(videoUrl, "rm-greeting-video", greeting.imageAspect ?? null),
+      );
+    } else if (greeting.imageUrl) {
       const img = document.createElement("img");
       img.className =
         greeting.imageAspect === "square"
@@ -5901,16 +6460,16 @@ import {
 
     card.appendChild(body);
 
-    const close = document.createElement("button");
-    close.className = "rm-greeting-close";
-    close.type = "button";
-    close.setAttribute("aria-label", "Dismiss");
-    close.innerHTML = ICONS.x;
-    close.onclick = (e) => {
-      e.stopPropagation();
-      dismissGreetingCard(card, greeting.id, true);
-    };
-    card.appendChild(close);
+    card.appendChild(
+      createOverflowMenu(
+        () => card.classList.contains("expanded"),
+        (expanded) => {
+          card.classList.toggle("expanded", expanded);
+          greetingStack.classList.toggle("expanded", expanded);
+        },
+        () => dismissGreetingCard(card, greeting.id, true),
+      ),
+    );
 
     if (!isRich) {
       card.onclick = () => toggleChatWidget();
@@ -5932,8 +6491,14 @@ import {
     id: string,
     persist: boolean,
   ): void {
+    if (expandedVideoOwner === card) closeExpandedVideo();
+    card.querySelectorAll<HTMLVideoElement>("video").forEach((video) => video.pause());
     if (persist) addDismissedGreetingId(id);
     card.classList.add("dismissed");
+    const hasExpandedCard = Boolean(
+      greetingStack.querySelector(".rm-greeting-card.expanded:not(.dismissed)"),
+    );
+    greetingStack.classList.toggle("expanded", hasExpandedCard);
     const delayTimer = greetingTimers.get(id);
     if (delayTimer) {
       clearTimeout(delayTimer);
@@ -5950,6 +6515,11 @@ import {
   }
 
   function renderGreetings(options?: { force?: boolean }): void {
+    if (expandedVideoOwner && greetingStack.contains(expandedVideoOwner)) {
+      closeExpandedVideo();
+    }
+    pauseGreetingVideos();
+    greetingStack.classList.remove("expanded");
     const force = options?.force ?? false;
     clearGreetingTimers();
     greetingStack.innerHTML = "";
@@ -6001,6 +6571,11 @@ import {
 
   function hideGreetingStack(): void {
     clearGreetingTimers();
+    if (expandedVideoOwner && greetingStack.contains(expandedVideoOwner)) {
+      closeExpandedVideo();
+    }
+    pauseGreetingVideos();
+    greetingStack.classList.remove("expanded");
     const cards = greetingStack.querySelectorAll(".rm-greeting-card");
     cards.forEach((c) => c.classList.add("dismissed"));
   }
@@ -6240,6 +6815,8 @@ import {
   }
 
   function closeChatWidget() {
+    if (expandedVideoPlayer) closeExpandedVideo();
+    pauseWidgetVideos();
     isOpen = false;
     chatWindow.classList.remove("open");
     trigger.classList.remove("active");
