@@ -481,14 +481,34 @@ import {
       left: 50%;
       right: auto;
       bottom: var(--rm-panel-bottom);
-      width: min(360px, calc(100vw - (var(--rm-panel-side) * 2)));
-      max-width: 360px;
+      width: min(300px, calc(100vw - 40px));
+      max-width: 300px;
       align-items: stretch;
       transform: translateX(-50%);
     }
     .rm-widget-container.center-inline .rm-greeting-stack.expanded {
-      width: min(var(--rm-expanded-width), calc(100vw - (var(--rm-panel-side) * 2)));
-      max-width: var(--rm-expanded-width);
+      width: min(560px, calc(100vw - 40px));
+      max-width: 560px;
+    }
+    .rm-widget-container.center-inline.inline-width-expanded .rm-greeting-stack:not(.expanded) {
+      width: min(560px, calc(100vw - 40px));
+      max-width: 560px;
+      align-items: flex-start;
+    }
+    .rm-widget-container.center-inline.inline-width-expanded .rm-greeting-stack:not(.expanded) .rm-greeting-card {
+      width: 360px;
+      max-width: 100%;
+    }
+    .rm-widget-container.center-inline.inline-width-expanded .rm-greeting-stack:not(.expanded) .rm-greeting-card.compact {
+      width: 320px;
+    }
+    @media (max-width: 480px) {
+      .rm-widget-container.center-inline .rm-greeting-stack,
+      .rm-widget-container.center-inline .rm-greeting-stack.expanded,
+      .rm-widget-container.center-inline.inline-width-expanded .rm-greeting-stack:not(.expanded) {
+        width: calc(100vw - 32px);
+        max-width: none;
+      }
     }
     .rm-greeting-card {
       width: 100%;
@@ -2698,8 +2718,8 @@ import {
       left: 50%;
       transform: translateX(-50%) translateY(12px);
       right: auto;
-      width: min(400px, calc(100vw - (var(--rm-panel-side) * 2)));
-      max-width: 400px;
+      width: min(560px, calc(100vw - 40px));
+      max-width: 560px;
       min-height: min(600px, var(--rm-panel-max-height));
       max-height: min(620px, var(--rm-panel-max-height));
       transform-origin: bottom center;
@@ -2744,8 +2764,8 @@ import {
       right: auto;
       bottom: var(--rm-panel-bottom);
       left: 50%;
-      width: min(var(--rm-expanded-width), calc(100vw - (var(--rm-panel-side) * 2)));
-      max-width: var(--rm-expanded-width);
+      width: min(560px, calc(100vw - 40px));
+      max-width: 560px;
       height: auto;
       min-height: min(560px, var(--rm-panel-max-height));
       max-height: var(--rm-panel-max-height);
@@ -2821,8 +2841,8 @@ import {
       .rm-widget-container.center-inline .rm-chat-window {
         position: fixed;
         top: auto;
-        left: var(--rm-panel-side);
-        right: var(--rm-panel-side);
+        left: 16px;
+        right: 16px;
         bottom: var(--rm-panel-bottom);
         width: auto;
         height: auto;
@@ -2847,9 +2867,9 @@ import {
       }
       .rm-widget-container.center-inline .rm-chat-window.expanded.open {
         top: auto;
-        right: var(--rm-panel-side);
+        right: 16px;
         bottom: var(--rm-panel-bottom);
-        left: var(--rm-panel-side);
+        left: 16px;
         width: auto;
         height: auto;
         min-height: min(560px, var(--rm-panel-max-height));
@@ -3002,6 +3022,7 @@ import {
     (expanded) => chatWindow.classList.toggle("expanded", expanded),
     () => closeChatWidget(),
     "rm-header-menu-wrap",
+    () => !isInlineBarVariant,
   );
 
   formHeader.appendChild(formHeaderIcon);
@@ -3046,6 +3067,7 @@ import {
     (expanded) => chatWindow.classList.toggle("expanded", expanded),
     () => closeChatWidget(),
     "rm-header-menu-wrap",
+    () => !isInlineBarVariant,
   );
 
   header.appendChild(headerAvatar);
@@ -3592,7 +3614,7 @@ import {
     onMaximize: (expanded: boolean) => void,
     onClose: () => void,
     className = "rm-greeting-menu-wrap",
-    canExpand = true,
+    canExpand: boolean | (() => boolean) = true,
   ): HTMLElement {
     const wrap = document.createElement("div");
     wrap.className = className;
@@ -3619,6 +3641,9 @@ import {
       trigger.setAttribute("aria-label", open ? "Close menu" : "Open menu");
       trigger.innerHTML = open ? ICONS.close : ICONS.more;
     }
+    function canExpandNow(): boolean {
+      return typeof canExpand === "function" ? canExpand() : canExpand;
+    }
     function closeMenu(): void {
       setMenuState(false);
     }
@@ -3626,7 +3651,10 @@ import {
       event.stopPropagation();
       const open = !menu.classList.contains("open");
       const currentlyExpanded = getExpanded();
-      if (canExpand) {
+      const allowExpand = canExpandNow();
+      maximize.hidden = !allowExpand;
+      maximize.style.display = allowExpand ? "" : "none";
+      if (allowExpand) {
         maximize.innerHTML = (currentlyExpanded ? ICONS.minimize : ICONS.maximize) + `<span>${currentlyExpanded ? "Shrink" : "Expand"}</span>`;
       }
       setMenuState(open);
@@ -3640,7 +3668,7 @@ import {
     };
     maximize.onclick = (event) => {
       event.stopPropagation();
-      if (!canExpand) return;
+      if (!canExpandNow()) return;
       const expanded = !getExpanded();
       onMaximize(expanded);
       maximize.innerHTML = (expanded ? ICONS.minimize : ICONS.maximize) + `<span>${expanded ? "Shrink" : "Expand"}</span>`;
@@ -3648,7 +3676,7 @@ import {
     };
     close.onclick = (event) => { event.stopPropagation(); closeMenu(); onClose(); };
     menu.onclick = (event) => event.stopPropagation();
-    if (canExpand) menu.appendChild(maximize);
+    if (canExpand !== false) menu.appendChild(maximize);
     menu.appendChild(close);
     wrap.append(trigger, menu);
     return wrap;
@@ -3735,6 +3763,7 @@ import {
     if (inlineBarExpanded) return;
     inlineBarExpanded = true;
     inlineBar.classList.add("expanded");
+    container.classList.add("inline-width-expanded");
     inlineBarPlaceholder.style.display = "none";
     inlineBarInput.placeholder = conversationId
       ? _isHandedOff
@@ -3750,6 +3779,7 @@ import {
     if (!inlineBarExpanded) return;
     inlineBarExpanded = false;
     inlineBar.classList.remove("expanded");
+    container.classList.remove("inline-width-expanded");
     inlineBarInput.value = "";
     inlineBarInput.placeholder = "";
     inlineBarInput.blur();
