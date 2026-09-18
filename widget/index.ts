@@ -730,7 +730,7 @@ import {
     .rm-header-menu-button:focus-visible { background: var(--rm-bg-tertiary, #e4e4e7); outline: none; }
     .rm-greeting-menu-button svg,
     .rm-header-menu-button svg { width: 16px; height: 16px; }
-    .rm-overflow-menu { position: absolute; top: 35px; right: 0; min-width: 150px; padding: 5px; border: 0; border-radius: 11px; background: var(--rm-bg, #fff); box-shadow: none; display: none; }
+    .rm-overflow-menu { position: absolute; top: calc(100% + 2px); right: 0; min-width: 150px; padding: 5px; border: 0; border-radius: 11px; background: var(--rm-bg, #fff); box-shadow: 0 0 0 1px var(--rm-border-subtle, rgba(0,0,0,0.06)); display: none; }
     .rm-overflow-menu.open { display: grid; }
     .rm-overflow-menu button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 0 9px; border: 0; border-radius: 8px; background: transparent; color: var(--rm-text, #18181b); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
     .rm-overflow-menu button:hover,
@@ -1046,9 +1046,9 @@ import {
     }
     .rm-header-subtitle {
       font-size: 13px;
-      font-weight: 500;
+      font-weight: 400;
       color: var(--rm-text-secondary, #52525b);
-      opacity: 1;
+      opacity: .72;
       margin-top: 1px;
       line-height: 1.3;
       letter-spacing: 0;
@@ -2176,13 +2176,6 @@ import {
     .rm-form-body::-webkit-scrollbar-thumb {
       background: var(--rm-scrollbar);
       border-radius: 4px;
-    }
-    .rm-form-description {
-      font-size: 14px;
-      color: var(--rm-text-secondary);
-      line-height: 1.5;
-      text-align: center;
-      padding: 8px 0;
     }
     .rm-form-field {
       display: flex;
@@ -3588,9 +3581,14 @@ import {
     close.type = "button";
     close.setAttribute("role", "menuitem");
     close.innerHTML = ICONS.close + "<span>Close</span>";
+    function setMenuState(open: boolean): void {
+      menu.classList.toggle("open", open);
+      trigger.setAttribute("aria-expanded", String(open));
+      trigger.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+      trigger.innerHTML = open ? ICONS.close : ICONS.more;
+    }
     function closeMenu(): void {
-      menu.classList.remove("open");
-      trigger.setAttribute("aria-expanded", "false");
+      setMenuState(false);
     }
     trigger.onclick = (event) => {
       event.stopPropagation();
@@ -3599,8 +3597,7 @@ import {
       if (canExpand) {
         maximize.innerHTML = (currentlyExpanded ? ICONS.minimize : ICONS.maximize) + `<span>${currentlyExpanded ? "Shrink" : "Expand"}</span>`;
       }
-      menu.classList.toggle("open", open);
-      trigger.setAttribute("aria-expanded", String(open));
+      setMenuState(open);
     };
     wrap.onkeydown = (event) => {
       if (event.key === "Enter" || event.key === " ") event.stopPropagation();
@@ -3626,8 +3623,17 @@ import {
   }
 
   function closeAllOverflowMenus(): void {
-    document.querySelectorAll<HTMLElement>(".rm-overflow-menu.open").forEach((menu) => menu.classList.remove("open"));
-    document.querySelectorAll<HTMLElement>(".rm-greeting-menu-button[aria-expanded=true], .rm-header-menu-button[aria-expanded=true]").forEach((button) => button.setAttribute("aria-expanded", "false"));
+    document.querySelectorAll<HTMLElement>(".rm-overflow-menu.open").forEach((menu) => {
+      menu.classList.remove("open");
+      const trigger = menu.parentElement?.querySelector<HTMLButtonElement>(
+        ".rm-greeting-menu-button, .rm-header-menu-button",
+      );
+      if (trigger) {
+        trigger.setAttribute("aria-expanded", "false");
+        trigger.setAttribute("aria-label", "Open menu");
+        trigger.innerHTML = ICONS.more;
+      }
+    });
   }
   document.addEventListener("click", closeAllOverflowMenus);
   document.addEventListener("keydown", (event) => {
@@ -4598,13 +4604,6 @@ import {
 
         // Build form fields
         formBody.innerHTML = "";
-
-        if (cf.description) {
-          const desc = document.createElement("div");
-          desc.className = "rm-form-description";
-          desc.textContent = cf.description;
-          formBody.appendChild(desc);
-        }
 
         const fieldInputs: Array<{
           label: string;
