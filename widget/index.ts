@@ -2203,7 +2203,7 @@ import {
     .rm-form-input {
       padding: 10px 14px;
       border: 1px solid var(--rm-border);
-      border-radius: min(var(--rm-input-radius), 50%);
+      border-radius: min(var(--rm-input-radius), 12px);
       font-size: 16px;
       font-weight: 400;
       line-height: 1.45;
@@ -2226,7 +2226,7 @@ import {
     .rm-form-textarea {
       padding: 10px 14px;
       border: 1px solid var(--rm-border);
-      border-radius: min(var(--rm-input-radius), 50%);
+      border-radius: min(var(--rm-input-radius), 12px);
       font-size: 16px;
       font-weight: 400;
       line-height: 1.45;
@@ -2252,7 +2252,7 @@ import {
       width: 100%;
       min-height: 40px;
       padding: 0 16px;
-      border-radius: min(var(--rm-btn-radius), 50%);
+      border-radius: min(var(--rm-btn-radius), 12px);
       border: none;
       font-size: 14px;
       font-weight: 500;
