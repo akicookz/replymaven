@@ -725,7 +725,7 @@ import {
     .rm-home-menu-wrap { position: absolute; top: 8px; right: 8px; z-index: 5; }
     .rm-header-menu-wrap { position: relative; margin-left: auto; flex-shrink: 0; }
     .rm-greeting-menu-button,
-    .rm-header-menu-button { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 9px; background: var(--rm-bg, #fff); color: var(--rm-text-secondary, #52525b); box-shadow: 0 2px 8px rgba(0,0,0,.14); cursor: pointer; }
+    .rm-header-menu-button { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 50%; background: var(--rm-bg, #fff); color: var(--rm-text-secondary, #52525b); box-shadow: 0 2px 8px rgba(0,0,0,.14); cursor: pointer; }
     .rm-header-menu-button { background: var(--rm-bg-secondary, #f4f4f5); box-shadow: none; }
     .rm-greeting-menu-button:hover,
     .rm-greeting-menu-button:focus-visible,
@@ -1028,7 +1028,7 @@ import {
       color: var(--rm-accent-text, #2563eb);
     }
     .rm-header-avatar.rm-icon-avatar {
-      border-radius: 10px;
+      border-radius: 50%;
     }
     .rm-header-avatar svg {
       width: 20px;
@@ -1124,7 +1124,7 @@ import {
       flex-shrink: 0;
     }
     .rm-message-avatar.rm-icon-avatar {
-      border-radius: 5px;
+      border-radius: 50%;
     }
     .rm-message-avatar svg {
       width: 10px;
@@ -1840,7 +1840,7 @@ import {
       box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
     .rm-home-avatar.rm-icon-avatar {
-      border-radius: 14px;
+      border-radius: 50%;
     }
     .rm-home-avatar img {
       width: 100%;
