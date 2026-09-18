@@ -4,6 +4,9 @@ const UPLOAD_EXTENSION_BY_TYPE: Record<string, string> = {
   "image/png": "png",
   "image/webp": "webp",
   "image/svg+xml": "svg",
+  "video/mp4": "mp4",
+  "video/webm": "webm",
+  "video/ogg": "ogv",
 };
 
 /**

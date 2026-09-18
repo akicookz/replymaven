@@ -7,6 +7,7 @@ import {
 } from "../shared/faq-limits";
 import { INDUSTRIES } from "../shared/industries";
 import { isAllowedStoredUploadUrl } from "./lib/public-upload-url";
+import { isGreetingVideoUrl } from "./lib/greeting-media";
 import {
   GTAG_MEASUREMENT_ID_RE,
   MAX_HELP_ANALYTICS_EMBEDS,
@@ -1008,9 +1009,17 @@ const allowedPagesArraySchema = z
 
 const imageAspectSchema = z.enum(["landscape", "square"]);
 
+const greetingMediaUrlSchema = z
+  .string()
+  .max(500)
+  .refine(
+    (value) => !isGreetingVideoUrl(value) || isAllowedStoredUploadUrl(value),
+    "Video greetings must use an uploaded media path",
+  );
+
 export const createGreetingSchema = z.object({
   enabled: z.boolean().optional(),
-  imageUrl: z.string().max(500).nullable().optional(),
+  imageUrl: greetingMediaUrlSchema.nullable().optional(),
   imagePosition: imagePositionSchema.nullable().optional(),
   imageAspect: imageAspectSchema.nullable().optional(),
   title: z.string().min(1, "Title is required").max(120),
@@ -1031,7 +1040,7 @@ export const createGreetingSchema = z.object({
 
 export const updateGreetingSchema = z.object({
   enabled: z.boolean().optional(),
-  imageUrl: z.string().max(500).nullable().optional(),
+  imageUrl: greetingMediaUrlSchema.nullable().optional(),
   imagePosition: imagePositionSchema.nullable().optional(),
   imageAspect: imageAspectSchema.nullable().optional(),
   title: z.string().min(1).max(120).optional(),

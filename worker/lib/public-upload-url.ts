@@ -7,6 +7,15 @@ export function publicUploadUrl(key: string): string {
   return `${PUBLIC_APP_ORIGIN}${UPLOAD_PATH_PREFIX}${key}`;
 }
 
+/** Keep local development uploads on the local Worker origin. */
+export function publicUploadUrlForRequest(request: Request, key: string): string {
+  const url = new URL(request.url);
+  if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+    return `${UPLOAD_PATH_PREFIX}${key}`;
+  }
+  return publicUploadUrl(key);
+}
+
 /** Relative leftovers and the absolute URLs /api/upload now returns. */
 export function isAllowedStoredUploadUrl(url: string): boolean {
   if (!url || url.includes("..")) return false;

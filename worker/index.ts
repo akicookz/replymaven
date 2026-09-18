@@ -46,7 +46,11 @@ import {
 import {
   isConversationUploadUrl,
 } from "../shared/upload-ownership";
-import { publicUploadUrl } from "./lib/public-upload-url";
+import {
+  publicUploadUrl,
+  publicUploadUrlForRequest,
+} from "./lib/public-upload-url";
+import { getGreetingMediaType } from "./lib/greeting-media";
 import { AiService } from "./services/ai-service";
 import { executeChannelBotNameCommand } from "./services/run-bot-name-command";
 import { runAgentChannelInbound } from "./services/run-agent-channel-inbound";
@@ -4859,6 +4863,7 @@ const app = new Hono<HonoAppContext>()
       id: row.id,
       enabled: row.enabled,
       imageUrl: row.imageUrl,
+      mediaType: getGreetingMediaType(row.imageUrl),
       imagePosition: row.imagePosition,
       imageAspect: row.imageAspect,
       title: row.title,
@@ -4900,7 +4905,10 @@ const app = new Hono<HonoAppContext>()
     }
 
     const row = await widgetService.createGreeting(project.id, parsed.data);
-    return c.json(row, 201);
+    return c.json(
+      { ...row, mediaType: getGreetingMediaType(row.imageUrl) },
+      201,
+    );
   })
   .patch("/api/projects/:id/greetings/reorder", async (c) => {
     const user = c.get("user");
@@ -4943,7 +4951,7 @@ const app = new Hono<HonoAppContext>()
       parsed.data,
     );
     if (!updated) return c.json({ error: "Not found" }, 404);
-    return c.json(updated);
+    return c.json({ ...updated, mediaType: getGreetingMediaType(updated.imageUrl) });
   })
   .delete("/api/projects/:id/greetings/:greetingId", async (c) => {
     const user = c.get("user");
@@ -8050,14 +8058,21 @@ const app = new Hono<HonoAppContext>()
       "image/png",
       "image/webp",
       "image/svg+xml",
+      "video/mp4",
+      "video/webm",
+      "video/ogg",
     ];
     if (!allowedTypes.includes(fileObj.type)) {
       return c.json({ error: "Invalid file type" }, 400);
     }
 
-    // Max 10MB
-    if (fileObj.size > 10 * 1024 * 1024) {
-      return c.json({ error: "File too large (max 10MB)" }, 400);
+    const isVideo = fileObj.type.startsWith("video/");
+    const maxBytes = isVideo ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
+    if (fileObj.size > maxBytes) {
+      return c.json(
+        { error: `File too large (max ${isVideo ? "50MB" : "10MB"})` },
+        400,
+      );
     }
 
     const ext = uploadExtensionFor(fileObj.type, fileObj.name);
@@ -8099,20 +8114,60 @@ const app = new Hono<HonoAppContext>()
       uploadKey = `${user.id}/${crypto.randomUUID()}.${ext}`;
       customMetadata = { ownerType: "user", ownerId: user.id };
     }
-    const buffer = await fileObj.arrayBuffer();
-
-    await c.env.UPLOADS.put(uploadKey, buffer, {
+    await c.env.UPLOADS.put(uploadKey, fileObj.stream(), {
       httpMetadata: { contentType: fileObj.type },
       customMetadata,
     });
 
-    return c.json({ key: uploadKey, url: publicUploadUrl(uploadKey) }, 201);
+    return c.json(
+      { key: uploadKey, url: publicUploadUrlForRequest(c.req.raw, uploadKey) },
+      201,
+    );
   })
 
   // ─── Serve Uploads ──────────────────────────────────────────────────────────
   .get("/api/uploads/:key{.+}", async (c) => {
     const key = c.req.param("key");
-    const obj = await c.env.UPLOADS.get(key);
+    const rangeHeader = c.req.header("Range");
+    const rangeMatch = rangeHeader?.match(/^bytes=(\d*)-(\d*)$/i);
+    let range: R2Range | undefined;
+    let totalSize: number | undefined;
+    if (rangeMatch) {
+      const start = rangeMatch[1] ? Number(rangeMatch[1]) : undefined;
+      const end = rangeMatch[2] ? Number(rangeMatch[2]) : undefined;
+      if (
+        (start !== undefined && (!Number.isSafeInteger(start) || start < 0)) ||
+        (end !== undefined && (!Number.isSafeInteger(end) || end < 0)) ||
+        (start !== undefined && end !== undefined && end < start) ||
+        (start === undefined && end === undefined)
+      ) {
+        return new Response(null, { status: 416 });
+      }
+      const head = await c.env.UPLOADS.head(key);
+      if (!head) return c.json({ error: "Not found" }, 404);
+      totalSize = head.size;
+      if (totalSize === 0 || (start !== undefined && start >= totalSize)) {
+        return new Response(null, {
+          status: 416,
+          headers: { "Content-Range": `bytes */${totalSize}` },
+        });
+      }
+      if (start !== undefined) {
+        const boundedEnd = Math.min(end ?? totalSize - 1, totalSize - 1);
+        range = { offset: start, length: boundedEnd - start + 1 };
+      } else {
+        const suffixLength = Math.min(end!, totalSize);
+        if (suffixLength === 0) {
+          return new Response(null, {
+            status: 416,
+            headers: { "Content-Range": `bytes */${totalSize}` },
+          });
+        }
+        range = { suffix: suffixLength };
+      }
+    }
+
+    const obj = await c.env.UPLOADS.get(key, range ? { range } : undefined);
     if (!obj) return c.json({ error: "Not found" }, 404);
 
     const headers = new Headers();
@@ -8123,6 +8178,28 @@ const app = new Hono<HonoAppContext>()
     headers.set("Cache-Control", "public, max-age=31536000, immutable");
     headers.set("X-Content-Type-Options", "nosniff");
     headers.set("Content-Security-Policy", "sandbox; default-src 'none'");
+    headers.set("Accept-Ranges", "bytes");
+    if (obj.range) {
+      let offset = 0;
+      let length = obj.size;
+      if (range && "suffix" in range) {
+        offset = obj.size - range.suffix;
+        length = range.suffix;
+      } else if ("suffix" in obj.range) {
+        offset = obj.size - obj.range.suffix;
+        length = obj.range.suffix;
+      } else {
+        offset = obj.range.offset ?? 0;
+        length = obj.range.length ?? obj.size;
+      }
+      headers.set("Content-Length", String(length));
+      headers.set(
+        "Content-Range",
+        `bytes ${offset}-${offset + length - 1}/${obj.size}`,
+      );
+      return new Response(obj.body, { status: 206, headers });
+    }
+    headers.set("Content-Length", String(obj.size));
     return new Response(obj.body, { headers });
   });
 

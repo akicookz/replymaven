@@ -13,11 +13,16 @@ import {
 } from "../db";
 import { users } from "../db/auth.schema";
 import { ContactFormService } from "./contact-form-service";
+import {
+  getGreetingMediaType,
+  type GreetingMediaType,
+} from "../lib/greeting-media";
 
 export interface GreetingPublic {
   id: string;
   enabled: boolean;
   imageUrl: string | null;
+  mediaType: GreetingMediaType | null;
   imagePosition: string | null;
   imageAspect: "landscape" | "square" | null;
   title: string;
@@ -380,6 +385,7 @@ export class WidgetService {
       id: row.id,
       enabled: row.enabled,
       imageUrl: row.imageUrl,
+      mediaType: getGreetingMediaType(row.imageUrl),
       imagePosition: row.imagePosition,
       imageAspect: (row.imageAspect as "landscape" | "square" | null) ?? null,
       title: row.title,
