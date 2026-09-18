@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ReplyMaven greeting preview</title>
+    <style>
+      html, body { min-height: 100%; margin: 0; }
+      body {
+        min-height: 100vh;
+        background: #f2efe8;
+        color: #24231f;
+        font: 16px/1.5 system-ui, sans-serif;
+      }
+      main { max-width: 760px; margin: 0 auto; padding: 64px 24px; }
+      h1 { margin: 0 0 12px; font-size: 32px; }
+      p { max-width: 580px; }
+      button {
+        border: 0;
+        border-radius: 10px;
+        background: #5147e5;
+        color: white;
+        cursor: pointer;
+        font: inherit;
+        padding: 10px 14px;
+      }
+      nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0 0; }
+      nav a {
+        border-radius: 10px;
+        background: #e3dfd5;
+        color: #24231f;
+        padding: 9px 12px;
+        text-decoration: none;
+      }
+      code { background: #e3dfd5; border-radius: 6px; padding: 2px 6px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Greeting preview</h1>
+      <p>
+        This page loads the local widget build and uses an in-page config. It
+        does not read project data or write chat data.
+      </p>
+      <p>Video source: <code>/replymaven-video-check.mp4</code></p>
+      <button id="replay-greetings" type="button">Replay greeting</button>
+      <nav aria-label="Greeting examples">
+        <a href="?greeting=video">Video</a>
+        <a href="?greeting=image">Image</a>
+        <a href="?greeting=compact">Compact</a>
+      </nav>
+    </main>
+    <script>
+      (() => {
+        const videoUrl = "/replymaven-video-check.mp4";
+        const imageSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 480"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#5147e5"/><stop offset="1" stop-color="#a78bfa"/></linearGradient></defs><rect width="960" height="480" rx="42" fill="url(#g)"/><circle cx="760" cy="150" r="100" fill="#fff" opacity=".22"/><path d="M160 340c80-130 180-130 260 0 80-130 180-130 260 0" fill="none" stroke="#fff" stroke-width="24" stroke-linecap="round" opacity=".82"/><text x="84" y="118" fill="#fff" font-family="system-ui,sans-serif" font-size="48" font-weight="700">A clear path forward</text></svg>`;
+        const imageUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(imageSvg)}`;
+        const config = {
+          widget: {
+            primaryColor: "#5147e5",
+            backgroundColor: "#fffdf8",
+            textColor: "#24231f",
+            headerText: "Talk to our team",
+            headerSubtitle: "We are here to help",
+            avatarUrl: null,
+            position: "bottom-right",
+            borderRadius: 18,
+            fontFamily: "system-ui",
+            customCss: null,
+            bannerUrl: null,
+            bannerPosition: null,
+            homeTitle: "How can we help?",
+            homeSubtitle: "Ask a question and we will point you in the right direction.",
+            allowedPages: null,
+            backgroundStyle: "solid",
+          },
+          quickActions: [],
+          greetings: [
+            {
+              id: "video-greeting-preview",
+              enabled: true,
+              imageUrl: videoUrl,
+              mediaType: "video",
+              imagePosition: null,
+              imageAspect: "landscape",
+              title: "See what is new",
+              description: "This greeting uses the local video file.",
+              ctaText: "Open chat",
+              ctaLink: "#chat",
+              author: null,
+              allowedPages: null,
+              delaySeconds: 0,
+              durationSeconds: 0,
+              sortOrder: 0,
+            },
+            {
+              id: "image-greeting-preview",
+              enabled: true,
+              imageUrl,
+              mediaType: "image",
+              imagePosition: null,
+              imageAspect: "landscape",
+              title: "A clear path forward",
+              description: "This greeting uses an inline SVG image.",
+              ctaText: "Learn more",
+              ctaLink: "#learn-more",
+              author: null,
+              allowedPages: null,
+              delaySeconds: 0,
+              durationSeconds: 0,
+              sortOrder: 1,
+            },
+            {
+              id: "compact-greeting-preview",
+              enabled: true,
+              imageUrl: null,
+              mediaType: null,
+              imagePosition: null,
+              imageAspect: null,
+              title: "Need a hand?",
+              description: null,
+              ctaText: null,
+              ctaLink: null,
+              author: null,
+              allowedPages: null,
+              delaySeconds: 0,
+              durationSeconds: 0,
+              sortOrder: 2,
+            },
+          ],
+          introMessage: "Need a hand?",
+          introMessageAuthor: null,
+          introMessageDelay: 1,
+          introMessageDuration: 15,
+          botName: "Maven",
+          agentName: "a team member",
+          contactForm: null,
+          inquiryForm: null,
+        };
+
+        const scenario = new URLSearchParams(window.location.search).get("greeting") ?? "video";
+        if (scenario === "video" || scenario === "image" || scenario === "compact") {
+          config.greetings = config.greetings.filter((greeting) =>
+            greeting.id.startsWith(`${scenario}-greeting-`),
+          );
+        }
+
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = (input, init) => {
+          const url = typeof input === "string" ? input : input.url;
+          if (url.includes("/api/widget/fixture/config")) {
+            return Promise.resolve(new Response(JSON.stringify(config), {
+              headers: { "Content-Type": "application/json" },
+            }));
+          }
+          if (url.includes("/api/widget/fixture/conversations/active")) {
+            return Promise.resolve(new Response(JSON.stringify({ conversation: null }), {
+              headers: { "Content-Type": "application/json" },
+            }));
+          }
+          if (url.includes("/api/widget/fixture/")) {
+            return Promise.resolve(new Response(JSON.stringify({ error: "preview_only" }), {
+              status: 418,
+              headers: { "Content-Type": "application/json" },
+            }));
+          }
+          return originalFetch(input, init);
+        };
+      })();
+    </script>
+    <script src="/widget-embed.js" data-project="fixture"></script>
+    <script>
+      document.getElementById("replay-greetings").addEventListener("click", () => {
+        window.ReplyMaven?.showGreetings();
+      });
+    </script>
+  </body>
+</html>
