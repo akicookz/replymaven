@@ -349,6 +349,11 @@ import {
       --rm-card-radius: 12px;
       --rm-btn-radius: 8px;
       --rm-input-radius: 8px;
+      --rm-panel-bottom: 96px;
+      --rm-panel-side: 32px;
+      --rm-panel-top: 16px;
+      --rm-expanded-width: 568px;
+      --rm-panel-max-height: calc(100dvh - var(--rm-panel-bottom) - var(--rm-panel-top));
     }
     .rm-widget-container.ready {
       visibility: visible;
@@ -455,8 +460,8 @@ import {
 
     /* ─── Greetings Stack (welcome + news cards) ───────────────────────── */
     .rm-greeting-stack {
-      position: absolute;
-      bottom: 76px;
+      position: fixed;
+      bottom: var(--rm-panel-bottom);
       width: 360px;
       max-width: 360px;
       display: flex;
@@ -466,11 +471,11 @@ import {
       font-family: inherit;
     }
     .rm-widget-container.bottom-right .rm-greeting-stack {
-      right: 12px;
+      right: var(--rm-panel-side);
       align-items: flex-end;
     }
     .rm-widget-container.bottom-left .rm-greeting-stack {
-      left: 12px;
+      left: var(--rm-panel-side);
       align-items: flex-start;
     }
     .rm-widget-container.center-inline .rm-greeting-stack {
@@ -734,29 +739,23 @@ import {
     .rm-overflow-menu button:hover,
     .rm-overflow-menu button:focus-visible { background: var(--rm-bg-secondary, #f4f4f5); outline: none; }
     .rm-overflow-menu svg { width: 14px; height: 14px; }
-    .rm-greeting-card.expanded { width: min(680px, calc(100vw - 24px)); max-width: 680px; max-height: calc(100vh - 108px); display: flex; flex-direction: column; transition: opacity .35s ease, transform .35s ease; }
-    .rm-greeting-card.has-video.expanded { width: min(680px, calc(320px * var(--rm-video-width-ratio, 1.7778)), calc((100vh - 108px) * var(--rm-video-width-ratio, 1.7778)), calc(100vw - 24px)); }
-    .rm-greeting-card.has-video-square.expanded { width: min(680px, calc(320px * var(--rm-video-width-ratio, 1)), calc((100vh - 108px) * var(--rm-video-width-ratio, 1)), calc(100vw - 24px)); }
+    .rm-greeting-card.expanded { width: min(var(--rm-expanded-width), calc(100vw - (var(--rm-panel-side) * 2))); max-width: var(--rm-expanded-width); max-height: var(--rm-panel-max-height); display: flex; flex-direction: column; transition: opacity .35s ease, transform .35s ease; }
+    .rm-greeting-card.has-video.expanded { width: min(var(--rm-expanded-width), calc(320px * var(--rm-video-width-ratio, 1.7778)), calc(var(--rm-panel-max-height) * var(--rm-video-width-ratio, 1.7778)), calc(100vw - (var(--rm-panel-side) * 2))); }
+    .rm-greeting-card.has-video-square.expanded { width: min(var(--rm-expanded-width), calc(320px * var(--rm-video-width-ratio, 1)), calc(var(--rm-panel-max-height) * var(--rm-video-width-ratio, 1)), calc(100vw - (var(--rm-panel-side) * 2))); }
     .rm-greeting-card.expanded .rm-greeting-body { min-height: 0; overflow-y: auto; }
     .rm-greeting-card.expanded .rm-greeting-video { height: auto; aspect-ratio: var(--rm-video-ratio, 16 / 9); flex-shrink: 0; }
-    .rm-greeting-stack.expanded { width: min(680px, calc(100vw - 24px)); max-width: 680px; }
+    .rm-greeting-stack.expanded { width: min(var(--rm-expanded-width), calc(100vw - (var(--rm-panel-side) * 2))); max-width: var(--rm-expanded-width); }
     .rm-greeting-stack.expanded > .rm-greeting-card:not(.expanded) {
       display: none;
       pointer-events: none;
     }
-    .rm-chat-window.expanded { position: fixed; right: 16px; bottom: 16px; width: min(680px, calc(100vw - 32px)); max-width: 680px; height: auto; min-height: min(560px, calc(100vh - 32px)); max-height: calc(100vh - 32px); }
-    .rm-widget-container.bottom-left .rm-chat-window.expanded { left: 16px; right: auto; }
+    .rm-chat-window.expanded { width: min(var(--rm-expanded-width), calc(100vw - (var(--rm-panel-side) * 2))); max-width: var(--rm-expanded-width); height: auto; min-height: min(560px, var(--rm-panel-max-height)); max-height: var(--rm-panel-max-height); }
     @media (max-width: 480px) {
       .rm-video-expanded { padding: 0; }
       .rm-video-expanded-shell { width: 100%; height: 100dvh; }
       .rm-video-expanded-shell .rm-greeting-video,
       .rm-video-expanded-shell .rm-message-video { max-height: none; }
       .rm-video-expanded-back { top: 16px; right: 16px; }
-      .rm-greeting-card.expanded,
-      .rm-greeting-stack.expanded { width: calc(100vw - 24px); max-width: calc(100vw - 24px); }
-      .rm-greeting-card.expanded { max-height: calc(100dvh - 112px); }
-      .rm-greeting-card.has-video.expanded { width: min(680px, calc(320px * var(--rm-video-width-ratio, 1.7778)), calc((100dvh - 112px) * var(--rm-video-width-ratio, 1.7778)), calc(100vw - 24px)); }
-      .rm-greeting-card.has-video-square.expanded { width: min(680px, calc(320px * var(--rm-video-width-ratio, 1)), calc((100dvh - 112px) * var(--rm-video-width-ratio, 1)), calc(100vw - 24px)); }
     }
     /* Let the text rise into the faded zone so image and body melt
        together instead of stacking as two blocks. */
@@ -939,7 +938,7 @@ import {
         position: fixed;
         left: 12px;
         right: 12px;
-        bottom: 84px;
+        bottom: var(--rm-panel-bottom);
         width: auto;
         max-width: none;
       }
@@ -950,11 +949,11 @@ import {
 
     /* ─── Chat Window ─────────────────────────────────────────────────────── */
     .rm-chat-window {
-      position: absolute;
-      bottom: 66px;
-      width: 400px;
-      min-height: 600px;
-      max-height: 620px;
+      position: fixed;
+      bottom: var(--rm-panel-bottom);
+      width: min(400px, calc(100vw - (var(--rm-panel-side) * 2)));
+      min-height: min(600px, var(--rm-panel-max-height));
+      max-height: min(620px, var(--rm-panel-max-height));
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -983,15 +982,13 @@ import {
       color: #ffffff;
     }
     .rm-chat-window.bottom-right {
-      right: 0;
+      right: var(--rm-panel-side);
       transform-origin: bottom right;
     }
     .rm-chat-window.bottom-left {
-      left: 0;
+      left: var(--rm-panel-side);
       transform-origin: bottom left;
     }
-    .rm-chat-window.bottom-right.expanded { right: 16px; }
-    .rm-chat-window.bottom-left.expanded { left: 16px; }
     .rm-chat-window.open {
       opacity: 1;
       visibility: visible;
@@ -2003,6 +2000,8 @@ import {
     .rm-header-back {
       background: var(--rm-bg-secondary, #f4f4f5);
       border: none;
+      padding: 0;
+      line-height: 0;
       color: var(--rm-text-secondary, #52525b);
       cursor: pointer;
       width: 32px;
@@ -2406,6 +2405,7 @@ import {
     .rm-back-btn:hover { background: var(--rm-bg-tertiary); }
 
     @media (max-width: 480px) {
+      .rm-widget-container { --rm-panel-bottom: 84px; --rm-panel-side: 12px; --rm-panel-top: 12px; }
       .rm-widget-container.bottom-right,
       .rm-widget-container.bottom-left {
         bottom: 16px;
@@ -2413,57 +2413,20 @@ import {
         left: auto;
       }
       .rm-chat-window {
-        --rm-chat-radius: 0px !important;
-      }
-      .rm-chat-window {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        width: 100%;
-        max-width: 100%;
-        min-height: 0;
-        max-height: none;
-        height: 100%;
-        box-shadow: none;
-        border: none;
-        border-radius: 0 !important;
-        transform-origin: bottom center;
-      }
-      .rm-chat-window.expanded {
         top: auto;
-        right: 12px;
-        bottom: 12px;
-        left: 12px;
+        right: var(--rm-panel-side);
+        bottom: var(--rm-panel-bottom);
+        left: var(--rm-panel-side);
         width: auto;
         max-width: none;
+        min-height: min(600px, var(--rm-panel-max-height));
+        max-height: var(--rm-panel-max-height);
         height: auto;
-        min-height: 0;
-        max-height: calc(100dvh - 24px);
-        --rm-chat-radius: 18px !important;
-        border-radius: 18px !important;
-      }
-      .rm-chat-window.bottom-right,
-      .rm-chat-window.bottom-left {
-        right: 0;
-        left: 0;
-      }
-      .rm-chat-window.bottom-right.expanded,
-      .rm-chat-window.bottom-left.expanded {
-        top: auto;
-        right: 12px;
-        bottom: 12px;
-        left: 12px;
-        width: auto;
-        max-width: none;
-        height: auto;
-        min-height: min(560px, calc(100dvh - 24px));
-        max-height: calc(100dvh - 24px);
         --rm-chat-radius: 18px !important;
         border-radius: 18px !important;
         box-shadow: var(--rm-shadow);
       }
+      .rm-chat-window.expanded { min-height: min(560px, var(--rm-panel-max-height)); }
       .rm-chat-window.open ~ .rm-trigger {
         display: none;
       }
@@ -2748,15 +2711,14 @@ import {
     }
     .rm-widget-container.center-inline .rm-chat-window {
       position: fixed;
-      /* Sit directly above the inline bar: bar is at bottom:24px, ~50px tall + 8px gap */
-      bottom: 82px;
+      bottom: var(--rm-panel-bottom);
       left: 50%;
       transform: translateX(-50%) translateY(12px);
       right: auto;
-      width: 560px;
-      max-width: calc(100% - 40px);
-      min-height: 0;
-      max-height: min(520px, calc(100vh - 120px));
+      width: min(400px, calc(100vw - (var(--rm-panel-side) * 2)));
+      max-width: 400px;
+      min-height: min(600px, var(--rm-panel-max-height));
+      max-height: min(620px, var(--rm-panel-max-height));
       transform-origin: bottom center;
       pointer-events: auto;
       border-radius: 20px;
@@ -2786,13 +2748,13 @@ import {
     .rm-widget-container.center-inline .rm-chat-window.expanded.open {
       top: auto;
       right: auto;
-      bottom: 16px;
+      bottom: var(--rm-panel-bottom);
       left: 50%;
-      width: min(680px, calc(100vw - 32px));
-      max-width: 680px;
+      width: min(var(--rm-expanded-width), calc(100vw - (var(--rm-panel-side) * 2)));
+      max-width: var(--rm-expanded-width);
       height: auto;
-      min-height: min(560px, calc(100vh - 32px));
-      max-height: calc(100vh - 32px);
+      min-height: min(560px, var(--rm-panel-max-height));
+      max-height: var(--rm-panel-max-height);
       transform: translateX(-50%);
       border-radius: 20px;
       box-shadow: var(--rm-shadow);
@@ -2865,21 +2827,20 @@ import {
         font-size: 13px;
         padding: 8px 14px;
       }
-      /* On mobile, chat window goes full-screen and inline bar hides */
+      /* On mobile, the chat window stays floating above the inline bar. */
       .rm-widget-container.center-inline .rm-chat-window {
         position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        width: 100%;
-        height: 100%;
+        top: auto;
+        left: var(--rm-panel-side);
+        right: var(--rm-panel-side);
+        bottom: var(--rm-panel-bottom);
+        width: auto;
+        height: auto;
         max-width: none;
-        max-height: none;
-        min-height: 0;
-        border-radius: 0;
-        border: none;
-        box-shadow: none;
+        max-height: var(--rm-panel-max-height);
+        min-height: min(600px, var(--rm-panel-max-height));
+        border-radius: 18px;
+        box-shadow: var(--rm-shadow);
         transform: translateY(16px);
         transform-origin: bottom center;
       }
@@ -2893,18 +2854,18 @@ import {
       }
       .rm-widget-container.center-inline .rm-chat-window.expanded.open {
         top: auto;
-        right: 12px;
-        bottom: 12px;
-        left: 12px;
+        right: var(--rm-panel-side);
+        bottom: var(--rm-panel-bottom);
+        left: var(--rm-panel-side);
         width: auto;
         height: auto;
-        min-height: min(560px, calc(100dvh - 24px));
-        max-height: calc(100dvh - 24px);
+        min-height: min(560px, var(--rm-panel-max-height));
+        max-height: var(--rm-panel-max-height);
         border-radius: 18px;
         box-shadow: var(--rm-shadow);
         transform: none;
       }
-      /* On mobile full-screen, show the input area inside the chat window */
+      /* On mobile, show the input area inside the floating chat window. */
       .rm-widget-container.center-inline .rm-chat-window.open .rm-input-area {
         display: flex;
       }
@@ -3034,7 +2995,9 @@ import {
   formHeader.className = "rm-header";
 
   const formHeaderBack = document.createElement("button");
+  formHeaderBack.type = "button";
   formHeaderBack.className = "rm-header-back";
+  formHeaderBack.setAttribute("aria-label", "Back to home");
   formHeaderBack.innerHTML = ICONS.backArrow;
   formHeaderBack.onclick = () => showHomeScreen();
 
@@ -3084,7 +3047,9 @@ import {
   header.className = "rm-header";
 
   const headerBack = document.createElement("button");
+  headerBack.type = "button";
   headerBack.className = "rm-header-back";
+  headerBack.setAttribute("aria-label", "Back to home");
   headerBack.innerHTML = ICONS.backArrow;
   headerBack.onclick = () => showHomeScreen();
 
