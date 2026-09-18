@@ -635,8 +635,10 @@ import {
     .rm-video-expand:hover,
     .rm-video-expand:focus-visible { background: rgba(255,255,255,.16); outline: none; }
     .rm-video-control svg,
-    .rm-video-expand svg { width: 15px; height: 15px; }
-    .rm-video-progress { flex: 1; min-width: 24px; height: 16px; appearance: none; border: 0; border-radius: 4px; background: transparent; cursor: pointer; }
+    .rm-video-expand svg { display: block; width: 15px; height: 15px; }
+    .rm-video-control [data-video-play-icon] { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; line-height: 0; }
+    .rm-video-control [data-video-play-icon] svg { display: block; }
+    .rm-video-progress { flex: 1; align-self: center; min-width: 24px; height: 16px; appearance: none; border: 0; border-radius: 4px; background: transparent; cursor: pointer; }
     .rm-video-progress::-webkit-slider-runnable-track { height: 3px; border-radius: 999px; background: linear-gradient(to right, #fff 0%, #fff var(--rm-video-progress, 0%), rgba(255,255,255,.35) var(--rm-video-progress, 0%), rgba(255,255,255,.35) 100%); }
     .rm-video-progress::-moz-range-track { height: 3px; border: 0; border-radius: 999px; background: rgba(255,255,255,.35); }
     .rm-video-progress::-moz-range-progress { height: 3px; border-radius: 999px; background: #fff; }
@@ -840,7 +842,7 @@ import {
       gap: 5px;
     }
     .rm-greeting-card:not(.compact) .rm-greeting-title {
-      font-size: 14px;
+      font-size: 16px;
       letter-spacing: 0;
     }
     .rm-greeting-card:not(.compact) .rm-greeting-desc {
