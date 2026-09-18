@@ -48,6 +48,10 @@
         <a href="?greeting=video">Video</a>
         <a href="?greeting=image">Image</a>
         <a href="?greeting=compact">Compact</a>
+        <a href="?greeting=compact-author">Named compact</a>
+        <a href="?greeting=all&position=bottom-right">Stacked right</a>
+        <a href="?greeting=all&position=bottom-left">Stacked left</a>
+        <a href="?greeting=all&position=center-inline">Stacked inline</a>
       </nav>
     </main>
     <script>
@@ -127,6 +131,28 @@
               durationSeconds: 0,
               sortOrder: 2,
             },
+            {
+              id: "compact-author-greeting-preview",
+              enabled: true,
+              imageUrl: null,
+              mediaType: null,
+              imagePosition: null,
+              imageAspect: null,
+              title: "Your setup is ready",
+              description: null,
+              ctaText: null,
+              ctaLink: null,
+              author: {
+                id: "author-jordan",
+                name: "Jordan Lee",
+                avatar: null,
+                workTitle: "Product specialist",
+              },
+              allowedPages: null,
+              delaySeconds: 0,
+              durationSeconds: 0,
+              sortOrder: 3,
+            },
           ],
           introMessage: "Need a hand?",
           introMessageAuthor: null,
@@ -138,8 +164,17 @@
           inquiryForm: null,
         };
 
-        const scenario = new URLSearchParams(window.location.search).get("greeting") ?? "video";
-        if (scenario === "video" || scenario === "image" || scenario === "compact") {
+        const params = new URLSearchParams(window.location.search);
+        const scenario = params.get("greeting") ?? "video";
+        const requestedPosition = params.get("position");
+        if (
+          requestedPosition === "bottom-right" ||
+          requestedPosition === "bottom-left" ||
+          requestedPosition === "center-inline"
+        ) {
+          config.widget.position = requestedPosition;
+        }
+        if (scenario === "video" || scenario === "image" || scenario === "compact" || scenario === "compact-author") {
           config.greetings = config.greetings.filter((greeting) =>
             greeting.id.startsWith(`${scenario}-greeting-`),
           );
