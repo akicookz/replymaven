@@ -172,6 +172,12 @@
           },
         };
 
+        try {
+          localStorage.removeItem("rm_fixture_greetings_dismissed");
+        } catch {
+          // Preview storage may be unavailable.
+        }
+
         const params = new URLSearchParams(window.location.search);
         const scenario = params.get("greeting") ?? "video";
         const requestedPosition = params.get("position");
