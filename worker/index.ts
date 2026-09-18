@@ -8138,7 +8138,6 @@ const app = new Hono<HonoAppContext>()
       if (
         (start !== undefined && (!Number.isSafeInteger(start) || start < 0)) ||
         (end !== undefined && (!Number.isSafeInteger(end) || end < 0)) ||
-        (start !== undefined && end !== undefined && end < start) ||
         (start === undefined && end === undefined)
       ) {
         return new Response(null, { status: 416 });
@@ -8146,6 +8145,12 @@ const app = new Hono<HonoAppContext>()
       const head = await c.env.UPLOADS.head(key);
       if (!head) return c.json({ error: "Not found" }, 404);
       totalSize = head.size;
+      if (start !== undefined && end !== undefined && end < start) {
+        return new Response(null, {
+          status: 416,
+          headers: { "Content-Range": `bytes */${totalSize}` },
+        });
+      }
       if (totalSize === 0 || (start !== undefined && start >= totalSize)) {
         return new Response(null, {
           status: 416,
@@ -8179,23 +8184,18 @@ const app = new Hono<HonoAppContext>()
     headers.set("X-Content-Type-Options", "nosniff");
     headers.set("Content-Security-Policy", "sandbox; default-src 'none'");
     headers.set("Accept-Ranges", "bytes");
-    if (obj.range) {
-      let offset = 0;
-      let length = obj.size;
-      if (range && "suffix" in range) {
-        offset = obj.size - range.suffix;
-        length = range.suffix;
-      } else if ("suffix" in obj.range) {
-        offset = obj.size - obj.range.suffix;
-        length = obj.range.suffix;
-      } else {
-        offset = obj.range.offset ?? 0;
-        length = obj.range.length ?? obj.size;
-      }
+    if (range) {
+      const objectSize = totalSize ?? obj.size;
+      const offset = "suffix" in range
+        ? objectSize - range.suffix
+        : range.offset ?? 0;
+      const length = "suffix" in range
+        ? range.suffix
+        : range.length ?? obj.size;
       headers.set("Content-Length", String(length));
       headers.set(
         "Content-Range",
-        `bytes ${offset}-${offset + length - 1}/${obj.size}`,
+        `bytes ${offset}-${offset + length - 1}/${objectSize}`,
       );
       return new Response(obj.body, { status: 206, headers });
     }
