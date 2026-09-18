@@ -722,17 +722,23 @@ import {
     }
     .rm-header-menu-wrap { position: relative; margin-left: auto; flex-shrink: 0; }
     .rm-greeting-menu-button,
-    .rm-header-menu-button { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 50%; background: var(--rm-bg, #fff); color: var(--rm-text-secondary, #52525b); box-shadow: 0 2px 8px rgba(0,0,0,.14); cursor: pointer; }
+    .rm-header-menu-button { position: relative; z-index: 2; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 50%; background: var(--rm-bg, #fff); color: var(--rm-text-secondary, #52525b); box-shadow: 0 2px 8px rgba(0,0,0,.14); cursor: pointer; }
     .rm-header-menu-button { background: var(--rm-bg-secondary, #f4f4f5); box-shadow: none; }
+    .rm-greeting-menu-wrap:has(.rm-overflow-menu.open) .rm-greeting-menu-button,
+    .rm-header-menu-wrap:has(.rm-overflow-menu.open) .rm-header-menu-button { background: transparent; box-shadow: none; }
     .rm-greeting-menu-button:hover,
     .rm-greeting-menu-button:focus-visible,
     .rm-header-menu-button:hover,
     .rm-header-menu-button:focus-visible { background: var(--rm-bg-tertiary, #e4e4e7); outline: none; }
     .rm-greeting-menu-button svg,
     .rm-header-menu-button svg { width: 16px; height: 16px; }
-    .rm-overflow-menu { position: absolute; top: calc(100% + 2px); right: 0; min-width: 150px; padding: 5px; border: 0; border-radius: 11px; background: var(--rm-bg, #fff); box-shadow: 0 0 0 1px var(--rm-border-subtle, rgba(0,0,0,0.06)); display: none; }
-    .rm-header-menu-wrap .rm-overflow-menu { top: 0; right: calc(100% + 4px); min-width: 132px; }
-    .rm-overflow-menu.open { display: grid; }
+    .rm-overflow-menu { position: absolute; top: 0; right: 0; min-width: 150px; padding: 5px 36px 5px 5px; border: 0; border-radius: 11px; background: var(--rm-bg, #fff); box-shadow: 0 0 0 1px var(--rm-border-subtle, rgba(0,0,0,0.06)); display: grid; opacity: 0; visibility: hidden; pointer-events: none; transform: scale(.25); transform-origin: top right; filter: blur(4px); transition: opacity .18s ease, transform .18s cubic-bezier(.2,0,0,1), filter .18s ease, visibility 0s linear .18s; }
+    .rm-header-menu-wrap .rm-overflow-menu { min-width: 132px; }
+    .rm-overflow-menu.open { opacity: 1; visibility: visible; pointer-events: auto; transform: scale(1); filter: blur(0); transition: opacity .18s ease, transform .18s cubic-bezier(.2,0,0,1), filter .18s ease, visibility 0s linear 0s; }
+    @media (prefers-reduced-motion: reduce) {
+      .rm-overflow-menu,
+      .rm-overflow-menu.open { transition: none; }
+    }
     .rm-overflow-menu button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 0 9px; border: 0; border-radius: 8px; background: transparent; color: var(--rm-text, #18181b); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
     .rm-overflow-menu button:hover,
     .rm-overflow-menu button:focus-visible { background: var(--rm-bg-secondary, #f4f4f5); outline: none; }
