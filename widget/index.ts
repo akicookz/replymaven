@@ -672,6 +672,26 @@ import {
     .rm-video-expanded-back:focus-visible { background: rgba(255,255,255,.18); outline: none; }
     .rm-video-expanded-back svg { width: 15px; height: 15px; }
     .rm-greeting-menu-wrap { position: absolute; top: 7px; right: 7px; z-index: 5; }
+    .rm-greeting-card > .rm-greeting-menu-wrap {
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .16s ease;
+    }
+    .rm-greeting-card:hover > .rm-greeting-menu-wrap,
+    .rm-greeting-card:focus-within > .rm-greeting-menu-wrap,
+    .rm-greeting-card > .rm-greeting-menu-wrap:has(.rm-overflow-menu.open) {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .rm-greeting-card > .rm-greeting-menu-wrap .rm-greeting-menu-button {
+      box-shadow: none;
+    }
+    @media (hover: none), (pointer: coarse) {
+      .rm-greeting-card > .rm-greeting-menu-wrap {
+        opacity: 1;
+        pointer-events: auto;
+      }
+    }
     .rm-home-menu-wrap { position: absolute; top: 8px; right: 8px; z-index: 5; }
     .rm-header-menu-wrap { position: relative; margin-left: auto; flex-shrink: 0; }
     .rm-greeting-menu-button,
