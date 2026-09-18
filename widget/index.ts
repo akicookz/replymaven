@@ -731,6 +731,7 @@ import {
     .rm-greeting-menu-button svg,
     .rm-header-menu-button svg { width: 16px; height: 16px; }
     .rm-overflow-menu { position: absolute; top: calc(100% + 2px); right: 0; min-width: 150px; padding: 5px; border: 0; border-radius: 11px; background: var(--rm-bg, #fff); box-shadow: 0 0 0 1px var(--rm-border-subtle, rgba(0,0,0,0.06)); display: none; }
+    .rm-header-menu-wrap .rm-overflow-menu { top: 0; right: calc(100% + 4px); min-width: 132px; }
     .rm-overflow-menu.open { display: grid; }
     .rm-overflow-menu button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 0 9px; border: 0; border-radius: 8px; background: transparent; color: var(--rm-text, #18181b); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
     .rm-overflow-menu button:hover,
