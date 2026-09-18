@@ -2712,6 +2712,17 @@ import {
                   transform 0.3s cubic-bezier(0.4,0,0.2,1),
                   visibility 0.3s;
     }
+    .rm-widget-container.center-inline .rm-chat-window:not(.expanded) {
+      min-height: 0;
+    }
+    .rm-widget-container.center-inline .rm-chat-window:not(.expanded) .rm-chat-view {
+      flex: 0 1 auto;
+    }
+    .rm-widget-container.center-inline .rm-chat-window:not(.expanded) .rm-messages {
+      flex: 0 1 auto;
+      min-height: 0;
+      max-height: calc(var(--rm-panel-max-height) - 120px);
+    }
     .rm-widget-container.center-inline .rm-chat-window.open {
       opacity: 1;
       visibility: visible;
@@ -2817,11 +2828,14 @@ import {
         height: auto;
         max-width: none;
         max-height: var(--rm-panel-max-height);
-        min-height: min(600px, var(--rm-panel-max-height));
+        min-height: 0;
         border-radius: 18px;
         box-shadow: var(--rm-shadow);
         transform: translateY(16px);
         transform-origin: bottom center;
+      }
+      .rm-widget-container.center-inline .rm-chat-window:not(.expanded) .rm-messages {
+        max-height: calc(var(--rm-panel-max-height) - 120px);
       }
       .rm-widget-container.center-inline .rm-chat-window.open {
         transform: translateY(0);
