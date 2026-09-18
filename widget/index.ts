@@ -731,9 +731,10 @@ import {
     .rm-overflow-menu button:focus-visible { background: var(--rm-bg-secondary, #f4f4f5); outline: none; }
     .rm-overflow-menu svg { width: 14px; height: 14px; }
     .rm-greeting-card.expanded { width: min(680px, calc(100vw - 24px)); max-width: 680px; max-height: calc(100vh - 108px); display: flex; flex-direction: column; transition: opacity .35s ease, transform .35s ease; }
+    .rm-greeting-card.has-video.expanded { width: min(680px, calc(320px * var(--rm-video-width-ratio, 1.7778)), calc((100vh - 108px) * var(--rm-video-width-ratio, 1.7778)), calc(100vw - 24px)); }
+    .rm-greeting-card.has-video-square.expanded { width: min(680px, calc(320px * var(--rm-video-width-ratio, 1)), calc((100vh - 108px) * var(--rm-video-width-ratio, 1)), calc(100vw - 24px)); }
     .rm-greeting-card.expanded .rm-greeting-body { min-height: 0; overflow-y: auto; }
-    .rm-greeting-card.expanded .rm-greeting-video { height: min(320px, calc((100vw - 24px) * .5625)); aspect-ratio: auto; }
-    .rm-greeting-card.expanded .rm-greeting-video.square { height: min(320px, calc(100vw - 24px)); }
+    .rm-greeting-card.expanded .rm-greeting-video { height: auto; aspect-ratio: var(--rm-video-ratio, 16 / 9); flex-shrink: 0; }
     .rm-greeting-stack.expanded { width: min(680px, calc(100vw - 24px)); max-width: 680px; }
     .rm-greeting-stack.expanded > .rm-greeting-card:not(.expanded) {
       display: none;
@@ -750,6 +751,8 @@ import {
       .rm-greeting-card.expanded,
       .rm-greeting-stack.expanded { width: calc(100vw - 24px); max-width: calc(100vw - 24px); }
       .rm-greeting-card.expanded { max-height: calc(100dvh - 112px); }
+      .rm-greeting-card.has-video.expanded { width: min(680px, calc(320px * var(--rm-video-width-ratio, 1.7778)), calc((100dvh - 112px) * var(--rm-video-width-ratio, 1.7778)), calc(100vw - 24px)); }
+      .rm-greeting-card.has-video-square.expanded { width: min(680px, calc(320px * var(--rm-video-width-ratio, 1)), calc((100dvh - 112px) * var(--rm-video-width-ratio, 1)), calc(100vw - 24px)); }
     }
     /* Let the text rise into the faded zone so image and body melt
        together instead of stacking as two blocks. */
@@ -3616,7 +3619,22 @@ import {
     video.addEventListener("ended", () => setVideoPlayState(player, video, false));
     video.addEventListener("loadedmetadata", () => {
       if (video.videoWidth > 0 && video.videoHeight > 0) {
+        const ratio = video.videoWidth / video.videoHeight;
         player.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+        player.style.setProperty("--rm-video-ratio", String(ratio));
+        const card = player.closest<HTMLElement>(".rm-greeting-card");
+        if (card) {
+          card.classList.remove("has-video", "has-video-square");
+          card.classList.add(ratio <= 1.05 ? "has-video-square" : "has-video");
+          card.style.setProperty(
+            "--rm-video-width-ratio",
+            String(ratio),
+          );
+        } else if (expandedVideoPlayer === player && expandedVideoOwner) {
+          expandedVideoOwner.classList.remove("has-video", "has-video-square");
+          expandedVideoOwner.classList.add(ratio <= 1.05 ? "has-video-square" : "has-video");
+          expandedVideoOwner.style.setProperty("--rm-video-width-ratio", String(ratio));
+        }
       }
       syncVideoControls(player, video);
     });
@@ -3632,6 +3650,7 @@ import {
     onMaximize: (expanded: boolean) => void,
     onClose: () => void,
     className = "rm-greeting-menu-wrap",
+    canExpand = true,
   ): HTMLElement {
     const wrap = document.createElement("div");
     wrap.className = className;
@@ -3660,7 +3679,9 @@ import {
       event.stopPropagation();
       const open = !menu.classList.contains("open");
       const currentlyExpanded = getExpanded();
-      maximize.innerHTML = (currentlyExpanded ? ICONS.minimize : ICONS.maximize) + `<span>${currentlyExpanded ? "Shrink" : "Expand"}</span>`;
+      if (canExpand) {
+        maximize.innerHTML = (currentlyExpanded ? ICONS.minimize : ICONS.maximize) + `<span>${currentlyExpanded ? "Shrink" : "Expand"}</span>`;
+      }
       menu.classList.toggle("open", open);
       trigger.setAttribute("aria-expanded", String(open));
     };
@@ -3673,6 +3694,7 @@ import {
     };
     maximize.onclick = (event) => {
       event.stopPropagation();
+      if (!canExpand) return;
       const expanded = !getExpanded();
       onMaximize(expanded);
       maximize.innerHTML = (expanded ? ICONS.minimize : ICONS.maximize) + `<span>${expanded ? "Shrink" : "Expand"}</span>`;
@@ -3680,7 +3702,8 @@ import {
     };
     close.onclick = (event) => { event.stopPropagation(); closeMenu(); onClose(); };
     menu.onclick = (event) => event.stopPropagation();
-    menu.append(maximize, close);
+    if (canExpand) menu.appendChild(maximize);
+    menu.appendChild(close);
     wrap.append(trigger, menu);
     return wrap;
   }
@@ -6486,6 +6509,9 @@ import {
     const isRich = Boolean(greeting.imageUrl) || Boolean(videoUrl) || Boolean(greeting.ctaText);
     if (!isRich) card.classList.add("compact");
     if (!isRich && greeting.author?.name) card.classList.add("has-author");
+    if (videoUrl) {
+      card.classList.add(greeting.imageAspect === "square" ? "has-video-square" : "has-video");
+    }
 
     if (videoUrl) {
       card.appendChild(
@@ -6574,6 +6600,8 @@ import {
           greetingStack.classList.toggle("expanded", expanded);
         },
         () => dismissGreetingCard(card, greeting.id, true),
+        "rm-greeting-menu-wrap",
+        isRich,
       ),
     );
 
