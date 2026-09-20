@@ -8,7 +8,6 @@ export interface PlanLimits {
   telegram: boolean;
   slack: boolean;
   customTone: boolean;
-  autoCannedDraft: boolean;
   customCss: boolean;
   tools: boolean;
 }

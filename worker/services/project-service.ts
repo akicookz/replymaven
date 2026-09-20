@@ -250,7 +250,6 @@ export class ProjectService {
         | "toneOfVoice"
         | "customTonePrompt"
         | "introMessage"
-        | "autoCannedDraft"
         | "workingHours"
         | "avgResponseTime"
         | "telegramBotToken"

@@ -915,7 +915,6 @@ function sanitizeProjectSettings(
   if (!settings) return null;
 
   return {
-    aiSearchInstanceName: settings.aiSearchInstanceName,
     telegramConfigured: Boolean(
       settings.telegramBotToken || settings.telegramChatId,
     ),
@@ -928,7 +927,6 @@ function sanitizeProjectSettings(
     toneOfVoice: settings.toneOfVoice,
     customTonePrompt: settings.customTonePrompt,
     introMessage: settings.introMessage,
-    autoCannedDraft: settings.autoCannedDraft,
     autoCloseMinutes: settings.autoCloseMinutes,
     workingHours: settings.workingHours,
     avgResponseTime: settings.avgResponseTime,

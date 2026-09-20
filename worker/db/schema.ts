@@ -51,7 +51,6 @@ export const projectSettings = sqliteTable(
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
     geminiApiKey: text("gemini_api_key"), // deprecated: platform key used instead
-    aiSearchInstanceName: text("ai_search_instance_name"),
     telegramBotToken: text("telegram_bot_token"), // encrypted
     customerIdentitySecret: text("customer_identity_secret"), // encrypted
     telegramChatId: text("telegram_chat_id"),
@@ -81,9 +80,6 @@ export const projectSettings = sqliteTable(
     introMessageDuration: integer("intro_message_duration")
       .notNull()
       .default(15),
-    autoCannedDraft: integer("auto_canned_draft", { mode: "boolean" })
-      .notNull()
-      .default(true),
     autoCloseMinutes: integer("auto_close_minutes").default(30), // null = disabled
     workingHours: text("working_hours"),
     avgResponseTime: text("avg_response_time"),
@@ -1050,7 +1046,9 @@ export const greetings = sqliteTable(
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
     enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    // When videoUrl is set, imageUrl is that video's poster instead of the artwork.
     imageUrl: text("image_url"),
+    videoUrl: text("video_url"),
     // Focal point for the image as "X% Y%"; null = centered.
     imagePosition: text("image_position"),
     // "landscape" (wide banner crop) or "square"; null = landscape.
