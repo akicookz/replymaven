@@ -13,20 +13,30 @@ import { TelegramService } from "../../services/telegram-service";
 import { SlackService } from "../../services/slack-service";
 import { ToolService } from "../../services/tool-service";
 import { type AppEnv } from "../../types";
-import { createModelRuntimeState } from "../llm/create-language-model";
-import { logWarn } from "../../observability";
-import { type AiParticipation } from "../types";
-import { normalizeConversationHistory } from "./normalize-history";
-import { runMavenTurn } from "./run-maven-turn";
+import {
+  createLanguageModel,
+  createModelRuntimeState,
+  runWithModelFallback,
+} from "../llm/create-language-model";
+import {
+  fallbackRenderContactTimingMessage,
+  renderContactTimingMessage,
+} from "../llm/render-contact-timing-message";
+import { buildContactFallbackMessage } from "../contact-support/contact-support";
+import { buildSupportTurnOpening } from "../prompt/sections";
 import {
   createStreamingStripState,
   flushStreamingStripState,
   stripInternalTokensStreaming,
 } from "../streaming/internal-tokens";
 import {
+  type AiParticipation,
   type MavenStreamPart,
   type SupportPromptSettings,
 } from "../types";
+import { logWarn } from "../../observability";
+import { normalizeConversationHistory } from "./normalize-history";
+import { runMavenTurn } from "./run-maven-turn";
 
 export interface ChannelTurnOptions {
   db: DrizzleD1Database<Record<string, unknown>>;
@@ -42,6 +52,12 @@ export interface ChannelTurnOptions {
   isReturningVisitor: boolean;
   channel?: ConversationChannel;
   aiParticipation?: AiParticipation;
+  /**
+   * "contact_support" opens with a greeting and a response-time line, and
+   * falls back to a holding message when the model produces nothing. Standard
+   * turns stay silent instead.
+   */
+  turnKind?: "standard" | "contact_support";
 }
 
 async function collectVisibleText(
@@ -90,6 +106,48 @@ export async function runChannelTurn(
     geminiApiKey: env.GEMINI_API_KEY || null,
     openaiApiKey: env.OPENAI_API_KEY || null,
   });
+
+  const turnKind = options.turnKind ?? "standard";
+  const turnContext = {
+    kind: turnKind,
+    isFirstVisitorTurn: options.isFirstVisitorTurn,
+    isReturningVisitor: options.isReturningVisitor,
+  } as const;
+
+  let responseOpening = "";
+  if (turnKind === "contact_support") {
+    const baseOpening = buildSupportTurnOpening(turnContext, visitorInfo);
+    responseOpening = `${baseOpening}${fallbackRenderContactTimingMessage()}\n\n`;
+    if (settings?.avgResponseTime?.trim()) {
+      try {
+        const timingMessage = await runWithModelFallback({
+          runtime: modelRuntime,
+          stage: "render_contact_timing",
+          operation: (config) =>
+            renderContactTimingMessage(createLanguageModel(config), {
+              nowMs: Date.now(),
+              currentMessage: options.currentMessage,
+              workingHours: settings.workingHours,
+              avgResponseTime: settings.avgResponseTime,
+              companyContext: settings.companyContext,
+              visitorLocation: {
+                timezone: getMetadataString(conversation.metadata, "timezone"),
+                city: getMetadataString(conversation.metadata, "city"),
+                region: getMetadataString(conversation.metadata, "region"),
+                country: getMetadataString(conversation.metadata, "country"),
+              },
+            }, { throwOnModelError: true }),
+          logContext,
+        });
+        responseOpening = `${baseOpening}${timingMessage}\n\n`;
+      } catch (error) {
+        logWarn("channel_turn.timing_fallback", {
+          ...logContext,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
 
   let content: string | null;
   let sources: PublicSourceReference[] = [];
@@ -146,13 +204,10 @@ export async function runChannelTurn(
           ),
           visitorInfo,
           timeContext: { nowMs: Date.now(), conversationHistory },
-          turnContext: {
-            kind: "standard",
-            isFirstVisitorTurn: options.isFirstVisitorTurn,
-            isReturningVisitor: options.isReturningVisitor,
-          },
+          turnContext,
           aiParticipation,
-          escalated: conversation.status === "waiting_agent",
+          escalated: turnKind === "contact_support" ||
+            conversation.status === "waiting_agent",
         },
         publicToolDependencies: {
           executionCtx: options.executionCtx,
@@ -173,14 +228,22 @@ export async function runChannelTurn(
       url: source.url ?? null,
       type: source.type,
     }));
-    content = visibleText || null;
+    if (visibleText) {
+      content = `${responseOpening}${visibleText}`;
+    } else if (turnKind === "contact_support") {
+      content = buildContactFallbackMessage(responseOpening);
+    } else {
+      content = null;
+    }
     if (!visibleText) sources = [];
   } catch (error) {
     logWarn("channel_turn.turn_failed", {
       ...logContext,
       error: error instanceof Error ? error.message : String(error),
     });
-    content = null;
+    content = turnKind === "contact_support"
+      ? buildContactFallbackMessage(responseOpening)
+      : null;
     sources = [];
   }
   if (!content) return null;

@@ -191,7 +191,6 @@ import {
   extractFormName,
   markContactAiUnavailable,
 } from "./chat-runtime/contact-support/contact-support";
-import { runContactSupportFollowUp } from "./chat-runtime/contact-support/run-contact-support-follow-up";
 import { createEscalation } from "./chat-runtime/post-turn/escalation";
 import { buildToolRegistry } from "./chat-runtime/tools/http-tool-executor";
 import { isReturningVisitorGap, toToolDefinition } from "./chat-runtime/types";
@@ -1434,7 +1433,7 @@ const app = new Hono<HonoAppContext>()
       (await billingService.checkMessageLimit(project.userId, subscription))
         .allowed;
     if (aiAllowed) {
-      c.executionCtx.waitUntil(runContactSupportFollowUp({
+      c.executionCtx.waitUntil(runChannelTurn({
         db,
         env: c.env,
         executionCtx: c.executionCtx,
@@ -1447,9 +1446,11 @@ const app = new Hono<HonoAppContext>()
         },
         settings,
         conversation,
-        formMessage,
+        currentMessage: formMessage,
         isFirstVisitorTurn,
         isReturningVisitor,
+        aiParticipation: "assist_until_agent",
+        turnKind: "contact_support",
       }));
     }
     return c.json(
