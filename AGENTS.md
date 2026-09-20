@@ -46,14 +46,14 @@ ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbo
 
 ### Core Features
 
-- **Embeddable chat widget** -- standalone JS embed script (`<script>` tag) that users install on their pages. Supports programmatic invocation (`open`, `close`, `toggle`, `sendMessage`, `identify`, `setPageContext`, `setMetadata`, `requestNotifications`, `openInquiryForm`). Talks native Agent chat over a WebSocket to the conversation's `MavenChatAgent` child. Automatically sends current page URL and title as context with each message.
+- **Embeddable chat widget** -- standalone JS embed script (`<script>` tag) that users install on their pages. Supports programmatic invocation (`open`, `close`, `toggle`, `sendMessage`, `identify`, `reset`, `setPageContext`, `setMetadata`, `requestNotifications`, `openTicketForm`, `showGreetings`, `dismissGreeting`). Talks native Agent chat over a WebSocket to the conversation's `MavenChatAgent` child. Automatically sends current page URL and title as context with each message.
 - **Dashboard** -- React SPA where users configure their bot, manage resources, review conversations, and customize the widget's look and feel.
 - **Resource management** -- users add web pages, FAQs, and PDFs as knowledge sources. These are stored in R2 and indexed via Cloudflare AI Search for RAG retrieval.
 - **Tone of voice** -- configurable AI personality (professional, friendly, casual, formal, or custom prompt).
-- **Quick actions and quick topics** -- configurable buttons and topic suggestions shown above the chat input.
-- **Intro message** -- the first bot message visitors see when they open the widget.
+- **Quick actions** -- configurable buttons shown on the widget home and above the chat input.
+- **Greetings** -- proactive cards (welcome plus news/changelog) that pop out above the launcher before any conversation exists. Each card carries an optional image or video, title, description, CTA, author, per-page targeting, a reveal delay, and an auto-hide duration.
+- **Help center** -- per-project categories and articles, published under `/docs` or a custom domain, mirrored into the RAG index.
 - **Live agent handoff** -- when the bot cannot answer or the visitor requests a human, one escalation fans out to every connected Telegram/Slack channel and every accepted project member with access. Maven keeps helping while review is pending. A channel or member email joins the conversation when a human first replies there. After that, visitor messages go only to the joined external clients. Dashboard and MCP replies do not create push routes. Agents use `@BotName` commands (Telegram, Slack, dashboard, or MCP) to hand back to AI (with optional instructions), close conversations, instruct the bot to respond immediately, or start a Sidechat investigate turn. `ask_maven` starts that investigate turn from MCP. The inbox Assign menu includes Maven; picking it hands the thread back. Idle takeover after four quiet hours also assigns Maven. New bookings, conversations, and contact form submissions also notify enabled messengers when configured.
-- **Canned response auto-drafting** -- after a conversation ends, the AI analyzes it and generates draft canned responses. Users approve or reject drafts from the dashboard.
 - **Customer continuity** -- anonymous widget visitor IDs can be connected to project-scoped customer profiles. Signed server-issued tokens keep exact visitor history together across devices without trusting browser-supplied email.
 
 ### Conversation runtime
@@ -120,13 +120,16 @@ bun run widget:build
 Bun, never npm. Before calling a change done, run:
 
 ```bash
-bun test              # unit/contract tests
-bun run test:agents   # Workers-pool integration tests
 bun run lint
 bun run build         # tsc -b && vite build
 ```
 
-Widget changes also need `bun run widget:build`. Changes to Agent or migration code need `bun run test:agents` as well.
+There is no test suite. The repo has no `*.test.ts` files and no `test` or `test:agents`
+script, so `bun test` exits with "0 test files matching". If you add tests, add the script
+and update this section.
+
+Widget changes also need `bun run widget:build`. Verify UI work in the real browser
+(see the preview note below) rather than assuming a build success means it renders.
 
 `wrangler dev` binds a LOCAL D1 database (`"remote": false` on the DB binding). To work against realistic data, import a production export once: `wrangler d1 export supportbot-db --remote --output dump.sql`, reset `.wrangler/state/v3/d1`, load the dump into the local database, then `bun run db:migrate:dev`. Flip the binding to `"remote": true` only when you deliberately want dev pointed at production data; deploys ignore this flag either way.
 
@@ -195,19 +198,26 @@ replymaven/
 │   │   ├── auth.schema.ts          # Auth tables (users, sessions, accounts, verifications)
 │   │   ├── index.ts                # Re-exports all schemas
 │   │   └── drizzle/                # SQL migration files
-│   └── services/                    # Domain service classes
+│   ├── agents/                      # MavenProjectAgent, MavenChatAgent, Sidechat
+│   ├── chat-runtime/                # prompt/, retrieval/, streaming/, tools/
+│   ├── conversations/               # PublicConversationStore + legacy reader
+│   ├── routes/                      # Route modules mounted by index.ts
+│   ├── security/
+│   ├── lib/
+│   └── services/                    # Domain service classes (~40 files)
 │       ├── project-service.ts
 │       ├── resource-service.ts
 │       ├── widget-service.ts
+│       ├── agent-channel.ts         # Telegram/Slack transport behind one adapter
 │       ├── telegram-service.ts
-│       ├── canned-response-service.ts
+│       ├── slack-service.ts
 │       ├── ai-service.ts
 │       ├── email-service.ts
 │       └── dashboard-service.ts
 ├── widget/                          # Chat widget (separate build)
-│   ├── index.ts                     # Widget loader/entry point (IIFE)
-│   ├── widget.ts                    # Widget UI logic
-│   ├── styles.css                   # Widget styles (scoped)
+│   ├── index.ts                     # Widget loader + UI + styles (IIFE, ~7k lines)
+│   ├── agent-chat-bridge.tsx        # Native Agent chat session bridge
+│   ├── send-outbox.ts               # Lossless message delivery
 │   └── vite.config.ts              # Separate Vite build -> single JS file
 ├── wrangler.jsonc                   # Cloudflare bindings: D1, R2, KV, AI
 ├── vite.config.ts                   # Main Vite config (React SPA + Cloudflare)
@@ -299,23 +309,17 @@ For 3+ branches, extract a small helper with `if`/`else if`/`return`, use a look
 2. Reuse existing components in `src/components/` next
 3. Create custom component only if no reusable option exists
 
-### UI verification
-
-- Do not add mocked DOM/component tests for visual styling, layout, focus, scrolling, or interaction behavior. These tests have repeatedly passed while the real dashboard was broken.
-- Verify UI changes in the real authenticated browser at the affected route and viewport. Exercise the actual interaction and inspect the rendered result.
-- Keep pure state/protocol tests and backend/security tests only when they prove a real contract independently of component markup or CSS classes.
-
 ### Styling
 
 - Tailwind CSS v4 tokens from `src/index.css`
 - Use semantic color tokens (`bg-background`, `text-foreground`, `bg-card`, `text-muted-foreground`, etc.)
 - Keep glassmorphism style consistent: `bg-card/50 backdrop-blur-xl`, `rounded-2xl`, subtle borders/shadows
 - oklch color space for all color definitions
-- Base radius: `1.25rem`
+- Base radius: `--radius: 0.75rem` (`src/theme.css`)
 - Fonts: `Satoshi` (sans), `Playfair Display` (heading)
 - Dark mode via `.dark` class variant
 - Ensure keyboard accessibility, ARIA usage, and color contrast
-- **Never use borders as visual separators** -- no `border-t`, `border-b`, `<hr>`, horizontal rules, or separator elements for dividing sections or list rows. Use spacing (`space-y-*`, `gap-*`, `py-*`) and background color contrast (`bg-muted/50` cards) for visual separation instead. Container borders on cards (`border border-border` on the outer card) are acceptable only sparingly, but row-separator borders within lists/tables are never allowed.
+- See **UI rules** below. They are hard rules, not preferences.
 
 ### Routing and data fetching
 
@@ -507,28 +511,107 @@ Only edit the Drizzle schema files, then run `bun run db:generate`. Never hand-w
 
 ## UI rules
 
-Hard rules. No exceptions, no "just this once".
+Hard rules. No exceptions, no "just this once". Bad UI is not allowed in this
+codebase: if a screen looks tossed together, it is a defect, not a style opinion.
+
+### Reach for the primitives first
+
+Never hand-roll a control that `src/components/ui/` already provides. If you find
+yourself rebuilding a button, input, select, popover, or dialog out of divs, stop
+and use the primitive.
+
+If the same *shape* of UI appears a second time, promote it to a primitive and put
+a short comment at the top saying how to use it. Two hand-rolled copies of the same
+thing is the signal, not a threshold to argue about.
 
 ### Never use separators or divider borders
 
-No `<Separator />`, no `border-t` / `border-b` / `border-x` used to divide one region from
-another, no `<hr>`. This includes drawer and dialog headers and footers: never put a border
-under a header or above a footer.
+No `<Separator />`, no `border-t` / `border-b` / `border-x` used to divide one region
+from another, no `<hr>`. This includes drawer and dialog headers and footers: never
+put a border under a header or above a footer.
 
-Separate regions with spacing, or with a background shift (`bg-muted/40`, `glass-bar`) if the
-region genuinely needs to read as its own surface. Borders around a whole component are fine;
-lines drawn *between* things are not.
+Separate regions with spacing, or with a background shift (`bg-muted/40`, `glass-bar`)
+if the region genuinely needs to read as its own surface. Borders around a whole
+component are fine; lines drawn *between* things are not.
 
 ### Never write long descriptions
 
-Prefer no description at all. Most headings do not need a subtitle, and most fields do not need
-helper text: if the label already says it, the sentence under it is noise.
+Prefer no description at all. Most headings do not need a subtitle, and most fields
+do not need helper text: if the label already says it, the sentence under it is noise.
 
-When a description is genuinely required, one short line. Never two lines, never a sentence
-explaining what the user can already see.
+A description earns its place only when it tells the user something they would
+actually go looking for, and cannot infer from the label:
 
-Applies to `CardDescription`, `SheetDescription`, `DialogDescription`, form helper text, and
-section subtitles.
+- Bad -- `Working hours` / "Shared when visitors ask when your team is available."
+- Good -- `Working hours` / "Maven follows this when telling visitors you are offline."
+
+When a description is genuinely required, one short line. Never two lines.
+
+Applies to `CardDescription`, `SheetDescription`, `DialogDescription`, form helper
+text, and section subtitles.
+
+### No accordions
+
+Do not use `Accordion`, and do not build one. Use a `Popover` instead.
+
+Do not use an up/down chevron to signal expansion. Use a right chevron on a text
+button (`Configure ›`), so the affordance reads as "opens something" rather than
+"unfolds in place".
+
+### Use the design tokens
+
+No hardcoded colours, radii, or spacing where a token exists. Tokens live in
+`src/theme.css` and `src/index.css`. A raw hex belongs only in genuinely one-off,
+non-themed surfaces (the widget preview, marketing illustration), and then with a
+comment saying why.
+
+### Radius tracks height
+
+Control radius is proportional to control height -- roughly 0.3 of it -- so every
+control reads with the same corner. That is why `Button` has a per-size radius
+(`sm` is `rounded-md`, the rest `rounded-lg`). Do not "normalise" those onto one
+value; a single radius makes short controls look like pills and tall ones look square.
+
+Rule of thumb: controls up to ~34px use `rounded-md`, 36-46px use `rounded-lg`.
+Panels and popovers are surfaces, not controls, and sit a rung higher.
+
+Prefer `inset-ring-*` over `border-*` for control and card edges. It is 1px, it takes
+theme colours and opacity, it composes with `shadow-*`, and it does not affect layout.
+
+### Never use the AI sparkle icon
+
+No `Sparkles`, no wand, no glitter. It is tacky. Name the action instead.
+
+### Every action needs feedback
+
+An action that appears to do nothing is broken. Prefer a visible UI change that shows
+the result over a toast:
+
+- Delete -- the row animates out of the list.
+- Save -- the item re-renders with the saved values.
+- Move/reorder -- the item is shown in its new position.
+
+Use a toast when there is no natural place to show the result, and for failures.
+Never leave a mutation with no feedback at all.
+
+### Alignment and cohesion
+
+Vertical rhythm, control heights, and spacing must be consistent within a screen.
+No one-sided cards, no buttons scattered at different heights, no field that is 6px
+taller than the one beside it.
+
+If you do not know how to lay something out, show the user options and ask. Do not
+guess and ship.
+
+### UI verification
+
+- Do not add mocked DOM/component tests for visual styling, layout, focus, scrolling,
+  or interaction behavior. These tests have repeatedly passed while the real dashboard
+  was broken.
+- Verify UI changes in the real authenticated browser at the affected route and
+  viewport. Exercise the actual interaction and inspect the rendered result.
+- If you cannot reach the screen (auth, environment), say so plainly instead of
+  implying it was checked.
 
 ## Frontend Patterns
 
@@ -613,87 +696,142 @@ export default FooPage;
 
 ### Domain Tables
 
+Column lists below are the load-bearing ones, not the full set. `worker/db/schema.ts` is the source of truth.
+
 ```
 projects
-  id, userId (FK users), name, slug (unique per user), domain, createdAt, updatedAt
+  id, userId (FK users), name, slug (unique per user), domain, onboarded
 
 project_settings
-  id, projectId (FK projects), geminiApiKey (encrypted), aiSearchInstanceName,
-  telegramBotToken (encrypted), telegramChatId, companyName, companyUrl,
-  industry, companyContext, botName, agentName, toneOfVoice, customTonePrompt,
-  introMessage, showIntroBubble (boolean), autoCannedDraft (boolean),
-  createdAt, updatedAt
+  id, projectId, geminiApiKey (encrypted, unused: platform key is used instead),
+  telegramBotToken/telegramChatId, slackBotToken/slackSigningSecret/slackChannelId,
+  customerIdentitySecret (encrypted), companyName, companyUrl, industry,
+  companyContext, botName, agentName, toneOfVoice, customTonePrompt,
+  introMessage, introMessageAuthorId, introMessageDelay, introMessageDuration,
+  autoCloseMinutes, workingHours, avgResponseTime,
+  helpCustomUrl, helpTopNav, helpCustomCss, helpAnalytics, helpHomeMarkdown,
+  helpHomeBackground*, helpThemeDefault
 
 widget_config
-  id, projectId (FK projects), primaryColor, backgroundColor, textColor,
-  headerText, avatarUrl, position, borderRadius, fontFamily, customCss,
-  createdAt, updatedAt
+  id, projectId, primaryColor, backgroundColor, textColor, headerText,
+  headerSubtitle, avatarUrl, position, borderRadius, fontFamily, customCss,
+  bannerUrl, bannerPosition, homeTitle, homeSubtitle, allowedPages,
+  botMessageBg/TextColor, visitorMessageBg/TextColor, backgroundStyle
 
 quick_actions
-  id, projectId (FK projects), label, action, icon, sortOrder
+  id, projectId, type, label, action, icon, showOnHome, sortOrder
 
-quick_topics
-  id, projectId (FK projects), label, prompt, sortOrder
+greetings
+  id, projectId, enabled, imageUrl (image or video; type derived from the
+  extension by worker/lib/greeting-media.ts), imagePosition, imageAspect
+  (landscape|square), title, description, ctaText, ctaLink, authorId,
+  allowedPages, delaySeconds, durationSeconds, sortOrder
+
+guidelines
+  id, projectId, condition, instruction, enabled, sortOrder
+
+help_categories
+  id, projectId, name, slug, description, icon, sortOrder, archivedAt
+
+help_articles
+  id, projectId, categoryId, title, slug, excerpt, ogImageUrl, content,
+  status, sortOrder, publishedAt
 
 resources
-  id, projectId (FK projects), type (webpage|pdf|faq), title, url, r2Key,
-  content, status (pending|indexed|failed), lastIndexedAt, createdAt, updatedAt
+  id, projectId, type (webpage|pdf|faq), title, description, url, r2Key,
+  content, status (pending|indexed|failed), lastIndexedAt, sourceArticleId
 
-conversations
-  id, projectId (FK projects), customerId (nullable FK customers), visitorId, visitorName, visitorEmail,
-  status (active|waiting_agent|agent_replied|closed), telegramThreadId
-  (populated on handoff/new-convo Telegram notification for reply threading),
-  metadata (JSON -- geo data, device info, agentHandbackInstructions),
-  createdAt, updatedAt
-
-messages
-  id, conversationId (FK conversations), role (visitor|bot|agent),
-  content, sources (JSON), createdAt
-
-canned_responses
-  id, projectId (FK projects), trigger, response,
-  status (draft|approved|rejected), sourceConversationId, createdAt, updatedAt
-
-api_keys
-  id, projectId (FK projects), keyHash (SHA-256), prefix, label, createdAt
+crawled_pages
+  id, resourceId, projectId, url, pageTitle, r2Key, status, depth
 
 customers
-  id, projectId (FK projects), name, email, externalId, phone, customFields (JSON),
-  firstSeenAt, lastSeenAt, createdAt, updatedAt
+  id, projectId, externalId, name, email, phone, customFields (JSON),
+  firstSeenAt, lastSeenAt
 
 customer_visitors
-  id, projectId, customerId, visitorId, linkedBy (dashboard|signed_widget),
-  createdAt
+  id, projectId, customerId, visitorId, linkedBy (dashboard|signed_widget)
+
+ticket_config
+  id, projectId, enabled, description, fields (JSON)
+
+tools
+  id, projectId, name, displayName, description, endpoint, method, headers,
+  parameters, responseMapping, enabled, timeout, sortOrder, allowedChannels,
+  access, schemaFingerprint
+
+tool_executions
+  id, toolId, conversationId, messageId, input, output, status, httpStatus,
+  duration, errorMessage
+
+visitor_bans
+  id, projectId, visitorId, visitorEmail, reason, bannedBy,
+  bannedFromConversationId, expiresAt
+
+team_members
+  id, ownerId, userId, email, role, status, accessAllProjects,
+  invitedAt, acceptedAt
+
+team_member_projects
+  id, teamMemberId, projectId
+
+subscriptions
+  id, userId, stripeCustomerId, stripeSubscriptionId, plan, interval, status,
+  trialEndsAt, currentPeriodStart, currentPeriodEnd, cancelAtPeriodEnd
+
+usage
+  id, userId, periodStart, messagesUsed, alerted80, alerted100
+
+message_usage_credits
+  messageId, userId, periodStart
+
+api_keys
+  id, projectId, keyHash (SHA-256), prefix, label
+
+mcp_oauth_clients / mcp_oauth_authorizations / mcp_oauth_auth_codes / mcp_oauth_tokens
+  MCP OAuth registration, consent, PKCE codes, and hashed access/refresh tokens
 ```
+
+`conversations` and `messages` still exist but are frozen. They are the one-time
+import source for the Agent-owned transcripts only (see **Conversation runtime**),
+plus the columns the inbox still reads off the directory row. Do not add
+conversation features against them.
 
 ### KV Namespace: CONVERSATIONS_CACHE
 
 Shared general-purpose KV namespace. The name is historical -- it no longer caches conversations. Current consumers:
 
 - `email-change:{userId}` -- pending email change verification tokens
-- `faq:{version}:{projectId}:{fingerprint}` -- compiled FAQ prompt text, keyed by a content-hash fingerprint (`worker/chat-runtime/prompt/build-compiled-faq-context.ts`). 5-minute TTL.
+- team context for MCP requests (`getTeamContext`, read via `worker/mcp-server.ts`)
 - `hybrid_unavailable:{projectId}` -- remembers which projects cannot serve hybrid retrieval so new Worker isolates skip the failed attempt (`worker/chat-runtime/retrieval/run-ai-search.ts`). 24-hour TTL.
-- Auto-refine flow uses it for transient state.
+- `inbound-email:{emailId}` -- dedupes Resend inbound webhook retries.
 
-Do NOT re-add conversation-message caching here -- prior attempts introduced stale-snapshot bugs in the widget. Message reads should hit D1 via `ChatService.getMessages` / `ChatService.getMessagesSince` directly.
+Do NOT re-add conversation-message caching here -- prior attempts introduced stale-snapshot bugs in the widget. Transcripts live in each conversation's child Agent; read them through `PublicConversationStore` (`worker/conversations/`).
 
 ---
 
 ## API Routes
+
+Grouped, not exhaustive. `worker/index.ts` and `worker/routes/*.ts` are the source of truth.
 
 ### Public (no auth required)
 
 | Method | Route | Purpose |
 |--------|-------|---------|
 | POST/GET | `/api/auth/*` | Better Auth handler |
-| GET | `/api/widget/:projectSlug/config` | Widget config + quick actions/topics |
+| GET | `/api/widget/:projectSlug/config` | Widget config: appearance, quick actions, greetings, ticket form |
 | POST | `/api/widget/:projectSlug/conversations` | Start a new conversation |
+| GET | `/api/widget/:projectSlug/conversations/active` | Restore the visitor's open conversation |
+| POST | `/api/widget/:projectSlug/conversations/:id/agent-session` | Mint the token the widget uses to open the `MavenChatAgent` WebSocket. Chat messages travel over that socket, not over HTTP. |
+| PATCH | `/api/widget/:projectSlug/conversations/:id` | Sync visitor identity/metadata onto the conversation |
+| POST | `/api/widget/:projectSlug/conversations/:id/heartbeat` | Visitor presence |
+| POST | `/api/widget/:projectSlug/conversations/:id/email` | Email the transcript |
 | POST | `/api/widget/:projectSlug/identify` | Verify an opaque signed customer token and attach exact visitor history |
-| POST | `/api/widget/:projectSlug/conversations/:id/messages` | Send message (returns SSE stream, or JSON `{ agentMode: true }` when in agent mode) |
-| GET | `/api/widget/:projectSlug/conversations/:id/messages` | Get conversation history |
+| POST | `/api/widget/:projectSlug/tickets` (alias `/inquiries`) | Ticket form submission; posts a visitor message and escalates |
+| POST | `/api/widget/:projectSlug/upload` | Visitor attachment upload |
 | POST | `/api/telegram/webhook/:projectId` | Telegram bot webhook. Verified with the per-project `secret_token` Telegram echoes in `X-Telegram-Bot-Api-Secret-Token` (derived from `ENCRYPTION_KEY`, `worker/services/telegram-secrets.ts`). The first verified update from a project with no chat id binds that chat; there is no token-polling detect endpoint. |
 | POST | `/api/slack/events/:projectId` | Slack Events API. Verified with the per-project Slack signing secret (`v0:{ts}:{body}` HMAC). The first trusted `event.channel` binds once. |
 | POST | `/api/webhooks/inbound-mail` | Resend inbound webhook (svix-signed). Fetching the body needs a Resend key with read access, not a sending-only one; a failed fetch answers 502 so Resend retries. Replies are routed by the conversation link they quote (`worker/services/inbound-email-routing.ts`) because Resend replaces our `Message-ID` with the sending provider's, so `In-Reply-To` never references an id we issued. Sender-email lookup is the last resort and only ever matches visitors. |
+| POST | `/api/billing/webhook` | Stripe webhook |
 | GET | `/api/widget-embed.js` | 301 redirect to `widget.replymaven.com` (legacy) |
 
 ### Dashboard (session-authenticated)
@@ -702,28 +840,31 @@ Do NOT re-add conversation-message caching here -- prior attempts introduced sta
 |--------|-------|---------|
 | GET | `/api/dashboard` | Dashboard stats |
 | GET/POST/PATCH/DELETE | `/api/projects[/:id]` | CRUD projects |
-| GET/PUT | `/api/projects/:id/settings` | Project settings (tone, intro, API keys) |
+| GET/PUT | `/api/projects/:id/settings` | Project settings (tone, bot identity, integrations, help center) |
 | GET/PUT | `/api/projects/:id/widget-config` | Widget look and feel |
-| GET/POST/DELETE | `/api/projects/:id/quick-actions` | Quick actions CRUD |
-| GET/POST/DELETE | `/api/projects/:id/quick-topics` | Quick topics CRUD |
-| GET/POST/DELETE | `/api/projects/:id/resources` | Resource management |
-| GET/POST | `/api/projects/:id/customers` | List/create customer profiles |
-| GET | `/api/projects/:id/customers/ws` | Project-scoped customer cache update stream |
-| GET/PATCH/DELETE | `/api/projects/:id/customers/:customerId` | Customer detail/profile lifecycle |
-| POST | `/api/projects/:id/conversations/:conversationId/customer` | Promote a visitor or link a conversation to a customer |
-| POST | `/api/projects/:id/customers/:targetCustomerId/merge` | Merge a duplicate customer into the target profile |
-| POST | `/api/projects/:id/customer-identity-secret/rotate` | Create or rotate the project-scoped signing secret |
-| POST | `/api/projects/:id/resources/:resId/reindex` | Trigger re-index |
-| GET | `/api/projects/:id/conversations` | List conversations |
-| GET | `/api/projects/:id/conversations/:convId` | Conversation detail + messages |
+| GET/POST + PATCH/DELETE `/:actionId` | `/api/projects/:id/quick-actions` | Quick actions CRUD |
+| GET/POST + PATCH/DELETE `/:greetingId` + PATCH `/reorder` | `/api/projects/:id/greetings` | Greeting cards CRUD and ordering (max 50 per project) |
+| GET/POST + PATCH/DELETE `/:gId` | `/api/projects/:id/guidelines` | Guidelines / SOPs |
+| GET/POST + PUT/DELETE `/:resourceId` | `/api/projects/:id/resources` | Resource management, plus `/reindex`, `/content`, `/pages`, `/split-with-ai`, `/generate-faq` |
+| GET/POST/PATCH/DELETE | `/api/projects/:id/help/categories` and `/help/articles` | Help center authoring, plus `/publish`, `/unpublish`, `/preview`, `/reorder` |
+| GET/PUT | `/api/projects/:id/ticket-config` | Ticket form fields |
+| GET/POST + PATCH/DELETE `/:toolId` | `/api/projects/:id/tools` | Custom HTTP tools, plus `/test` and `/api/projects/:id/tool-executions` |
+| GET | `/api/projects/:id/conversations[/:convId]` | Inbox list and conversation detail |
 | POST | `/api/projects/:id/conversations/:convId/reply` | Agent reply |
-| GET/PATCH/DELETE | `/api/projects/:id/canned-responses` | Canned response management |
-| POST | `/api/projects/:id/canned-responses/:crId/approve` | Approve draft |
-| GET/PUT | `/api/projects/:id/telegram` | Telegram config |
-| POST | `/api/projects/:id/telegram/test` | Test Telegram connection |
-| GET/PUT | `/api/projects/:id/slack` | Slack config |
-| POST | `/api/projects/:id/slack/test` | Test Slack connection |
-| POST | `/api/upload` | Upload files to R2 |
+| PATCH/POST | `/api/projects/:id/conversations/:convId/{assign,priority,snooze,close,reopen,unblock,send-email}` | Inbox actions; `bulk` applies them to many at once |
+| GET | `/api/projects/:id/inbox-counts`, `/needs-review-updates`, `/assignable-users` | Inbox chrome |
+| POST | `/api/projects/:projectId/conversations/:conversationId/sidechat/session` | Open a private Sidechat session |
+| POST/DELETE/PATCH | `/api/projects/:projectId/sidechat/mcp/connections[...]` | Sidechat MCP connections, reconnect/refresh, per-tool enablement |
+| POST | `/api/projects/:projectId/conversations/:conversationId/sidechat/drafts/send-as-maven` | Send a Sidechat draft to the visitor |
+| GET/POST + PATCH/DELETE `/:customerId` | `/api/projects/:id/customers` | Customer profiles, plus `/merge` and conversation linking |
+| POST | `/api/projects/:id/customer-identity-secret/rotate` | Create or rotate the project-scoped signing secret |
+| GET/POST/DELETE | `/api/projects/:id/visitors/ban[ned]` | Visitor bans |
+| GET/PUT + POST `/test` | `/api/projects/:id/telegram`, `/slack` | Messenger config and connection test |
+| GET/POST/PATCH/DELETE | `/api/team[s]`, `/api/team/invite`, `/api/team/accept/:inviteId` | Members, invites, team switching |
+| GET/POST | `/api/billing/{subscription,checkout,portal,usage-log}` | Stripe subscription and usage |
+| GET/POST/DELETE | `/api/mcp/{register,authorize,token,revoke,connections}` | MCP OAuth client registration and consent |
+| GET/PUT/POST | `/api/profile`, `/api/onboarding/*` | Account profile and first-run onboarding |
+| POST | `/api/upload`, `/api/help-images/upload` | Upload files to R2 |
 
 ---
 
@@ -751,7 +892,9 @@ window.ReplyMaven.reset()
 window.ReplyMaven.setPageContext({ page: "Pricing", plan: "Pro" })
 window.ReplyMaven.setMetadata({ internalId: "abc123" })
 window.ReplyMaven.requestNotifications()
-window.ReplyMaven.openInquiryForm()
+window.ReplyMaven.openTicketForm()   // openInquiryForm() is the legacy alias
+window.ReplyMaven.showGreetings()
+window.ReplyMaven.dismissGreeting(id)
 ```
 
 ### Customer Continuity
@@ -770,29 +913,47 @@ window.ReplyMaven.openInquiryForm()
 - External ID, email, and visitor-link conflicts fail without mutation. Customers are never auto-merged.
 - Customer mutations publish a project-scoped realtime event so customer lists and details refresh even when no conversation changed.
 
-### SSE Streaming Flow
+### Public chat turn
 
-1. Visitor sends message via `POST /api/widget/:slug/conversations/:id/messages`
-2. Worker stores visitor message in D1 + updates KV cache
-3. **Agent-mode check**: If conversation status is `waiting_agent` or `agent_replied`, AI is bypassed entirely. The visitor message is forwarded to Telegram (as a reply to the thread if `telegramThreadId` exists) and the endpoint returns `{ ok: true, agentMode: true }` as JSON instead of SSE. The widget detects the JSON content type and skips SSE parsing.
-4. Worker queries AI Search `search()` with project folder filter for relevant resource chunks
-5. Worker checks canned responses for exact/close matches
-6. Worker builds system prompt with: `botName` identity, tone config, company context, RAG context, canned response hints, conversation summary, `<page-context>` (from `setPageContext` + auto-collected page URL/title), `<agent-instructions>` (from `agentHandbackInstructions` in conversation metadata if present), and guidelines/SOPs
-7. Worker streams AI response back as SSE (`Content-Type: text/event-stream`)
-8. Bot message is stored in D1 after streaming completes
-9. If bot confidence is low or visitor requests a human, the AI says a natural handoff message (e.g. "Let me connect you with an engineer!") and appends `[HANDOFF_REQUESTED]` which is stripped. Status changes to `waiting_agent`, Telegram notification is sent with recent messages + dashboard link, and `telegramThreadId` is stored for reply threading.
+There is no HTTP message endpoint. The widget opens a WebSocket to the conversation's
+`MavenChatAgent` child and submits the turn over that socket.
+
+1. The widget mints a session token at `POST /api/widget/:slug/conversations/:id/agent-session`, then connects to the child Agent.
+2. The child persists the visitor message in its own SQLite and serializes the turn.
+3. `evaluatePublicTurnGate()` (`worker/agents/maven/public/public-turn.ts`) decides what happens next. In order: `subscription_inactive`, `message_limit_reached`, `banned`, `archived`, `muted` (closed as spam), `reopen_and_run_ai` (closed conversation, visitor came back), `human_mode`, `run_ai`.
+4. `human_mode` silences the model. The visitor message is forwarded only to the external clients that already joined (`forwardVisitorToJoinedHumans`). Two exceptions put the model back in play: the visitor addresses `@BotName` directly, and `shouldResumeAiAfterHumanIdle()` — two non-email visitor messages after four quiet hours since the last agent message or human command.
+5. On `run_ai`, retrieval runs (`worker/chat-runtime/retrieval/`): AI Search over the project folder, merged chunks, and the compiled FAQ context.
+6. `buildSupportSystemPrompt()` assembles the prompt: bot identity and voice, company context, `<guidelines>`, `<priority-faq-match>`, `<priority-faqs>`, `<knowledge-base>`, `<page-context>`, `<agent-instructions>`, and tool evidence. Guidelines outrank FAQs; both outrank the knowledge base.
+7. The reply streams to the widget over the socket and is persisted by the child when the turn completes. The opening greeting is held until real reply text exists, so the visitor sees status phases rather than a frozen greeting.
+8. Escalation is a tool call, not a magic string: the model calls `request_team_help` (`worker/chat-runtime/tools/internal/request-team-help.ts`). That flips status to `waiting_agent` and fans out through the enabled channel adapters. `[HANDOFF_REQUESTED]` survives only in `worker/chat-runtime/streaming/internal-tokens.ts` as a legacy token that gets stripped from output.
 
 ### AI Search (RAG) Integration
 
 Each project stores resources in R2 under a `{projectId}/` prefix. AI Search indexes the R2 bucket and we use folder-based metadata filtering for multitenancy:
 
+The instance name is hardcoded; there is no per-project instance setting
+(`worker/chat-runtime/retrieval/run-ai-search.ts`):
+
 ```typescript
-const results = await env.AI.autorag("supportbot").search({
-  query: userMessage,
-  filters: { type: "eq", key: "folder", value: `${projectId}/` },
-  max_num_results: 5,
-  ranking_options: { score_threshold: 0.3 },
-});
+const response = await env.AI.aiSearch()
+  .get("supportbot")
+  .search({
+    messages: [{ role: "user", content: query }],
+    ai_search_options: {
+      retrieval: {
+        retrieval_type: retrievalType,
+        // Range, not $eq: AutoRAG's folder $eq is exact and ignores
+        // subfolders, so `${projectId}/` alone would miss help articles
+        // under `${projectId}/articles/`. ASCII '/' (0x2F) < '0' (0x30),
+        // so this range stays scoped to one tenant.
+        filters: { folder: { $gte: `${projectId}/`, $lt: `${projectId}0` } },
+        max_num_results: maxResults,
+        match_threshold: matchThreshold,
+      },
+      query_rewrite: { enabled: false },
+      reranking: { enabled: true, model: "@cf/baai/bge-reranker-base" },
+    },
+  });
 ```
 
 Resource ingestion:
@@ -847,15 +1008,18 @@ window.ReplyMaven.setPageContext({
 - Keys are freeform -- site owners control what data is relevant. Values are sanitized on both sides (`shared/page-context.ts`): numbers and booleans become text, anything else is dropped, keys are capped at 80 characters, values at 1,000, and the whole record at 20 entries. A loose value never fails the turn.
 - Unlike `setMetadata` (which is for analytics/dashboard tracking), `setPageContext` data is actively used by the AI when generating responses.
 
-### Canned Response Auto-Drafting
+### Greetings
 
-After a conversation closes:
-1. Worker analyzes the conversation using Gemini
-2. Identifies the core question/intent
-3. Extracts the best answer from bot/agent responses
-4. Generates a concise canned response draft
-5. Stores draft in `canned_responses` with status `draft`
-6. User sees drafts in dashboard and can approve/edit/reject
+Proactive cards shown above the launcher before any conversation exists.
+
+- Stored in `greetings`, ordered by `sortOrder`. Max 50 per project. Served inside `GET /api/widget/:slug/config` as `greetings[]`.
+- `imageUrl` holds either an image or a video. `worker/lib/greeting-media.ts` derives the type from the file extension (`.mp4`, `.webm`, `.ogv`), so adding video needed no column. Uploads cap at 10MB for images and 50MB for video.
+- A card with media renders rich (its own layout, video controls, expand). A card without renders compact, uses the author name as the title, and opens the chat on click.
+- `delaySeconds` controls the reveal, `durationSeconds` the auto-hide. Auto-hide does not persist; an explicit dismissal writes the id to `localStorage` under the `greetings_dismissed` key.
+- `allowedPages` targets the card to specific pages, matched client-side against the current URL.
+- An unseen-reply preview always outranks greetings. Both stacks occupy the same coordinates and a real support reply is the more urgent card.
+- `window.ReplyMaven.showGreetings()` re-renders ignoring dismissals; `dismissGreeting(id?)` dismisses one or all.
+- `widget-service.ts` back-derives the legacy `introMessage`, `introMessageAuthor`, `introMessageDelay`, and `introMessageDuration` config fields from the first greeting so widget bundles still in the wild keep working.
 
 ---
 
@@ -885,59 +1049,6 @@ Secrets (via `.dev.vars` locally, `wrangler secret put` for production):
 - `ENCRYPTION_KEY` -- for AES-GCM encryption of stored API keys/tokens
 - `GEMINI_API_KEY` -- Google Gemini API key (required when `AI_MODEL` is a Gemini model)
 - `OPENAI_API_KEY` -- OpenAI API key (required when `AI_MODEL` is a GPT model)
-
----
-
-## Implementation Phases
-
-### Phase 1 -- Foundation (scaffold + auth + projects)
-1. Initialize project (package.json, vite config, wrangler config, tsconfigs, eslint)
-2. Set up Drizzle + D1 schema (auth tables + projects + project_settings)
-3. Set up Better Auth (Google/GitHub OAuth)
-4. Create dashboard layout (sidebar, auth guard, error boundary)
-5. Build project CRUD pages
-
-### Phase 2 -- Widget and Chat Core
-6. Build widget embed script (loader + iframe/shadow DOM)
-7. Build widget UI (chat interface, message bubbles, input)
-8. Implement chat API routes (create conversation, send message)
-9. Integrate Gemini API (server-side, SSE streaming)
-10. Implement KV conversation caching
-
-### Phase 3 -- RAG and Resources
-11. Build resource management pages (add URL, upload PDF, create FAQ)
-12. Implement resource ingestion pipeline (R2 upload -> AI Search)
-13. Integrate AI Search `search()` into chat flow
-14. Build RAG-augmented prompt construction
-
-### Phase 4 -- Customization
-15. Build widget config page (colors, position, fonts, live preview)
-16. Implement quick actions and quick topics
-17. Build tone of voice configuration
-18. Implement intro message configuration
-
-### Phase 5 -- Telegram and Agent Features
-19. Build Telegram integration config page
-20. Implement Telegram webhook + message relay
-21. Build conversation inbox for agent replies
-22. Implement live agent handoff flow (AI confidence check + `[HANDOFF_REQUESTED]` token)
-23. Implement agent-mode AI bypass (silence AI when conversation is in `waiting_agent`/`agent_replied`, forward visitor messages to Telegram)
-24. Implement `@BotName` command parsing with AI intent classification (`close`, `handback`, `respond`)
-25. Implement `generateDirectedResponse()` for agent-directed bot replies
-26. Add Telegram notification methods (`notifyNewConversation`, `notifyNewBooking`, `notifyContactForm`, `forwardVisitorMessage`) with reply threading via `telegramThreadId`
-27. Add `botName` (set once, then locked) and configurable `agentName` in project settings + dashboard UI
-
-### Phase 6 -- Canned Responses
-28. Build canned response management page
-29. Implement auto-draft generation (post-conversation Gemini analysis)
-30. Integrate canned responses into chat flow (priority matching)
-
-### Phase 7 -- Polish
-31. Dashboard analytics (conversation counts, response times, topics)
-32. Widget programmatic API (`open`, `close`, `toggle`, `identify`, `sendMessage`, `setPageContext`, `setMetadata`, `requestNotifications`, `openInquiryForm`)
-33. Implement `setPageContext` for per-message AI-visible page context (auto-includes `currentPageUrl` and `pageTitle`)
-34. Rate limiting and abuse prevention
-35. Error handling, loading states, edge cases
 
 ---
 
