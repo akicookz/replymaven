@@ -179,7 +179,6 @@ export const updateProjectSettingsSchema = z.object({
   introMessage: z.string().max(200).optional(),
   introMessageDelay: z.number().int().min(0).max(30).optional(),
   introMessageDuration: z.number().int().min(0).max(120).optional(),
-  autoCannedDraft: z.boolean().optional(),
   workingHours: z.string().max(200).nullable().optional(),
   avgResponseTime: z.string().max(200).nullable().optional(),
   companyName: z.string().max(200).nullable().optional(),
@@ -1017,9 +1016,15 @@ const greetingMediaUrlSchema = z
     "Video greetings must use an uploaded media path",
   );
 
+const greetingVideoUrlSchema = z
+  .string()
+  .max(500)
+  .refine(isAllowedStoredUploadUrl, "Videos must use an uploaded media path");
+
 export const createGreetingSchema = z.object({
   enabled: z.boolean().optional(),
   imageUrl: greetingMediaUrlSchema.nullable().optional(),
+  videoUrl: greetingVideoUrlSchema.nullable().optional(),
   imagePosition: imagePositionSchema.nullable().optional(),
   imageAspect: imageAspectSchema.nullable().optional(),
   title: z.string().min(1, "Title is required").max(120),
@@ -1041,6 +1046,7 @@ export const createGreetingSchema = z.object({
 export const updateGreetingSchema = z.object({
   enabled: z.boolean().optional(),
   imageUrl: greetingMediaUrlSchema.nullable().optional(),
+  videoUrl: greetingVideoUrlSchema.nullable().optional(),
   imagePosition: imagePositionSchema.nullable().optional(),
   imageAspect: imageAspectSchema.nullable().optional(),
   title: z.string().min(1).max(120).optional(),

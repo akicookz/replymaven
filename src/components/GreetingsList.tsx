@@ -24,7 +24,15 @@ interface GreetingsListProps {
 }
 
 function GreetingThumbnail({ greeting }: { greeting: GreetingData }) {
-  if (!greeting.imageUrl) {
+  // Legacy rows kept the video in imageUrl before video_url existed.
+  const videoUrl =
+    greeting.videoUrl ??
+    (greeting.imageUrl && isGreetingVideoUrl(greeting.imageUrl)
+      ? greeting.imageUrl
+      : null);
+  const posterUrl = videoUrl ? greeting.imageUrl : null;
+
+  if (!videoUrl && !greeting.imageUrl) {
     return (
       <span className="text-sm font-semibold text-muted-foreground">
         {greeting.title.charAt(0).toUpperCase()}
@@ -32,10 +40,11 @@ function GreetingThumbnail({ greeting }: { greeting: GreetingData }) {
     );
   }
 
-  if (isGreetingVideoUrl(greeting.imageUrl)) {
+  if (videoUrl) {
     return (
       <video
-        src={greeting.imageUrl}
+        src={videoUrl}
+        poster={posterUrl ?? undefined}
         muted
         playsInline
         preload="metadata"
@@ -47,7 +56,7 @@ function GreetingThumbnail({ greeting }: { greeting: GreetingData }) {
 
   return (
     <img
-      src={greeting.imageUrl}
+      src={greeting.imageUrl ?? undefined}
       alt=""
       className="h-full w-full object-cover"
       style={
@@ -111,17 +120,15 @@ function GreetingsList({
   }
 
   async function handleSubmit(form: GreetingFormState) {
+    // imageUrl is the poster when a video is set, so positioning and aspect
+    // only apply to a standalone image.
+    const isVideo = Boolean(form.videoUrl);
     const payload = {
       enabled: form.enabled,
       imageUrl: form.imageUrl,
-      imagePosition:
-        form.imageUrl && !isGreetingVideoUrl(form.imageUrl)
-          ? form.imagePosition
-          : null,
-      imageAspect:
-        form.imageUrl && !isGreetingVideoUrl(form.imageUrl)
-          ? form.imageAspect
-          : null,
+      videoUrl: form.videoUrl,
+      imagePosition: form.imageUrl && !isVideo ? form.imagePosition : null,
+      imageAspect: form.imageUrl && !isVideo ? form.imageAspect : null,
       title: form.title.trim(),
       description: form.description.trim() || null,
       ctaText: form.ctaText.trim() || null,
@@ -215,7 +222,7 @@ function GreetingsList({
         onDelete={editing ? () => handleDelete(editing) : undefined}
         initial={editing}
         authors={authors}
-        uploadImage={greetingsApi.uploadImage}
+        uploadMedia={greetingsApi.uploadMedia}
         onSubmit={handleSubmit}
         submitting={submitting}
       />

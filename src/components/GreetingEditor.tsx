@@ -33,11 +33,12 @@ import type {
   GreetingData,
   GreetingImageAspect,
 } from "@/hooks/use-greetings";
-import { isGreetingVideoUrl } from "@/hooks/use-greetings";
 
 export interface GreetingFormState {
   enabled: boolean;
+  /** Artwork when there is no video, poster frame when there is. */
   imageUrl: string | null;
+  videoUrl: string | null;
   imagePosition: string | null;
   imageAspect: GreetingImageAspect;
   title: string;
@@ -54,6 +55,7 @@ function emptyForm(): GreetingFormState {
   return {
     enabled: true,
     imageUrl: null,
+    videoUrl: null,
     imagePosition: null,
     imageAspect: "landscape",
     title: "",
@@ -71,6 +73,7 @@ function fromGreeting(g: GreetingData): GreetingFormState {
   return {
     enabled: g.enabled,
     imageUrl: g.imageUrl,
+    videoUrl: g.videoUrl,
     imagePosition: g.imagePosition,
     imageAspect: g.imageAspect ?? "landscape",
     title: g.title,
@@ -82,6 +85,14 @@ function fromGreeting(g: GreetingData): GreetingFormState {
     delaySeconds: g.delaySeconds,
     durationSeconds: g.durationSeconds,
   };
+}
+
+type GreetingKind = "message" | "announcement";
+
+/** The widget renders the rich card whenever media or a CTA is present. */
+function kindOf(g: GreetingData | null): GreetingKind {
+  if (!g) return "message";
+  return g.videoUrl || g.imageUrl || g.ctaText ? "announcement" : "message";
 }
 
 function getMediaFrameClass(
@@ -99,7 +110,7 @@ interface GreetingEditorProps {
   onOpenChange: (open: boolean) => void;
   initial: GreetingData | null;
   authors: AuthorOption[];
-  uploadImage: (file: File) => Promise<string>;
+  uploadMedia: (file: File) => Promise<string>;
   onSubmit: (form: GreetingFormState) => Promise<void>;
   onDelete?: () => void | Promise<void>;
   submitting: boolean;
@@ -110,12 +121,13 @@ function GreetingEditor({
   onOpenChange,
   initial,
   authors,
-  uploadImage,
+  uploadMedia,
   onSubmit,
   onDelete,
   submitting,
 }: GreetingEditorProps) {
   const [form, setForm] = useState<GreetingFormState>(emptyForm());
+  const [kind, setKind] = useState<GreetingKind>("message");
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -127,18 +139,41 @@ function GreetingEditor({
     playing: false,
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const posterInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const expandedVideoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     if (open) {
       setForm(initial ? fromGreeting(initial) : emptyForm());
+      setKind(kindOf(initial));
       setVideoPlaying(false);
       setExpandedVideoOpen(false);
       setUploadError(null);
       setSubmitError(null);
     }
   }, [open, initial]);
+
+  // Card shape is derived from the data, so switching clears what the other
+  // kind owns — otherwise a "message" keeping a CTA still renders rich.
+  function selectKind(next: GreetingKind) {
+    if (next === kind) return;
+    setKind(next);
+    setUploadError(null);
+    setForm((prev) =>
+      next === "message"
+        ? {
+            ...prev,
+            imageUrl: null,
+            videoUrl: null,
+            imagePosition: null,
+            ctaText: "",
+            ctaLink: "",
+          }
+        : { ...prev, authorId: null },
+    );
+    setVideoPlaying(false);
+  }
 
   function update<K extends keyof GreetingFormState>(
     key: K,
@@ -176,13 +211,66 @@ function GreetingEditor({
     setExpandedVideoOpen(false);
   }
 
+  // A video goes to videoUrl and leaves imageUrl free to hold its poster.
   async function handleFile(file: File) {
     setUploading(true);
     setUploadError(null);
     try {
-      const url = await uploadImage(file);
-      setForm((prev) => ({ ...prev, imageUrl: url, imagePosition: null }));
+      const url = await uploadMedia(file);
+      const isVideoFile = file.type.startsWith("video/");
+      setForm((prev) => ({
+        ...prev,
+        videoUrl: isVideoFile ? url : null,
+        imageUrl: isVideoFile ? prev.imageUrl : url,
+        imagePosition: null,
+      }));
       setVideoPlaying(false);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  // The preview video is same-origin, so the canvas stays untainted.
+  async function handleUseCurrentFrame() {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.readyState < 2 || !video.videoWidth) {
+      setUploadError("Let the video load, then pick a frame");
+      return;
+    }
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const scale = Math.min(1, 1280 / video.videoWidth);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(video.videoWidth * scale);
+      canvas.height = Math.round(video.videoHeight * scale);
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("no 2d context");
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob(resolve, "image/jpeg", 0.85),
+      );
+      if (!blob) throw new Error("no blob");
+      const url = await uploadMedia(
+        new File([blob], "thumbnail.jpg", { type: "image/jpeg" }),
+      );
+      setForm((prev) => ({ ...prev, imageUrl: url }));
+    } catch {
+      setUploadError("Could not capture this frame");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handlePosterFile(file: File) {
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const url = await uploadMedia(file);
+      setForm((prev) => ({ ...prev, imageUrl: url }));
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Upload failed");
     } finally {
@@ -213,10 +301,10 @@ function GreetingEditor({
     }
   }
 
-  const isRich = Boolean(form.imageUrl) || Boolean(form.ctaText.trim());
-  const isVideo = isGreetingVideoUrl(form.imageUrl);
+  const isVideo = Boolean(form.videoUrl);
+  const hasMedia = Boolean(form.videoUrl ?? form.imageUrl);
   const mediaFrameClass = getMediaFrameClass(
-    Boolean(form.imageUrl),
+    hasMedia,
     isVideo,
     form.imageAspect,
   );
@@ -234,6 +322,36 @@ function GreetingEditor({
         </SheetHeader>
 
         <SheetBody className="px-6 py-5 space-y-5">
+          <div className="grid grid-cols-2 gap-3">
+            {(
+              [
+                {
+                  value: "message",
+                  label: "Message",
+                  hint: "A short note from a teammate.",
+                },
+                {
+                  value: "announcement",
+                  label: "Announcement",
+                  hint: "Media, a headline, and a link.",
+                },
+              ] as const
+            ).map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={kind === option.value}
+                onClick={() => selectKind(option.value)}
+                className="rounded-xl p-3 text-left inset-ring inset-ring-border transition-[box-shadow,background-color] hover:inset-ring-hairline-strong aria-pressed:bg-primary/8 aria-pressed:inset-ring-primary"
+              >
+                <div className="text-sm font-medium">{option.label}</div>
+                <div className="text-xs text-muted-foreground">
+                  {option.hint}
+                </div>
+              </button>
+            ))}
+          </div>
+
           <div className="flex items-center justify-between rounded-xl bg-muted/40 px-4 py-3">
             <div>
               <div className="text-sm font-medium">Enabled</div>
@@ -247,6 +365,7 @@ function GreetingEditor({
             />
           </div>
 
+          {kind === "announcement" ? (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="text-sm font-medium text-foreground">
@@ -279,13 +398,13 @@ function GreetingEditor({
               className={cn(
                 "group/media relative flex items-center justify-center overflow-hidden rounded-xl bg-muted/30",
                 mediaFrameClass,
-                !form.imageUrl &&
+                !hasMedia &&
                   "cursor-pointer transition-colors hover:bg-muted/50",
               )}
-              role={form.imageUrl ? undefined : "button"}
-              tabIndex={form.imageUrl ? undefined : 0}
+              role={hasMedia ? undefined : "button"}
+              tabIndex={hasMedia ? undefined : 0}
               onKeyDown={
-                form.imageUrl
+                hasMedia
                   ? undefined
                   : (event) => {
                       if (event.key === "Enter" || event.key === " ") {
@@ -295,18 +414,17 @@ function GreetingEditor({
                     }
               }
               onClick={
-                form.imageUrl
-                  ? undefined
-                  : () => fileInputRef.current?.click()
+                hasMedia ? undefined : () => fileInputRef.current?.click()
               }
             >
-              {form.imageUrl ? (
+              {hasMedia ? (
                 <>
                   {isVideo ? (
                     <>
                       <video
                         ref={videoRef}
-                        src={form.imageUrl}
+                        src={form.videoUrl ?? undefined}
+                        poster={form.imageUrl ?? undefined}
                         className="h-full w-full object-contain"
                         muted
                         loop
@@ -354,14 +472,15 @@ function GreetingEditor({
                         <Expand className="size-4" />
                       </button>
                     </>
-                  ) : (
+                  ) : null}
+                  {!isVideo && form.imageUrl ? (
                     <ImagePositioner
                       src={form.imageUrl}
                       alt="Greeting"
                       position={form.imagePosition}
                       onChange={(value) => update("imagePosition", value)}
                     />
-                  )}
+                  ) : null}
                   <button
                     type="button"
                     title="Replace media"
@@ -379,6 +498,7 @@ function GreetingEditor({
                       setForm((prev) => ({
                         ...prev,
                         imageUrl: null,
+                        videoUrl: null,
                         imagePosition: null,
                       }));
                       setVideoPlaying(false);
@@ -395,7 +515,7 @@ function GreetingEditor({
                     <Image className="w-6 h-6" />
                   )}
                   <span className="text-xs">
-                    {uploading ? "Uploading..." : "Click to upload image or video"}
+                    {uploading ? "Uploading..." : "Click to upload media"}
                   </span>
                 </div>
               )}
@@ -421,6 +541,102 @@ function GreetingEditor({
               </p>
             )}
           </div>
+          ) : null}
+
+          {kind === "announcement" && isVideo ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-4 rounded-xl bg-muted/30 p-3">
+                <div className="min-w-0 space-y-2">
+                  <div className="text-sm font-medium text-foreground">
+                    Set a thumbnail
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={uploading}
+                      onClick={handleUseCurrentFrame}
+                    >
+                      Use current frame
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={uploading}
+                      onClick={() => posterInputRef.current?.click()}
+                    >
+                      {form.imageUrl ? "Replace" : "Upload"}
+                    </Button>
+                    {form.imageUrl ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={uploading}
+                        onClick={() => update("imageUrl", null)}
+                      >
+                        Remove
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+                <div
+                  className={cn(
+                    "flex aspect-video w-28 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-background/60 text-muted-foreground",
+                    !form.imageUrl &&
+                      "cursor-pointer transition-colors hover:bg-background/80",
+                  )}
+                  role={form.imageUrl ? undefined : "button"}
+                  tabIndex={form.imageUrl ? undefined : 0}
+                  onClick={
+                    form.imageUrl
+                      ? undefined
+                      : () => posterInputRef.current?.click()
+                  }
+                  onKeyDown={
+                    form.imageUrl
+                      ? undefined
+                      : (event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            posterInputRef.current?.click();
+                          }
+                        }
+                  }
+                >
+                  {form.imageUrl ? (
+                    <img
+                      src={form.imageUrl}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                  ) : null}
+                  {!form.imageUrl && uploading ? (
+                    <Upload className="w-4 h-4 animate-pulse" />
+                  ) : null}
+                  {!form.imageUrl && !uploading ? (
+                    <Image className="w-4 h-4" />
+                  ) : null}
+                </div>
+              </div>
+              <input
+                ref={posterInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handlePosterFile(file);
+                  e.target.value = "";
+                }}
+              />
+              <p className="text-xs text-muted-foreground">
+                Shown before the video loads.
+              </p>
+            </div>
+          ) : null}
 
           <div className="space-y-2">
             <label className="text-sm font-medium text-foreground">
@@ -430,18 +646,23 @@ function GreetingEditor({
               type="text"
               value={form.title}
               onChange={(e) => update("title", e.target.value)}
-              placeholder="What's new at Acme"
+              placeholder={
+                kind === "message"
+                  ? "Hi! Need a hand with anything?"
+                  : "What's new at Acme"
+              }
               maxLength={120}
-              className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
             <p className="text-xs text-muted-foreground text-right">
               {form.title.length}/120
             </p>
           </div>
 
+          {kind === "announcement" ? (
           <div className="space-y-2">
             <label className="text-sm font-medium text-foreground">
-              Description{" "}
+              Message{" "}
               <span className="text-muted-foreground font-normal">
                 (optional)
               </span>
@@ -452,13 +673,15 @@ function GreetingEditor({
               placeholder="Tell visitors what changed and why they should care."
               rows={3}
               maxLength={500}
-              className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+              className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
             />
             <p className="text-xs text-muted-foreground text-right">
               {form.description.length}/500
             </p>
           </div>
+          ) : null}
 
+          {kind === "announcement" ? (
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground">
@@ -470,7 +693,7 @@ function GreetingEditor({
                 onChange={(e) => update("ctaText", e.target.value)}
                 placeholder="Read more"
                 maxLength={40}
-                className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
             <div className="space-y-2">
@@ -483,19 +706,17 @@ function GreetingEditor({
                 onChange={(e) => update("ctaLink", e.target.value)}
                 placeholder="https://example.com/changelog"
                 maxLength={2048}
-                className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
           </div>
+          ) : null}
 
-          {!isRich ? (
+          {kind === "message" ? (
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground">
                 Author
               </label>
-              <p className="text-xs text-muted-foreground">
-                Choose who the compact greeting appears to be from.
-              </p>
               <Select
                 value={form.authorId ?? "none"}
                 onValueChange={(value) =>
@@ -653,7 +874,7 @@ function GreetingEditor({
           <DialogTitle className="sr-only">Expanded greeting video</DialogTitle>
           <video
             ref={expandedVideoRef}
-            src={isVideo ? form.imageUrl ?? undefined : undefined}
+            src={form.videoUrl ?? undefined}
             className="max-h-[80vh] w-full rounded-lg object-contain"
             controls
             muted={expandedVideoState.muted}

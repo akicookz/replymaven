@@ -50,7 +50,7 @@ import {
   publicUploadUrl,
   publicUploadUrlForRequest,
 } from "./lib/public-upload-url";
-import { getGreetingMediaType } from "./lib/greeting-media";
+import { resolveGreetingMedia } from "./lib/greeting-media";
 import { AiService } from "./services/ai-service";
 import { executeChannelBotNameCommand } from "./services/run-bot-name-command";
 import { runAgentChannelInbound } from "./services/run-agent-channel-inbound";
@@ -4862,8 +4862,7 @@ const app = new Hono<HonoAppContext>()
     const greetings = rows.map((row) => ({
       id: row.id,
       enabled: row.enabled,
-      imageUrl: row.imageUrl,
-      mediaType: getGreetingMediaType(row.imageUrl),
+      ...resolveGreetingMedia(row),
       imagePosition: row.imagePosition,
       imageAspect: row.imageAspect,
       title: row.title,
@@ -4906,7 +4905,7 @@ const app = new Hono<HonoAppContext>()
 
     const row = await widgetService.createGreeting(project.id, parsed.data);
     return c.json(
-      { ...row, mediaType: getGreetingMediaType(row.imageUrl) },
+      { ...row, ...resolveGreetingMedia(row) },
       201,
     );
   })
@@ -4951,7 +4950,7 @@ const app = new Hono<HonoAppContext>()
       parsed.data,
     );
     if (!updated) return c.json({ error: "Not found" }, 404);
-    return c.json({ ...updated, mediaType: getGreetingMediaType(updated.imageUrl) });
+    return c.json({ ...updated, ...resolveGreetingMedia(updated) });
   })
   .delete("/api/projects/:id/greetings/:greetingId", async (c) => {
     const user = c.get("user");

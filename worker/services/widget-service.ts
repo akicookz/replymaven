@@ -14,7 +14,7 @@ import {
 import { users } from "../db/auth.schema";
 import { ContactFormService } from "./contact-form-service";
 import {
-  getGreetingMediaType,
+  resolveGreetingMedia,
   type GreetingMediaType,
 } from "../lib/greeting-media";
 
@@ -22,6 +22,8 @@ export interface GreetingPublic {
   id: string;
   enabled: boolean;
   imageUrl: string | null;
+  videoUrl: string | null;
+  /** Unused by the current widget; cached bundles in the wild still read it. */
   mediaType: GreetingMediaType | null;
   imagePosition: string | null;
   imageAspect: "landscape" | "square" | null;
@@ -222,6 +224,7 @@ export class WidgetService {
     data: {
       enabled?: boolean;
       imageUrl?: string | null;
+      videoUrl?: string | null;
       imagePosition?: string | null;
       imageAspect?: "landscape" | "square" | null;
       title: string;
@@ -248,6 +251,7 @@ export class WidgetService {
       projectId,
       enabled: data.enabled ?? true,
       imageUrl: data.imageUrl ?? null,
+      videoUrl: data.videoUrl ?? null,
       imagePosition: data.imagePosition ?? null,
       imageAspect: data.imageAspect ?? null,
       title: data.title,
@@ -271,6 +275,7 @@ export class WidgetService {
     updates: {
       enabled?: boolean;
       imageUrl?: string | null;
+      videoUrl?: string | null;
       imagePosition?: string | null;
       imageAspect?: "landscape" | "square" | null;
       title?: string;
@@ -290,6 +295,7 @@ export class WidgetService {
     const setData: Record<string, unknown> = {};
     if (updates.enabled !== undefined) setData.enabled = updates.enabled;
     if (updates.imageUrl !== undefined) setData.imageUrl = updates.imageUrl;
+    if (updates.videoUrl !== undefined) setData.videoUrl = updates.videoUrl;
     if (updates.imagePosition !== undefined)
       setData.imagePosition = updates.imagePosition;
     if (updates.imageAspect !== undefined)
@@ -384,8 +390,7 @@ export class WidgetService {
     return rows.map((row) => ({
       id: row.id,
       enabled: row.enabled,
-      imageUrl: row.imageUrl,
-      mediaType: getGreetingMediaType(row.imageUrl),
+      ...resolveGreetingMedia(row),
       imagePosition: row.imagePosition,
       imageAspect: (row.imageAspect as "landscape" | "square" | null) ?? null,
       title: row.title,

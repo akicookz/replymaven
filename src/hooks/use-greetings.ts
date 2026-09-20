@@ -8,7 +8,8 @@ import {
 
 export type GreetingImageAspect = "landscape" | "square";
 
-const VIDEO_EXTENSIONS = /\.(?:mp4|webm|ogv)(?:$|[?#])/i;
+// Must match worker/lib/greeting-media.ts.
+const VIDEO_EXTENSIONS = /\.(?:mp4|webm|ogv|ogg)(?:$|[?#])/i;
 
 export function isGreetingVideoUrl(url: string | null | undefined): boolean {
   return Boolean(url && VIDEO_EXTENSIONS.test(url));
@@ -17,7 +18,9 @@ export function isGreetingVideoUrl(url: string | null | undefined): boolean {
 export interface GreetingData {
   id: string;
   enabled: boolean;
+  /** Artwork when there is no video, poster frame when there is. */
   imageUrl: string | null;
+  videoUrl: string | null;
   mediaType?: "image" | "video" | null;
   imagePosition: string | null;
   imageAspect: GreetingImageAspect | null;
@@ -35,6 +38,7 @@ export interface GreetingData {
 export interface CreateGreetingInput {
   enabled?: boolean;
   imageUrl?: string | null;
+  videoUrl?: string | null;
   imagePosition?: string | null;
   imageAspect?: GreetingImageAspect | null;
   title: string;
@@ -62,7 +66,7 @@ export interface UseGreetingsResult {
   >;
   remove: UseMutationResult<void, Error, string>;
   reorder: UseMutationResult<void, Error, string[]>;
-  uploadImage: (file: File) => Promise<string>;
+  uploadMedia: (file: File) => Promise<string>;
 }
 
 export function useGreetings(projectId: string): UseGreetingsResult {
@@ -151,7 +155,7 @@ export function useGreetings(projectId: string): UseGreetingsResult {
     onSuccess: invalidate,
   });
 
-  async function uploadImage(file: File): Promise<string> {
+  async function uploadMedia(file: File): Promise<string> {
     const allowedImage = ["image/jpeg", "image/png", "image/webp"].includes(file.type);
     const allowedVideo = ["video/mp4", "video/webm", "video/ogg"].includes(file.type);
     if (!allowedImage && !allowedVideo) {
@@ -181,6 +185,6 @@ export function useGreetings(projectId: string): UseGreetingsResult {
     update,
     remove,
     reorder,
-    uploadImage,
+    uploadMedia,
   };
 }
