@@ -1,8 +1,9 @@
 import type { UIMessage } from "ai";
-import type {
-  PublicMessageAuthor,
-  PublicMessageMetadata,
-  PublicSourceReference,
+import {
+  readMessageAttachments,
+  type PublicMessageAuthor,
+  type PublicMessageMetadata,
+  type PublicSourceReference,
 } from "../../../shared/maven-conversation";
 import { serializeMessageImageUrls } from "../../../shared/message-images";
 import type { Message } from "./types";
@@ -69,7 +70,10 @@ function readMetadata(
     !isNullableNumber(value.emailedAt) ||
     !isNullableString(value.systemKind)
   ) return null;
-  return value as unknown as PublicMessageMetadata;
+  return {
+    ...(value as unknown as PublicMessageMetadata),
+    attachments: readMessageAttachments(value.attachments),
+  };
 }
 
 function readText(parts: UIMessage["parts"]): string {
@@ -104,6 +108,8 @@ function adaptPublicMessage(
     role: metadata.author,
     content: readText(message.parts),
     imageUrl: serializeMessageImageUrls(metadata.imageUrls),
+    attachments: metadata.attachments,
+    origin: metadata.origin ?? null,
     sources: serializeSources(metadata),
     senderName: metadata.senderName,
     senderAvatar: metadata.senderAvatar,

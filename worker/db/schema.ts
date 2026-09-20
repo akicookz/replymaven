@@ -1119,6 +1119,46 @@ export const visitorBans = sqliteTable(
 export type VisitorBanRow = typeof visitorBans.$inferSelect;
 export type NewVisitorBanRow = typeof visitorBans.$inferInsert;
 
+// ─── Project Inbound Addresses ────────────────────────────────────────────────
+
+export const projectInboundAddresses = sqliteTable(
+  "project_inbound_addresses",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    address: text("address").notNull(),
+    label: text("label"),
+    ignored: integer("ignored", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    firstSeenAt: integer("first_seen_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    lastSeenAt: integer("last_seen_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_project_inbound_addresses_project_address").on(
+      table.projectId,
+      table.address,
+    ),
+    index("idx_project_inbound_addresses_project").on(table.projectId),
+  ],
+);
+
+export type ProjectInboundAddressRow = typeof projectInboundAddresses.$inferSelect;
+export type NewProjectInboundAddressRow = typeof projectInboundAddresses.$inferInsert;
+
 // ─── Unified Schema Object ────────────────────────────────────────────────────
 
 export const schema = {
@@ -1149,4 +1189,5 @@ export const schema = {
   greetings,
   helpCategories,
   helpArticles,
+  projectInboundAddresses,
 } as const;

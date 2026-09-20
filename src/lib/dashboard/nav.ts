@@ -30,7 +30,7 @@ export type DashboardNavIcon =
   | "building-2"
   | "message-square"
   | "messages-square"
-  | "wrench"
+  | "cable"
   | "users"
   | "plug"
   | "settings";
@@ -204,7 +204,7 @@ const NAV_RECORDS: NavRecord[] = [
   {
     id: "tools",
     group: "support-chat",
-    icon: "wrench",
+    icon: "cable",
     searchTerms: ["connectors", "tools", "integrations", "mcp"],
     navigationCommandId: "navigate-tools",
     sequenceKey: "t",

@@ -89,6 +89,7 @@ interface AppendPublicMessageFields {
   conversationId: string;
   content: string;
   imageUrls?: string[];
+  attachments?: PublicMessageRecord["attachments"];
   sources?: PublicSourceReference[];
   senderName?: string | null;
   senderAvatar?: string | null;
@@ -97,6 +98,7 @@ interface AppendPublicMessageFields {
   idempotencyKey?: string | null;
   origin?: "widget" | "dashboard" | "telegram" | "slack" | "email" | "mcp" | null;
   externalReplyTo?: string | null;
+  rfcMessageId?: string | null;
 }
 
 export type AppendPublicVisitorInput = AppendPublicMessageFields;
@@ -318,6 +320,7 @@ export interface PublicMessageAttachmentSource {
   author: PublicMessageRecord["author"];
   userId: string | null;
   imageUrls: string[];
+  attachments: PublicMessageRecord["attachments"];
 }
 
 export interface LegacyPublicConversationCreateInput {
@@ -333,6 +336,8 @@ export interface LegacyPublicMessageInput {
   conversationId: string;
   content: string;
   imageUrl?: string | null;
+  imageUrls?: string[];
+  attachments?: PublicMessageRecord["attachments"];
   sources?: string | null;
   senderName?: string | null;
   senderAvatar?: string | null;
@@ -343,6 +348,7 @@ export interface LegacyPublicMessageInput {
   idempotencyKey?: string | null;
   origin?: "widget" | "dashboard" | "telegram" | "slack" | "email" | "mcp" | null;
   externalReplyTo?: string | null;
+  rfcMessageId?: string | null;
 }
 
 export interface PublicConversationStore {
@@ -351,7 +357,11 @@ export interface PublicConversationStore {
   getOperational(projectId: string, conversationId: string): Promise<PublicConversationRecord | null>;
   getActiveByVisitor(projectId: string, visitorId: string): Promise<PublicConversationRecord | null>;
   getLastByVisitor(projectId: string, visitorId: string): Promise<PublicConversationRecord | null>;
-  getRecentByVisitorEmail(projectId: string, email: string): Promise<PublicConversationRecord | null>;
+  getRecentByVisitorEmail(
+    projectId: string,
+    email: string,
+    options?: { openOnly?: boolean; touchedSinceMs?: number },
+  ): Promise<PublicConversationRecord | null>;
   list(query: PublicConversationListQuery): Promise<PublicConversationListResult>;
   bulkApplyActions(projectId: string, conversationIds: string[], action: PublicConversationAction): Promise<PublicBulkConversationActionResult>;
   listNeedsReview(projectId: string, since: number): Promise<PublicConversationRecord[]>;

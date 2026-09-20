@@ -39,6 +39,7 @@ export interface SupportToolDefinition {
 }
 
 export interface SupportPromptOptions {
+  channel?: "widget" | "email";
   guidelines?: Array<{ condition: string; instruction: string }>;
   agentHandbackInstructions?: string | null;
   pageContext?: Record<string, string>;

@@ -67,6 +67,8 @@ export function toLegacyMessageDto(
     role: message.author,
     content: message.content,
     imageUrl: serializeMessageImageUrls(message.imageUrls),
+    attachments: message.attachments,
+    origin: message.origin ?? null,
     sources: serializeSources(message),
     senderName: message.senderName,
     senderAvatar: message.senderAvatar,

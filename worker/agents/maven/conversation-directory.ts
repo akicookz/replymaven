@@ -360,14 +360,29 @@ export class ConversationDirectory {
     return row ? mapDirectoryRow(row) : null;
   }
 
-  getRecentByVisitorEmail(email: string): MavenConversationSummary | null {
+  getRecentByVisitorEmail(
+    email: string,
+    options?: { openOnly?: boolean; touchedSinceMs?: number },
+  ): MavenConversationSummary | null {
+    const conditions = [
+      "visitor_id != ''",
+      "LOWER(TRIM(visitor_email)) = ?",
+      "archived_at IS NULL",
+    ];
+    const bindings: SqlBinding[] = [email.trim().toLowerCase()];
+    if (options?.openOnly) {
+      conditions.push("status != 'closed'");
+    }
+    if (options?.touchedSinceMs != null) {
+      conditions.push("last_activity_at >= ?");
+      bindings.push(options.touchedSinceMs);
+    }
     const row = this.sql.execute<ConversationDirectoryRow>(
       `SELECT * FROM conversation_directory
-       WHERE visitor_id != '' AND LOWER(TRIM(visitor_email)) = ?
-         AND archived_at IS NULL
-       ORDER BY updated_at DESC, conversation_id DESC
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY last_activity_at DESC, conversation_id DESC
        LIMIT 1`,
-      [email.trim().toLowerCase()],
+      bindings,
     )[0];
     return row ? mapDirectoryRow(row) : null;
   }

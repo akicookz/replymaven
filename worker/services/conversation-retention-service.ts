@@ -17,6 +17,7 @@ export interface MessageAttachmentSource {
   role: "visitor" | "bot" | "agent" | "system";
   userId: string | null;
   imageUrl: string | null;
+  attachmentUrls?: string[];
 }
 
 export interface ConversationRetentionStore {
@@ -63,6 +64,11 @@ export function collectOwnedUploadKeys(
       if (!key?.startsWith(conversationPrefix)) continue;
       keys.add(key);
     }
+    for (const url of source.attachmentUrls ?? []) {
+      const key = getLocalUploadKey(url);
+      if (!key?.startsWith(conversationPrefix)) continue;
+      keys.add(key);
+    }
   }
   return [...keys];
 }
@@ -106,6 +112,7 @@ class PublicConversationRetentionStore implements ConversationRetentionStore {
       role: row.author,
       userId: row.userId,
       imageUrl: row.imageUrls.length > 0 ? JSON.stringify(row.imageUrls) : null,
+      attachmentUrls: row.attachments.map((attachment) => attachment.url),
     }));
   }
 

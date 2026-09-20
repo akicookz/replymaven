@@ -102,6 +102,7 @@ export function mapD1MessageRow(row: MessageRow): PublicMessageRecord {
     author: row.role,
     content: row.content,
     imageUrls: parseMessageImageUrls(row.imageUrl),
+    attachments: [],
     sources: parseMessageSources(row.sources),
     senderName: row.senderName,
     senderAvatar: row.senderAvatar,

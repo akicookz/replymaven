@@ -219,6 +219,7 @@ function normalizeRequest(
     author: "visitor",
     content: submitted.content,
     imageUrls: submitted.imageUrls,
+    attachments: [],
     sources: [],
     senderName: null,
     senderAvatar: null,

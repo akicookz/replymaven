@@ -599,6 +599,10 @@ export const updateSlackSchema = z.object({
   slackChannelId: z.string().max(100).optional(),
 });
 
+export const updateInboundAddressSchema = z.object({
+  ignored: z.boolean(),
+});
+
 // ─── API Keys ─────────────────────────────────────────────────────────────────
 export const createApiKeySchema = z.object({
   label: z.string().min(1, "Label is required").max(100),
@@ -695,7 +699,6 @@ export const toolDescriptionSchema = z
 
 export const toolAudienceSchema = z
   .array(z.enum(["public", "sidechat"]))
-  .min(1)
   .max(2)
   .refine((values) => new Set(values).size === values.length, "Duplicate channel");
 

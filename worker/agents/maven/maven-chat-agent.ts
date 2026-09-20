@@ -2219,6 +2219,7 @@ export class MavenChatAgent extends AIChatAgent<
         author: "bot",
         content: input.text,
         imageUrls: [],
+        attachments: [],
         sources: [],
         senderName: input.senderName,
         senderAvatar: null,
@@ -2540,6 +2541,7 @@ export class MavenChatAgent extends AIChatAgent<
           author: "system",
           content: input.system.content,
           imageUrls: [],
+          attachments: [],
           sources: [],
           senderName: null,
           senderAvatar: null,
@@ -2833,6 +2835,7 @@ export class MavenChatAgent extends AIChatAgent<
       author: "system",
       content: input.content,
       imageUrls: [],
+      attachments: [],
       sources: [],
       senderName: null,
       senderAvatar: null,
@@ -2983,6 +2986,7 @@ export class MavenChatAgent extends AIChatAgent<
         author: "system",
         content: acceptance.summary,
         imageUrls: [],
+        attachments: [],
         sources: [],
         senderName: null,
         senderAvatar: null,
@@ -3230,11 +3234,14 @@ export class MavenChatAgent extends AIChatAgent<
   async getAttachmentManifest(): Promise<PublicMessageAttachmentSource[]> {
     this.requirePublicState();
     return this.readPublicMessages()
-      .filter((message) => message.imageUrls.length > 0)
+      .filter((message) =>
+        message.imageUrls.length > 0 || (message.attachments?.length ?? 0) > 0
+      )
       .map((message) => ({
         author: message.author,
         userId: message.userId,
         imageUrls: [...message.imageUrls],
+        attachments: [...(message.attachments ?? [])],
       }));
   }
 
