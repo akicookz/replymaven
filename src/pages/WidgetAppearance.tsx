@@ -163,7 +163,7 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
             type="text"
             value={state.form.headerText ?? ""}
             onChange={(e) => state.updateForm({ headerText: e.target.value })}
-            className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
 
@@ -181,7 +181,7 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
               state.updateForm({ headerSubtitle: e.target.value })
             }
             placeholder="We typically reply instantly"
-            className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
       </WidgetSectionCard>
@@ -339,7 +339,7 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
                   state.updateForm({ homeTitle: e.target.value })
                 }
                 placeholder="How can we help?"
-                className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
 
@@ -359,12 +359,12 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
                   })
                 }
                 placeholder="We typically reply instantly"
-                className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
           </>
         ) : (
-          <div className="px-4 py-3 rounded-xl border border-input bg-background text-sm text-muted-foreground">
+          <div className="px-4 py-3 rounded-lg border border-input bg-background text-sm text-muted-foreground">
             Center inline widgets skip the standalone home screen and open
             directly as an inline chat experience.
           </div>
@@ -457,10 +457,10 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
                   state.updateForm({ backgroundStyle: style.value })
                 }
                 className={cn(
-                  "relative flex flex-col items-center gap-1.5 rounded-xl border-2 p-3 text-center transition-[background-color,border-color,box-shadow]",
+                  "relative flex flex-col items-center gap-1.5 rounded-xl inset-ring p-3 text-center transition-[background-color,box-shadow]",
                   (state.form.backgroundStyle ?? "solid") === style.value
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-muted-foreground/30",
+                    ? "inset-ring-primary bg-primary/5"
+                    : "inset-ring-border hover:inset-ring-muted-foreground/30",
                 )}
               >
                 <div

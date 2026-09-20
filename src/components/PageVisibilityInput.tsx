@@ -74,7 +74,7 @@ function PageVisibilityInput({
             }
           }}
           placeholder={inputPlaceholder}
-          className="flex-1 px-4 py-2.5 rounded-xl border border-input bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
+          className="flex-1 px-4 py-2.5 rounded-lg border border-input bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
         />
         <Button
           type="button"

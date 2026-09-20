@@ -391,7 +391,7 @@ function Resources() {
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder="Resource title"
                     required
-                    className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                   />
                   {formType === "webpage" && (
                     <input
@@ -400,7 +400,7 @@ function Resources() {
                       onChange={(e) => setUrl(e.target.value)}
                       placeholder="https://example.com/page"
                       required
-                      className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                      className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                     />
                   )}
                   {formType === "pdf" && (
@@ -408,10 +408,12 @@ function Resources() {
                       <div
                         onClick={() => fileInputRef.current?.click()}
                         className={cn(
-                          "relative flex flex-col items-center justify-center px-6 py-8 rounded-xl border-2 border-dashed cursor-pointer transition-colors",
+                          // Outline, not a ring: box-shadow cannot be dashed,
+                          // and the dashed edge is the drop-target affordance.
+                          "relative flex flex-col items-center justify-center px-6 py-8 rounded-xl outline-2 outline-dashed -outline-offset-2 cursor-pointer transition-colors",
                           pdfFile
-                            ? "border-primary/50 bg-primary/5"
-                            : "border-input bg-background hover:border-muted-foreground/50",
+                            ? "outline-primary/50 bg-primary/5"
+                            : "outline-input bg-background hover:outline-muted-foreground/50",
                         )}
                       >
                         <Upload

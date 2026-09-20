@@ -218,7 +218,7 @@ function InviteForm({
               type="text"
               value={`${window.location.origin}/app/team/accept/${inviteData.id}`}
               readOnly
-              className="flex-1 px-4 py-2.5 rounded-xl border border-input bg-muted/50 text-foreground text-sm font-mono"
+              className="flex-1 px-4 py-2.5 rounded-lg border border-input bg-muted/50 text-foreground text-sm font-mono"
             />
             <Button
               variant="outline"
@@ -263,7 +263,7 @@ function InviteForm({
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="teammate@company.com"
-            className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
       </div>

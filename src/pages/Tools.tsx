@@ -1305,7 +1305,7 @@ export function ToolsPanel({
                   placeholder="check_order_status"
                   required
                   disabled={!!editingId}
-                  className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+                  className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
                 />
                 <p className="text-xs text-muted-foreground">
                   Lowercase letters, numbers, underscores. Cannot be changed after creation.
@@ -1321,7 +1321,7 @@ export function ToolsPanel({
                   onChange={(e) => setForm((f) => ({ ...f, displayName: e.target.value }))}
                   placeholder="Check Order Status"
                   required
-                  className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               </div>
             </div>
@@ -1336,7 +1336,7 @@ export function ToolsPanel({
                 placeholder="Looks up the current status of a customer order by order ID. Returns tracking info and estimated delivery."
                 required
                 rows={2}
-                className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+                className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
               />
               <p className="text-xs text-muted-foreground">
                 The AI uses this to decide when to call this connector. Be specific about what it does and when to use it.
@@ -1360,7 +1360,7 @@ export function ToolsPanel({
                 <label className="text-xs font-medium text-muted-foreground">Endpoint</label>
                 <div className="flex flex-wrap gap-2 sm:flex-nowrap">
                   <div className="shrink-0">
-                    <div className="flex h-[42px] rounded-xl border border-input bg-background overflow-hidden">
+                    <div className="flex h-[42px] rounded-lg border border-input bg-background overflow-hidden">
                       {(["POST", "GET"] as const).map((m) => (
                         <button
                           key={m}
@@ -1384,7 +1384,7 @@ export function ToolsPanel({
                     onChange={(e) => setForm((f) => ({ ...f, endpoint: e.target.value }))}
                     placeholder="https://api.example.com/orders/status"
                     required
-                    className="order-3 w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring sm:order-none sm:min-w-0 sm:flex-1 sm:w-auto"
+                    className="order-3 w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring sm:order-none sm:min-w-0 sm:flex-1 sm:w-auto"
                   />
                   <Select
                     value={String(form.timeout)}
@@ -1492,7 +1492,7 @@ export function ToolsPanel({
                         value={param.name}
                         onChange={(e) => updateParameter(i, { name: e.target.value })}
                         placeholder="parameter_name"
-                        className="flex-1 px-3 py-1.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring font-mono text-xs"
+                        className="flex-1 px-3 py-1.5 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring font-mono text-xs"
                       />
                       <div className="flex h-[34px] rounded-lg border border-input bg-background overflow-hidden shrink-0">
                         {(["string", "number", "boolean"] as const).map((t) => (
@@ -1532,7 +1532,7 @@ export function ToolsPanel({
                       value={param.description}
                       onChange={(e) => updateParameter(i, { description: e.target.value })}
                       placeholder="Description — helps the AI understand what to provide"
-                      className="w-full px-3 py-1.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring text-muted-foreground"
+                      className="w-full px-3 py-1.5 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring text-muted-foreground"
                     />
                   </div>
                 ))}
@@ -2064,7 +2064,7 @@ export function ToolsPanel({
                                   setTestParams((prev) => ({ ...prev, [param.name]: e.target.value }))
                                 }
                                 placeholder={`${param.type}${param.description ? ` — ${param.description}` : ""}`}
-                                className="flex-1 px-3 py-1.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                                className="flex-1 px-3 py-1.5 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                               />
                             </div>
                           ))}

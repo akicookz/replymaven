@@ -110,7 +110,7 @@ function Step1({
               onChange={(e) => onChange(e.target.value)}
               placeholder="example.com"
               autoFocus
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-input bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-input bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
         </div>
@@ -380,7 +380,7 @@ function Step2({
               setProfile({ ...profile, websiteName: e.target.value })
             }
             placeholder="My Awesome App"
-            className="w-full px-4 py-2.5 rounded-xl border border-input bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            className="w-full px-4 py-2.5 rounded-lg border border-input bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
 
@@ -395,7 +395,7 @@ function Step2({
               setProfile({ ...profile, companyName: e.target.value })
             }
             placeholder="Acme Inc."
-            className="w-full px-4 py-2.5 rounded-xl border border-input bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            className="w-full px-4 py-2.5 rounded-lg border border-input bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
       </div>
@@ -432,7 +432,7 @@ function Step2({
           }
           rows={8}
           placeholder="Describe what your company does, your products/services, pricing, policies, and anything your AI support agent should know..."
-          className="w-full px-4 py-3 rounded-xl border border-input bg-input-background text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+          className="w-full px-4 py-3 rounded-lg border border-input bg-input-background text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none"
         />
         <p className="text-xs text-muted-foreground">
           This context helps your AI agent answer questions accurately.

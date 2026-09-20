@@ -170,7 +170,7 @@ function FaqGenerateModal({
               onChange={(e) => setTopic(e.target.value.slice(0, 500))}
               placeholder="Shipping & returns"
               rows={2}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-full px-3.5 py-2.5 rounded-lg border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
               disabled={generate.isPending}
             />
             <div className="flex justify-end text-xs text-muted-foreground">

@@ -614,7 +614,7 @@ function FaqEditor({
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         placeholder="FAQ collection title (e.g., Shipping & Returns)"
-        className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
       />
 
       <div className="space-y-1.5">
@@ -645,7 +645,7 @@ function FaqEditor({
           }
           placeholder="Use when the visitor asks about shipping rates, delivery times, or returns."
           rows={2}
-          className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+          className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
         />
         {descriptionSuggestion && (
           <div className="flex items-start gap-2 p-2.5 rounded-xl bg-primary/5">

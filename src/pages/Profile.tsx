@@ -154,7 +154,7 @@ function EmailChangeSection({ currentEmail }: { currentEmail: string }) {
                 setError(null);
               }}
               placeholder="000000"
-              className="w-36 px-4 py-2.5 rounded-xl border border-input bg-background text-foreground text-center font-mono text-lg tracking-[0.3em] placeholder:text-muted-foreground placeholder:tracking-[0.3em] focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-36 px-4 py-2.5 rounded-lg border border-input bg-background text-foreground text-center font-mono text-lg tracking-[0.3em] placeholder:text-muted-foreground placeholder:tracking-[0.3em] focus:outline-none focus:ring-2 focus:ring-ring"
               autoFocus
             />
             <Button
@@ -228,7 +228,7 @@ function EmailChangeSection({ currentEmail }: { currentEmail: string }) {
               setError(null);
             }}
             placeholder="you@example.com"
-            className="flex-1 px-4 py-2.5 rounded-xl border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            className="flex-1 px-4 py-2.5 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
           {canVerify && (
             <Button
@@ -416,7 +416,7 @@ function Profile() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Your name"
-            className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
 
@@ -431,7 +431,7 @@ function Profile() {
             value={workTitle}
             onChange={(e) => setWorkTitle(e.target.value)}
             placeholder="e.g. Support Engineer, CEO"
-            className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
 

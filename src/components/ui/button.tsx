@@ -24,10 +24,12 @@ const buttonVariants = cva(
         "glow-secondary":
           "glow-surface-subtle text-brand-soft",
       },
+      // Radius tracks height so every control keeps the same corner ratio
+      // (~0.3 of height). Do not collapse these onto one value.
       size: {
         default: "h-9 px-4 py-2",
         sm: "h-8 rounded-md px-3 text-[13px]",
-        lg: "h-10 rounded-lg px-6",
+        lg: "h-10 px-6",
         icon: "h-9 w-9",
       },
     },

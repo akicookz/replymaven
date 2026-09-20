@@ -222,7 +222,7 @@ function FaqSplitModal({
                           updateBucketField(bIdx, "title", e.target.value)
                         }
                         placeholder="Bucket title"
-                        className="w-full px-3 py-2 rounded-xl border border-input bg-background text-sm font-medium focus:outline-none focus:ring-2 focus:ring-ring"
+                        className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm font-medium focus:outline-none focus:ring-2 focus:ring-ring"
                       />
                       <textarea
                         value={bucket.description}
@@ -238,7 +238,7 @@ function FaqSplitModal({
                         }
                         placeholder="When to refer to this FAQ"
                         rows={2}
-                        className="w-full px-3 py-2 rounded-xl border border-input bg-background text-xs resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+                        className="w-full px-3 py-2 rounded-lg border border-input bg-background text-xs resize-none focus:outline-none focus:ring-2 focus:ring-ring"
                       />
                       <div
                         className={`flex justify-between text-xs ${

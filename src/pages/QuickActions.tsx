@@ -436,7 +436,7 @@ function ActionsTab({
               onChange={(e) => setNewLabel(e.target.value)}
               placeholder="Label"
               required
-              className="flex-1 px-3 py-2 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              className="flex-1 px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
             {(newType === "prompt" || newType === "link") && (
               <input
@@ -445,7 +445,7 @@ function ActionsTab({
                 onChange={(e) => setNewAction(e.target.value)}
                 placeholder={newType === "link" ? "https://example.com" : "Pre-filled message"}
                 required
-                className="flex-1 px-3 py-2 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="flex-1 px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             )}
           </div>
@@ -671,7 +671,7 @@ function ActionsTab({
                                 }
                                 placeholder="We'll get back to you within 1-2 hours."
                                 rows={2}
-                                className="w-full px-3 py-2 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+                                className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
                               />
                             </div>
 
