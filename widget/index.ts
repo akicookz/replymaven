@@ -400,12 +400,6 @@ import {
       height: 22px;
       stroke-width: 1.5;
     }
-    .rm-trigger-avatar {
-      width: 100%;
-      height: 100%;
-      border-radius: 50%;
-      object-fit: cover;
-    }
     .rm-trigger .rm-icon-chat,
     .rm-trigger .rm-icon-close {
       position: absolute;
@@ -480,11 +474,15 @@ import {
       display: flex;
       left: 50%;
       right: auto;
-      bottom: var(--rm-panel-bottom);
+      /* --rm-inline-float-h is measured in JS; the float row above the composer
+         varies with how many quick-action topics and chips are rendered. */
+      bottom: calc(var(--rm-panel-bottom) + var(--rm-inline-float-h, 0px));
       width: min(300px, calc(100vw - 40px));
       max-width: 300px;
       align-items: stretch;
       transform: translateX(-50%);
+      transition: width .35s cubic-bezier(.4,0,.2,1),
+                  bottom .35s cubic-bezier(.4,0,.2,1);
     }
     .rm-widget-container.center-inline .rm-greeting-stack.expanded {
       width: min(560px, calc(100vw - 40px));
@@ -498,6 +496,7 @@ import {
     .rm-widget-container.center-inline.inline-width-expanded .rm-greeting-stack:not(.expanded) .rm-greeting-card {
       width: 360px;
       max-width: 100%;
+      transition: width .35s cubic-bezier(.4,0,.2,1), opacity .35s ease, transform .35s ease, max-height .35s ease;
     }
     .rm-widget-container.center-inline.inline-width-expanded .rm-greeting-stack:not(.expanded) .rm-greeting-card.compact {
       width: 320px;
@@ -613,12 +612,17 @@ import {
       cursor: pointer;
       z-index: 2;
     }
-    .rm-greeting-video:not(.playing):hover .rm-video-center-play,
-    .rm-greeting-video:not(.playing) .rm-video-center-play:focus-visible,
-    .rm-message-video:not(.playing):hover .rm-video-center-play,
-    .rm-message-video:not(.playing) .rm-video-center-play:focus-visible {
+    /* A video reads as a still image until the play affordance is visible, so
+       it stays up whenever playback is stopped rather than only on hover. */
+    .rm-greeting-video:not(.playing) .rm-video-center-play,
+    .rm-message-video:not(.playing) .rm-video-center-play {
       opacity: 1;
       transform: translate(-50%, -50%) scale(1);
+    }
+    .rm-greeting-video:not(.playing):hover .rm-video-center-play,
+    .rm-message-video:not(.playing):hover .rm-video-center-play {
+      background: rgba(15,23,42,0.72);
+      transform: translate(-50%, -50%) scale(1.06);
     }
     .rm-greeting-video.playing .rm-video-center-play,
     .rm-message-video.playing .rm-video-center-play { opacity: 0; pointer-events: none; }
@@ -896,7 +900,7 @@ import {
     .rm-greeting-cta {
       align-self: stretch;
       margin-top: 10px;
-      min-height: 40px;
+      min-height: 34px;
       padding: 0 16px;
       border-radius: var(--rm-btn-radius, 10px);
       background: var(--rm-primary, #2563eb);
@@ -1308,190 +1312,6 @@ import {
       }
     }
 
-    /* ─── Tool Call Card ──────────────────────────────────────────────────── */
-    .rm-tool-call {
-      align-self: flex-start;
-      padding: 0 16px;
-      margin: 4px 0;
-      max-width: 88%;
-    }
-    .rm-tool-call-card {
-      border-radius: 8px;
-      border: 1px solid var(--rm-border-subtle);
-      background: var(--rm-bg-secondary);
-      overflow: hidden;
-    }
-    .rm-tool-call-header {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 8px 10px;
-      cursor: pointer;
-      user-select: none;
-      font-size: 12px;
-      color: var(--rm-text-secondary);
-    }
-    .rm-tool-call-header:hover {
-      background: var(--rm-bg-tertiary);
-    }
-    .rm-tool-call-icon {
-      width: 20px;
-      height: 20px;
-      border-radius: 4px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-    }
-    .rm-tool-call-icon svg {
-      width: 12px;
-      height: 12px;
-    }
-    .rm-tool-call-icon.pending {
-      background: rgba(59,130,246,0.15);
-      color: #60a5fa;
-    }
-    .rm-tool-call-icon.success {
-      background: rgba(34,197,94,0.15);
-      color: #4ade80;
-    }
-    .rm-tool-call-icon.error {
-      background: rgba(239,68,68,0.15);
-      color: #f87171;
-    }
-    .rm-tool-call-name {
-      flex: 1;
-      min-width: 0;
-      font-weight: 500;
-      color: var(--rm-text);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .rm-tool-call-meta {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex-shrink: 0;
-      font-size: 10px;
-    }
-    .rm-tool-call-status {
-      padding: 1px 6px;
-      border-radius: 10px;
-      font-weight: 500;
-      font-size: 10px;
-    }
-    .rm-tool-call-status.success {
-      background: rgba(34,197,94,0.15);
-      color: #4ade80;
-    }
-    .rm-tool-call-status.error {
-      background: rgba(239,68,68,0.15);
-      color: #f87171;
-    }
-    .rm-tool-call-status.pending {
-      background: rgba(59,130,246,0.15);
-      color: #60a5fa;
-    }
-    .rm-tool-call-duration {
-      color: var(--rm-text-muted);
-    }
-    .rm-tool-call-chevron {
-      width: 12px;
-      height: 12px;
-      flex-shrink: 0;
-      color: var(--rm-text-muted);
-      transition: transform 0.15s ease;
-    }
-    .rm-tool-call.expanded .rm-tool-call-chevron {
-      transform: rotate(90deg);
-    }
-    .rm-tool-call-details {
-      max-height: 0;
-      overflow: hidden;
-      transition: max-height 0.2s ease-out;
-    }
-    .rm-tool-call.expanded .rm-tool-call-details {
-      max-height: 400px;
-    }
-    .rm-tool-call-section {
-      padding: 6px 10px;
-      border-top: 1px solid var(--rm-border-subtle);
-    }
-    .rm-tool-call-section-label {
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--rm-text-muted);
-      margin-bottom: 4px;
-    }
-    .rm-tool-call-code {
-      background: var(--rm-bg-tertiary);
-      border-radius: 6px;
-      padding: 6px 8px;
-      font-family: monospace;
-      font-size: 11px;
-      color: var(--rm-text-secondary);
-      white-space: pre-wrap;
-      word-break: break-all;
-      max-height: 120px;
-      overflow-y: auto;
-    }
-    .rm-tool-call-error-msg {
-      font-size: 11px;
-      color: #f87171;
-      margin-bottom: 4px;
-    }
-    @keyframes rm-pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
-    .rm-tool-call-loading {
-      animation: rm-pulse 1.5s ease-in-out infinite;
-    }
-
-    /* ─── Tool Error (legacy compat) ─────────────────────────────────────── */
-    .rm-tool-error {
-      align-self: flex-start;
-      padding: 0 16px;
-      margin: 2px 0;
-      max-width: 88%;
-    }
-    .rm-tool-error-header {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      cursor: pointer;
-      font-size: 12px;
-      color: #fca5a5;
-      user-select: none;
-    }
-    .rm-tool-error-header svg {
-      width: 12px;
-      height: 12px;
-      flex-shrink: 0;
-      transition: transform 0.15s ease;
-    }
-    .rm-tool-error.expanded .rm-tool-error-header svg {
-      transform: rotate(180deg);
-    }
-    .rm-tool-error-detail {
-      max-height: 0;
-      overflow: hidden;
-      transition: max-height 0.2s ease-out;
-      font-size: 11px;
-      color: #fecaca;
-      background: rgba(220,38,38,0.15);
-      border-radius: 6px;
-      padding: 0;
-      margin-top: 0;
-    }
-    .rm-tool-error.expanded .rm-tool-error-detail {
-      max-height: 200px;
-      padding: 6px 8px;
-      margin-top: 4px;
-    }
-
     /* ─── Quick Topics ────────────────────────────────────────────────────── */
     .rm-quick-topics {
       padding: 8px 16px 4px;
@@ -1889,34 +1709,6 @@ import {
     .rm-home-avatar svg {
       width: 22px;
       height: 22px;
-    }
-    .rm-home-close {
-      position: absolute;
-      top: 14px;
-      right: 14px;
-      width: 32px;
-      height: 32px;
-      border: none;
-      border-radius: 50%;
-      /* Desktop closes via the floating launcher; only needed on mobile where
-         the launcher is hidden behind the fullscreen panel. */
-      display: none;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      background: rgba(0,0,0,0.35);
-      color: #ffffff;
-      backdrop-filter: blur(4px);
-      -webkit-backdrop-filter: blur(4px);
-      transition: background 0.2s;
-      z-index: 2;
-    }
-    .rm-home-close:hover {
-      background: rgba(0,0,0,0.5);
-    }
-    .rm-home-close svg {
-      width: 16px;
-      height: 16px;
     }
     .rm-home-body {
       padding: 32px 20px 16px;
@@ -2333,38 +2125,6 @@ import {
     }
 
     /* Quick action bar in home */
-    .rm-home-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 16px;
-    }
-    .rm-home-action-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 9px 16px;
-      border-radius: min(var(--rm-btn-radius), 50%);
-      border: 1px solid var(--rm-border);
-      background: var(--rm-bg-secondary);
-      font-size: 14px;
-      font-weight: 500;
-      line-height: 1;
-      letter-spacing: 0;
-      cursor: pointer;
-      transition: background 0.2s, border-color 0.2s;
-      color: var(--rm-text);
-      font-family: inherit;
-    }
-    .rm-home-action-btn:hover {
-      background: var(--rm-bg-tertiary);
-      border-color: var(--rm-bg-tertiary);
-    }
-    .rm-home-action-btn svg {
-      width: 14px;
-      height: 14px;
-    }
-
     /* ─── Animations ──────────────────────────────────────────────────────── */
     @keyframes rm-ask-sweep {
       0% { background-position: 200% center; }
@@ -2395,21 +2155,6 @@ import {
     }
 
     /* ─── Responsive ──────────────────────────────────────────────────────── */
-    .rm-back-btn {
-      margin-top: 24px;
-      padding: 10px 24px;
-      border: 1px solid var(--rm-border);
-      border-radius: min(var(--rm-input-radius), 50%);
-      background: var(--rm-bg-secondary);
-      font-size: 14px;
-      font-weight: 500;
-      line-height: 1;
-      letter-spacing: 0;
-      color: var(--rm-text);
-      cursor: pointer;
-      transition: background 0.15s;
-    }
-    .rm-back-btn:hover { background: var(--rm-bg-tertiary); }
 
     @media (max-width: 480px) {
       .rm-widget-container { --rm-panel-bottom: 84px; --rm-panel-side: 12px; --rm-panel-top: 12px; }
@@ -2733,14 +2478,15 @@ import {
                   visibility 0.3s;
     }
     .rm-widget-container.center-inline .rm-chat-window:not(.expanded) {
-      min-height: 0;
+      min-height: min(340px, var(--rm-panel-max-height));
     }
     .rm-widget-container.center-inline .rm-chat-window:not(.expanded) .rm-chat-view {
-      flex: 0 1 auto;
+      flex: 1 1 auto;
+      min-height: 0;
     }
     .rm-widget-container.center-inline .rm-chat-window:not(.expanded) .rm-messages {
-      flex: 0 1 auto;
-      min-height: 0;
+      flex: 1 1 auto;
+      min-height: 120px;
       max-height: calc(var(--rm-panel-max-height) - 120px);
     }
     .rm-widget-container.center-inline .rm-chat-window.open {
@@ -2848,7 +2594,7 @@ import {
         height: auto;
         max-width: none;
         max-height: var(--rm-panel-max-height);
-        min-height: 0;
+        min-height: min(340px, var(--rm-panel-max-height));
         border-radius: 18px;
         box-shadow: var(--rm-shadow);
         transform: translateY(16px);
@@ -2897,9 +2643,6 @@ import {
         font-size: 16px !important;
       }
       .rm-home-ask-input {
-        font-size: 16px !important;
-      }
-      .rm-handoff-email-input {
         font-size: 16px !important;
       }
     }
@@ -3300,7 +3043,9 @@ import {
   interface GreetingPublic {
     id: string;
     enabled: boolean;
+    /** Artwork when there is no video, poster frame when there is. */
     imageUrl: string | null;
+    videoUrl?: string | null;
     mediaType?: "image" | "video" | null;
     imagePosition: string | null;
     imageAspect?: "landscape" | "square" | null;
@@ -3349,17 +3094,15 @@ import {
   let lastVideoFocus: HTMLElement | null = null;
 
   function isVideoUrl(value: string): boolean {
-    return /\.(mp4|webm|ogv)(?:$|[?#])/i.test(value);
+    // Must match worker/lib/greeting-media.ts.
+    return /\.(mp4|webm|ogv|ogg)(?:$|[?#])/i.test(value);
   }
 
   function getGreetingVideoUrl(greeting: GreetingPublic): string | null {
-    if (
-      greeting.mediaType === "video" &&
-      typeof greeting.imageUrl === "string" &&
-      greeting.imageUrl.trim()
-    ) {
-      return greeting.imageUrl.trim();
+    if (typeof greeting.videoUrl === "string" && greeting.videoUrl.trim()) {
+      return greeting.videoUrl.trim();
     }
+    // Rows written before video_url existed kept the video in imageUrl.
     if (typeof greeting.imageUrl === "string" && isVideoUrl(greeting.imageUrl)) {
       return greeting.imageUrl;
     }
@@ -3486,6 +3229,7 @@ import {
     url: string,
     className: string,
     aspect: "landscape" | "square" | null,
+    posterUrl?: string | null,
   ): HTMLElement {
     const player = document.createElement("div");
     player.className = className;
@@ -3494,6 +3238,7 @@ import {
 
     const video = document.createElement("video");
     video.src = resolveUrl(url);
+    if (posterUrl) video.poster = resolveUrl(posterUrl);
     video.preload = "metadata";
     video.playsInline = true;
     video.setAttribute("aria-label", "Greeting video");
@@ -3759,6 +3504,22 @@ import {
     );
   }
 
+  // The float row (topics + action chips) sits above the composer and the
+  // greeting stack is anchored to the same viewport edge, so the stack has to
+  // be pushed up by however tall the float actually is.
+  function syncInlineFloatOffset(): void {
+    if (!isInlineBarVariant) return;
+    const floatVisible =
+      inlineBar.classList.contains("expanded") &&
+      !inlineBar.classList.contains("chat-active") &&
+      !inlineBar.classList.contains("hidden");
+    const floatHeight = floatVisible ? inlineBarFloat.offsetHeight : 0;
+    container.style.setProperty(
+      "--rm-inline-float-h",
+      floatHeight > 0 ? `${floatHeight + 10}px` : "0px",
+    );
+  }
+
   function expandInlineBar() {
     if (inlineBarExpanded) return;
     inlineBarExpanded = true;
@@ -3773,6 +3534,7 @@ import {
     inlineBarInput.focus();
     stopPlaceholderRotation();
     updateInlineBarBtn();
+    syncInlineFloatOffset();
   }
 
   function collapseInlineBar() {
@@ -3786,6 +3548,7 @@ import {
     inlineBarPlaceholder.style.display = "";
     startPlaceholderRotation();
     updateInlineBarBtn();
+    syncInlineFloatOffset();
   }
 
   function updateInlineBarBtn() {
@@ -5844,10 +5607,6 @@ import {
     }
   }
 
-  // ─── Tool Error Display ────────────────────────────────────────────────────
-
-  // ─── Handoff Card ───────────────────────────────────────────────────────────
-
   // ─── Native Agent Transcript ───────────────────────────────────────────────
 
   function updateRenderedPublicMessage(message: PublicMessageRecord): void {
@@ -6499,7 +6258,12 @@ import {
 
     if (videoUrl) {
       card.appendChild(
-        createVideoPlayer(videoUrl, "rm-greeting-video", greeting.imageAspect ?? null),
+        createVideoPlayer(
+          videoUrl,
+          "rm-greeting-video",
+          greeting.imageAspect ?? null,
+          greeting.imageUrl,
+        ),
       );
     } else if (greeting.imageUrl) {
       const img = document.createElement("img");
@@ -6554,10 +6318,6 @@ import {
         ? greeting.title
         : (greeting.description ?? "");
     if (desc.textContent) text.appendChild(desc);
-
-    if (isRich && greeting.description) {
-      // already added above when author check fails
-    }
 
     body.appendChild(text);
 
@@ -6917,6 +6677,7 @@ import {
       if (!inlineBarExpanded) expandInlineBar();
       inlineBar.classList.add("chat-active");
       updateInlineBarBtn();
+      syncInlineFloatOffset();
       // On mobile, hide the inline bar since chat goes full-screen with its own input
       if (isMobileViewport()) {
         inlineBar.classList.add("hidden");
@@ -6948,6 +6709,7 @@ import {
       inlineBar.classList.remove("hidden");
       inlineBar.classList.remove("chat-active");
       collapseInlineBar();
+      syncInlineFloatOffset();
     }
     // Re-render greetings (skip dismissed ones) when no active conversation.
     if (!conversationId) {
