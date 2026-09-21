@@ -6263,6 +6263,18 @@ import {
     }
   }
 
+  function clearDismissedGreetingId(id: string): void {
+    const remaining = getDismissedGreetingIds().filter((v) => v !== id);
+    try {
+      localStorage.setItem(
+        getStorageKey("greetings_dismissed"),
+        JSON.stringify(remaining),
+      );
+    } catch {
+      // localStorage may be unavailable
+    }
+  }
+
   function isGreetingDismissed(id: string): boolean {
     return getDismissedGreetingIds().includes(id);
   }
@@ -6320,6 +6332,7 @@ import {
     card.classList.add("visible");
   }
 
+  /** Shows a card. Clears its stored dismissal, so this undoes close(). */
   function openGreetingById(id: string): boolean {
     const greeting = greetingsList.find((g) => g.id === id);
     if (!greeting || !greeting.enabled) return false;
@@ -6335,6 +6348,7 @@ import {
       hiddenByPageTargeting = false;
     }
 
+    clearDismissedGreetingId(id);
     let card = findGreetingCard(id);
     if (!card) {
       renderGreetings({ includeId: id });
@@ -6342,22 +6356,54 @@ import {
     }
     if (!card) return false;
 
-    collapseExpandedGreetings(id);
     revealGreetingNow(card, id);
-    if (isRichGreeting(greeting)) {
-      card.classList.add("expanded");
-      greetingStack.classList.add("expanded");
-    }
     return true;
+  }
+
+  /** Shows the whole stack, ignoring dismissals but not clearing them. */
+  function openGreetingStack(): boolean {
+    if (isOpen || isBanned || hiddenByPageTargeting) return false;
+    renderGreetings({ force: true });
+    return greetingStack.children.length > 0;
   }
 
   function toggleGreetingById(id: string): boolean {
     const card = findGreetingCard(id);
-    if (card?.classList.contains("expanded")) {
-      collapseExpandedGreetings();
+    if (card?.classList.contains("visible")) {
+      // Transient hide: toggling back shows it again, unlike close().
+      dismissGreetingCard(card, id, false);
       return false;
     }
     return openGreetingById(id);
+  }
+
+  function toggleGreetingStack(): boolean {
+    const showing = greetingStack.querySelector(
+      ".rm-greeting-card:not(.dismissed)",
+    );
+    if (showing) {
+      hideGreetingStack();
+      return false;
+    }
+    return openGreetingStack();
+  }
+
+  /** Sizes one card. Collapsing others keeps the stack readable. */
+  function expandGreetingById(id: string, expanded: boolean): boolean {
+    const greeting = greetingsList.find((g) => g.id === id);
+    const card = findGreetingCard(id);
+    if (!greeting || !card) return false;
+    if (expanded && !isRichGreeting(greeting)) return false;
+
+    card.classList.toggle("expanded", expanded);
+    if (expanded) collapseExpandedGreetings(id);
+    greetingStack.classList.toggle(
+      "expanded",
+      Boolean(
+        greetingStack.querySelector(".rm-greeting-card.expanded:not(.dismissed)"),
+      ),
+    );
+    return true;
   }
 
   function dismissGreetingById(id?: string): void {
@@ -6883,34 +6929,27 @@ import {
     return WIDGET_SCREENS.find((screen) => screen === value);
   }
 
-  function openScreen(screen?: WidgetScreen, args?: ScreenArgs): void {
-    screen = readScreen(screen);
+  /** true when the call did what it says; false when it was refused. */
+  function openScreen(screenInput?: WidgetScreen, args?: ScreenArgs): boolean {
+    const screen = readScreen(screenInput);
     if (screen === "greetings") {
-      if (args?.id) {
-        openGreetingById(args.id);
-      } else {
-        renderGreetings({ force: true });
-      }
-      return;
+      return args?.id ? openGreetingById(args.id) : openGreetingStack();
     }
     openChatWidget(screen);
+    return isOpen;
   }
 
-  function toggleScreen(screen?: WidgetScreen, args?: ScreenArgs): void {
-    screen = readScreen(screen);
+  function toggleScreen(screenInput?: WidgetScreen, args?: ScreenArgs): boolean {
+    const screen = readScreen(screenInput);
     if (screen === "greetings") {
-      if (args?.id) {
-        toggleGreetingById(args.id);
-      } else {
-        renderGreetings({ force: true });
-      }
-      return;
+      return args?.id ? toggleGreetingById(args.id) : toggleGreetingStack();
     }
     toggleChatWidget(screen);
+    return isOpen;
   }
 
-  function closeScreen(screen?: WidgetScreen, args?: ScreenArgs): void {
-    screen = readScreen(screen);
+  function closeScreen(screenInput?: WidgetScreen, args?: ScreenArgs): void {
+    const screen = readScreen(screenInput);
     if (screen === "greetings") {
       dismissGreetingById(args?.id);
       return;
@@ -6918,13 +6957,21 @@ import {
     closeChatWidget();
   }
 
+  /** Sizes the panel, or one greeting card when given an id. */
+  function setExpanded(expanded: boolean, args?: ScreenArgs): boolean {
+    if (args?.id) return expandGreetingById(args.id, expanded);
+    if (isInlineBarVariant) return false;
+    setPanelExpanded(expanded);
+    return true;
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).ReplyMaven = {
     open: openScreen,
     toggle: toggleScreen,
     close: closeScreen,
-    expand: () => setPanelExpanded(true),
-    shrink: () => setPanelExpanded(false),
+    expand: (args?: ScreenArgs) => setExpanded(true, args),
+    shrink: (args?: ScreenArgs) => setExpanded(false, args),
     sendMessage: (text: string) => {
       openChatWidget("chat");
       handleSendMessage(text);

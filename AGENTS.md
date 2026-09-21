@@ -887,14 +887,18 @@ The script creates an iframe or shadow DOM element containing the chat UI. It ex
 
 ```javascript
 // screen: "home" | "chat" | "form" | "greetings"
+// open and toggle return false when the call was refused; close returns void.
 window.ReplyMaven.open()                            // auto-routes: chat if live, else home
 window.ReplyMaven.open("form")
-window.ReplyMaven.open("greetings", { id })         // reveal now, expand if the card is rich
-window.ReplyMaven.toggle("chat")                    // same screen closes, a different one switches
+window.ReplyMaven.open("greetings", { id })         // show that card, clearing its dismissal
+window.ReplyMaven.toggle("chat")                    // show if hidden, hide if showing
+window.ReplyMaven.toggle("greetings", { id })       // same rule, per card
 window.ReplyMaven.close()                           // close the panel
 window.ReplyMaven.close("greetings", { id })        // dismiss one card; no id dismisses all
 window.ReplyMaven.expand()                          // widen the panel (the header menu's Expand)
 window.ReplyMaven.shrink()
+window.ReplyMaven.expand({ id })                    // enlarge one greeting card
+window.ReplyMaven.shrink({ id })
 window.ReplyMaven.sendMessage("Hello")
 window.ReplyMaven.identify({ name: "John", email: "john@example.com" })
 await window.ReplyMaven.identify({ token })
@@ -1025,8 +1029,9 @@ Proactive cards shown above the launcher before any conversation exists.
 - `delaySeconds` controls the reveal, `durationSeconds` the auto-hide. Auto-hide does not persist; an explicit dismissal writes the id to `localStorage` under the `greetings_dismissed` key.
 - `allowedPages` targets the card to specific pages, matched client-side against the current URL.
 - An unseen-reply preview always outranks greetings. Both stacks occupy the same coordinates and a real support reply is the more urgent card.
-- `open("greetings")` re-renders ignoring dismissals; `open("greetings", { id })` reveals one card now, skipping its delay and cancelling its auto-hide, and expands it when the card is rich. Only one card is expanded at a time. `close("greetings", { id })` dismisses one, `close("greetings")` all.
-- `toggle("greetings", { id })` collapses the card when it is the expanded one and switches to it otherwise. A compact card has no expanded state, so toggling one only reveals it; use `close("greetings", { id })` to remove it.
+- `open("greetings")` re-renders ignoring dismissals. `open("greetings", { id })` shows one card now, skipping its delay, cancelling its auto-hide, and clearing its stored dismissal, so it is the exact inverse of `close("greetings", { id })`.
+- `toggle` means show/hide everywhere, including per card. Sizing is `expand`/`shrink`: with no argument they size the panel, with `{ id }` they size one greeting card. Only a rich card can be enlarged, and enlarging one collapses any other.
+- `close("greetings", { id })` dismisses one card and persists it, `close("greetings")` all of them. A hide through `toggle` is transient and is not written to storage.
 - `"greetings"` is the card stack above the launcher, not a panel screen yet. The name is already plural so it survives the move into the panel.
 - `widget-service.ts` back-derives the legacy `introMessage`, `introMessageAuthor`, `introMessageDelay`, and `introMessageDuration` config fields from the first greeting so widget bundles still in the wild keep working.
 
