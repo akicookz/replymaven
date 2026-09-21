@@ -14,7 +14,7 @@ import {
   RefreshCw,
   Search,
   Trash2,
-  Wrench,
+  Server,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -80,12 +80,8 @@ interface McpConnectionsProps {
 }
 
 interface ConnectInput {
-  presetKey?: string;
-  name?: string;
-  url?: string;
+  presetKey: string;
   authMode: McpAuthMode;
-  bearerToken?: string;
-  headers?: Record<string, string>;
 }
 
 interface ToolPolicyInput {
@@ -103,34 +99,6 @@ interface PolicyMutationInput {
 async function parseError(response: Response, fallback: string): Promise<Error> {
   const body = await response.json().catch(() => null) as { error?: string } | null;
   return new Error(body?.error ?? fallback);
-}
-
-function parseHeaders(value: string): Record<string, string> | null {
-  const headers: Record<string, string> = {};
-  for (const rawLine of value.split("\n")) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    const separator = line.indexOf(":");
-    if (separator <= 0) return null;
-    const key = line.slice(0, separator).trim();
-    const headerValue = line.slice(separator + 1).trim();
-    if (
-      !key ||
-      !headerValue ||
-      Object.prototype.hasOwnProperty.call(headers, key)
-    ) {
-      return null;
-    }
-    headers[key] = headerValue;
-  }
-  return Object.keys(headers).length > 0 ? headers : null;
-}
-
-function authLabel(mode: McpAuthMode): string {
-  if (mode === "oauth") return "OAuth";
-  if (mode === "bearer") return "Bearer token";
-  if (mode === "headers") return "Custom headers";
-  return "No authentication";
 }
 
 function policyFromConnection(connection: McpConnection): ToolPolicyInput[] {
@@ -161,12 +129,24 @@ function connectionCardStatus(
   connection: McpConnection | undefined,
   settling: boolean,
   reconnecting: boolean,
-): "Connected" | "Connecting" | "Reconnecting" | "Reconnect" | "Connect" {
+): "Configure" | "Connecting" | "Reconnecting" | "Reconnect" | "Connect" {
   if (reconnecting) return "Reconnecting";
-  if (isMcpLinked(connection)) return "Connected";
   if (settling) return "Connecting";
+  if (isMcpLinked(connection)) return "Configure";
   if (connection?.authMode === "oauth") return "Reconnect";
   return "Connect";
+}
+
+function policiesMatch(left: ToolPolicyInput[], right: ToolPolicyInput[]): boolean {
+  if (left.length !== right.length) return false;
+  const rightByName = new Map(right.map((item) => [item.toolName, item]));
+  return left.every((item) => {
+    const other = rightByName.get(item.toolName);
+    return other != null
+      && item.catalogFingerprint === other.catalogFingerprint
+      && item.enabled === other.enabled
+      && item.access === other.access;
+  });
 }
 
 function oauthErrorMessage(category: string): string {
@@ -244,24 +224,17 @@ function ProviderMark({ preset }: { preset: McpPreset }) {
 function GenericServerMark() {
   return (
     <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-      <Wrench className="size-4 text-muted-foreground" />
+      <Server className="size-4 text-muted-foreground" />
     </span>
   );
 }
 
 function McpConnections({ projectId }: McpConnectionsProps) {
   const queryClient = useQueryClient();
-  const [customOpen, setCustomOpen] = useState(false);
-  const [authMode, setAuthMode] = useState<McpAuthMode>("none");
-  const [bearerToken, setBearerToken] = useState("");
-  const [customName, setCustomName] = useState("");
-  const [customUrl, setCustomUrl] = useState("");
-  const [customHeaders, setCustomHeaders] = useState("");
   const [expandedConnectionId, setExpandedConnectionId] = useState<string | null>(null);
   const [policyDrafts, setPolicyDrafts] = useState<Record<string, ToolPolicyInput[]>>({});
   const [toolSearch, setToolSearch] = useState("");
   const [openToolGroups, setOpenToolGroups] = useState<Record<string, boolean>>({});
-  const [formError, setFormError] = useState<string | null>(null);
 
   const queryKey = ["sidechat-mcp", projectId] as const;
   useEffect(() => {
@@ -293,24 +266,17 @@ function McpConnections({ projectId }: McpConnectionsProps) {
       if (!response.ok) throw await parseError(response, "Could not connect");
       return response.json() as Promise<{ connection: McpConnection }>;
     },
-    onSuccess: ({ connection }, input) => {
-      setBearerToken("");
-      setCustomHeaders("");
-      setCustomOpen(false);
-      setFormError(null);
+    onSuccess: ({ connection }) => {
       void queryClient.invalidateQueries({ queryKey });
       if (connection.authUrl) {
         window.location.assign(connection.authUrl);
       } else if (isMcpLinked(connection)) {
         setExpandedConnectionId(connection.id);
-      } else if (input.presetKey) {
+      } else {
         toast.error(`Could not finish connecting ${connection.name}.`);
       }
     },
-    onError: (error: Error, input) => {
-      if (input.presetKey) toast.error(error.message);
-      else setFormError(error.message);
-    },
+    onError: (error: Error) => toast.error(error.message),
   });
 
   const savePolicy = useMutation({
@@ -405,33 +371,6 @@ function McpConnections({ projectId }: McpConnectionsProps) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey }),
   });
 
-  function chooseCustom(open = true): void {
-    setCustomOpen(open);
-    setExpandedConnectionId(null);
-    setAuthMode("none");
-    setBearerToken("");
-    setFormError(null);
-  }
-
-  function submitConnection(): void {
-    setFormError(null);
-    const input: ConnectInput = {
-      name: customName.trim(),
-      url: customUrl.trim(),
-      authMode,
-      ...(authMode === "bearer" ? { bearerToken } : {}),
-    };
-    if (authMode === "headers") {
-      const headers = parseHeaders(customHeaders);
-      if (!headers) {
-        setFormError("Enter one header per line as Name: value.");
-        return;
-      }
-      input.headers = headers;
-    }
-    connect.mutate(input);
-  }
-
   function activatePreset(
     preset: McpPreset,
     connection: McpConnection | undefined,
@@ -475,7 +414,6 @@ function McpConnections({ projectId }: McpConnectionsProps) {
   function setConnectionPanel(connection: McpConnection, opening: boolean): void {
     setExpandedConnectionId(opening ? connection.id : null);
     if (opening) {
-      setCustomOpen(false);
       setToolSearch("");
       setPolicyDrafts((current) => ({
         ...current,
@@ -573,15 +511,11 @@ function McpConnections({ projectId }: McpConnectionsProps) {
     }));
   }
 
-  const allowedAuthModes: McpAuthMode[] = ["none", "oauth", "bearer", "headers"];
-  const canSubmit = customName.trim().length > 0 &&
-    customUrl.trim().length > 0 &&
-    (authMode !== "bearer" || bearerToken.length > 0) &&
-    (authMode !== "headers" || customHeaders.trim().length > 0);
-
   function renderConnectionSettings(connection: McpConnection) {
     const reconnecting = reconnect.isPending && reconnect.variables === connection.id;
-    const policies = policyDrafts[connection.id] ?? policyFromConnection(connection);
+    const savedPolicy = policyFromConnection(connection);
+    const policies = policyDrafts[connection.id] ?? savedPolicy;
+    const policyDirty = !policiesMatch(policies, savedPolicy);
     const normalizedSearch = toolSearch.trim().toLowerCase();
     const filteredTools = connection.tools.filter((tool) =>
       !normalizedSearch ||
@@ -623,7 +557,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
                 <Button
                   type="button"
                   size="sm"
-                  disabled={savePolicy.isPending || reconnecting}
+                  disabled={savePolicy.isPending || reconnecting || !policyDirty}
                   onClick={() => savePolicy.mutate({
                     connectionId: connection.id,
                     tools: policies,
@@ -633,26 +567,19 @@ function McpConnections({ projectId }: McpConnectionsProps) {
                   Save tools
                 </Button>
               )}
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={disconnect.isPending || reconnecting}
-                onClick={() => disconnect.mutate(connection.id)}
-              >
-                Disconnect
-              </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="size-8 px-0"
                     aria-label={`More options for ${connection.name}`}
-                    className="flex size-10 items-center justify-center rounded-lg bg-muted text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <MoreVertical className="size-4" />
-                  </button>
+                  </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="min-w-44">
+                <DropdownMenuContent align="end" className="min-w-32">
                   <DropdownMenuItem
                     disabled={refresh.isPending || reconnecting}
                     onSelect={() => refresh.mutate(connection.id)}
@@ -675,7 +602,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
                     onSelect={() => disconnect.mutate(connection.id)}
                   >
                     <Trash2 />
-                    Remove connection
+                    Disconnect
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -689,13 +616,6 @@ function McpConnections({ projectId }: McpConnectionsProps) {
           </p>
         ) : (
           <div className="space-y-4">
-            <div>
-              <h3 className="text-sm font-semibold text-foreground">Tool permissions</h3>
-              <p className="mt-1 text-xs text-muted-foreground text-pretty">
-                Choose which tools Maven can use and when approval is required.
-              </p>
-            </div>
-
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -744,13 +664,13 @@ function McpConnections({ projectId }: McpConnectionsProps) {
                         <DropdownMenuTrigger asChild>
                           <button
                             type="button"
-                            className="flex min-h-10 shrink-0 items-center gap-2 rounded-lg bg-muted px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            className="flex h-8 shrink-0 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                           >
                             {permissionLabel(currentPermission)}
                             <ChevronDown className="size-3.5 text-muted-foreground" />
                           </button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="min-w-44">
+                        <DropdownMenuContent align="end" className="min-w-32">
                           {canAllowAll && (
                             <DropdownMenuItem
                               onSelect={() => setGroupPermission(
@@ -805,7 +725,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
                         return (
                           <div
                             key={tool.toolName}
-                            className="flex min-h-14 items-center gap-3 rounded-xl bg-background/75 px-3 py-2"
+                            className="flex min-h-10 items-center gap-3 rounded-xl bg-background/75 px-3 py-1.5"
                             title={tool.description || undefined}
                           >
                             <p className="min-w-0 flex-1 truncate text-sm text-foreground">
@@ -826,7 +746,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
                                     : "Always allow"}
                                   onClick={() => setToolPermission(connection, tool, "allow")}
                                   className={cn(
-                                    "flex size-10 items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-35",
+                                    "flex size-8 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-35",
                                     permission === "allow"
                                       ? "bg-background text-foreground shadow-sm"
                                       : "text-muted-foreground hover:text-foreground",
@@ -841,7 +761,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
                                   title="Ask before use"
                                   onClick={() => setToolPermission(connection, tool, "ask")}
                                   className={cn(
-                                    "flex size-10 items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                    "flex size-8 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                                     permission === "ask"
                                       ? "bg-background text-foreground shadow-sm"
                                       : "text-muted-foreground hover:text-foreground",
@@ -856,7 +776,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
                                   title="Disable"
                                   onClick={() => setToolPermission(connection, tool, "disabled")}
                                   className={cn(
-                                    "flex size-10 items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                    "flex size-8 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                                     permission === "disabled"
                                       ? "bg-background text-foreground shadow-sm"
                                       : "text-muted-foreground hover:text-foreground",
@@ -898,19 +818,14 @@ function McpConnections({ projectId }: McpConnectionsProps) {
       (reconnect.isPending && reconnect.variables === connection?.id) ||
       settling;
     const status = (
-      <span
-        className={cn(
-          "flex shrink-0 items-center gap-1.5 text-xs font-medium",
-          connected ? "text-primary" : "text-muted-foreground",
-        )}
-      >
+      <>
         {busy && <Loader2 className="size-3.5 animate-spin" />}
         {connectionCardStatus(
           connection,
           settling,
           reconnect.isPending && reconnect.variables === connection?.id,
         )}
-      </span>
+      </>
     );
     const disabled =
       (!connected && (!data?.canManage || settling)) ||
@@ -937,145 +852,8 @@ function McpConnections({ projectId }: McpConnectionsProps) {
     );
   }
 
-  function renderCustomConnectionForm() {
-    return (
-      <div className="space-y-4 px-4 py-4">
-        <p className="text-xs text-muted-foreground text-pretty">
-          Credentials are sent directly to the project agent and are never shown again.
-        </p>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="space-y-1.5 text-sm font-medium text-foreground">
-            Server name
-            <input
-              value={customName}
-              onChange={(event) => setCustomName(event.target.value)}
-              className="h-10 w-full rounded-xl bg-background px-3 text-sm outline-none ring-1 ring-input focus-visible:ring-2 focus-visible:ring-ring"
-              placeholder="Customer data"
-            />
-          </label>
-          <label className="space-y-1.5 text-sm font-medium text-foreground">
-            HTTPS server URL
-            <input
-              value={customUrl}
-              onChange={(event) => setCustomUrl(event.target.value)}
-              className="h-10 w-full rounded-xl bg-background px-3 text-sm outline-none ring-1 ring-input focus-visible:ring-2 focus-visible:ring-ring"
-              placeholder="https://mcp.example.com/mcp"
-            />
-          </label>
-        </div>
-
-        <div className="flex flex-wrap gap-2" aria-label="Authentication method">
-          {allowedAuthModes.map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              onClick={() => setAuthMode(mode)}
-              aria-pressed={authMode === mode}
-              className={cn(
-                "min-h-10 rounded-lg px-3 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                authMode === mode
-                  ? "bg-foreground text-background"
-                  : "bg-muted text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {authLabel(mode)}
-            </button>
-          ))}
-        </div>
-
-        {authMode === "bearer" && (
-          <label className="max-w-xl space-y-1.5 text-sm font-medium text-foreground">
-            Bearer token
-            <input
-              type="password"
-              autoComplete="new-password"
-              aria-label="Custom server bearer token"
-              value={bearerToken}
-              onChange={(event) => setBearerToken(event.target.value)}
-              className="h-10 w-full rounded-xl bg-background px-3 text-sm outline-none ring-1 ring-input focus-visible:ring-2 focus-visible:ring-ring"
-              placeholder="Paste token"
-            />
-          </label>
-        )}
-
-        {authMode === "headers" && (
-          <label className="max-w-xl space-y-1.5 text-sm font-medium text-foreground">
-            Headers
-            <textarea
-              value={customHeaders}
-              onChange={(event) => setCustomHeaders(event.target.value)}
-              className="min-h-24 w-full resize-y rounded-xl bg-background px-3 py-2 text-sm outline-none ring-1 ring-input focus-visible:ring-2 focus-visible:ring-ring"
-              placeholder="X-API-Key: value"
-            />
-            <span className="block text-xs font-normal text-muted-foreground">
-              One header per line. Values are write-only.
-            </span>
-          </label>
-        )}
-
-        {formError && <p className="text-sm text-destructive">{formError}</p>}
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            size="sm"
-            className="min-h-10"
-            disabled={!canSubmit || connect.isPending}
-            onClick={submitConnection}
-          >
-            {connect.isPending && <Loader2 className="animate-spin" />}
-            Connect server
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="min-h-10"
-            onClick={() => {
-              setCustomOpen(false);
-              setBearerToken("");
-              setCustomHeaders("");
-              setFormError(null);
-            }}
-          >
-            Cancel
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  function renderCustomServerCard() {
-    return (
-      <ExpandableToolCard
-        mark={<GenericServerMark />}
-        title="Custom server"
-        status={
-          <span className="shrink-0 text-xs font-medium text-muted-foreground">
-            Connect
-          </span>
-        }
-        configured={false}
-        disabled={!data?.canManage}
-        open={customOpen}
-        onOpenChange={(next) => chooseCustom(next)}
-        panelId="custom-mcp-connection"
-      >
-        {data?.canManage && renderCustomConnectionForm()}
-      </ExpandableToolCard>
-    );
-  }
-
   return (
-    <section className="space-y-3" aria-labelledby="mcp-connections-heading">
-      <div>
-        <div>
-          <h2 id="mcp-connections-heading" className="text-lg font-semibold text-foreground">
-            Connectors
-          </h2>
-        </div>
-      </div>
-
+    <section className="space-y-3" aria-label="MCP connectors">
       {isLoading && <div className="h-24 rounded-2xl bg-muted/50 animate-pulse" />}
       {isError && (
         <div className="flex items-center gap-2 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
@@ -1105,7 +883,6 @@ function McpConnections({ projectId }: McpConnectionsProps) {
                 () => activatePreset(preset, connection),
               );
             })}
-            {renderCustomServerCard()}
             {data.connections
               .filter((connection) => connection.presetKey === null)
               .map((connection) => renderConnectionCard(

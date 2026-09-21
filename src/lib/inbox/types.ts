@@ -110,6 +110,13 @@ export interface Message {
   presentationAction?: MessagePresentationAction;
   sidechatTrace?: SidechatTraceItem[];
   imageUrl?: string | null;
+  attachments?: Array<{
+    url: string;
+    filename: string;
+    contentType: string;
+    size: number;
+  }>;
+  origin?: "widget" | "dashboard" | "telegram" | "slack" | "email" | "mcp" | null;
   sources?: string | null;
   senderName?: string | null;
   senderAvatar?: string | null;

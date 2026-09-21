@@ -1,4 +1,5 @@
 const UPLOAD_PATH_PREFIX = "/api/uploads/";
+const PROJECT_FILE_PATH = /^\/api\/projects\/[^/]+\/files\/(.+)$/;
 
 export function getLocalUploadKey(imageUrl: string): string | null {
   let path: string;
@@ -7,13 +8,21 @@ export function getLocalUploadKey(imageUrl: string): string | null {
   } catch {
     return null;
   }
+  const projectFile = path.match(PROJECT_FILE_PATH);
+  if (projectFile?.[1]) {
+    return decodeOwnedUploadKey(projectFile[1]);
+  }
   if (!path.startsWith(UPLOAD_PATH_PREFIX)) return null;
 
+  return decodeOwnedUploadKey(path.slice(UPLOAD_PATH_PREFIX.length));
+}
+
+function decodeOwnedUploadKey(raw: string): string | null {
   // Upload keys are server-generated and never contain "%", so one decode
   // round with a leftover-"%" rejection also blocks double-encoded traversal.
   let key: string;
   try {
-    key = decodeURIComponent(path.slice(UPLOAD_PATH_PREFIX.length));
+    key = decodeURIComponent(raw);
   } catch {
     return null;
   }
@@ -22,7 +31,6 @@ export function getLocalUploadKey(imageUrl: string): string | null {
   if (!segments.every((segment) => segment !== "" && segment !== "..")) {
     return null;
   }
-
   return key;
 }
 

@@ -10,6 +10,7 @@ import {
   type ChatPerspective,
 } from "@/lib/inbox/sidechat";
 import type { Conversation, Message } from "@/lib/inbox/types";
+import { readConversationChannelMetadata } from "../../../shared/maven-conversation";
 import { cn, renderMarkdown } from "@/lib/utils";
 import {
   parseMessageImageUrls,
@@ -79,6 +80,19 @@ export default function MessageBubble({
   const { isReceived, senderLabel } = presentation;
   const isBot = message.role === "bot";
   const isAgent = message.role === "agent";
+  let conversationMetadata: Record<string, unknown> = {};
+  if (conversation.metadata) {
+    try {
+      const parsed: unknown = JSON.parse(conversation.metadata);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        conversationMetadata = parsed as Record<string, unknown>;
+      }
+    } catch {
+      conversationMetadata = {};
+    }
+  }
+  const inboundAddress = readConversationChannelMetadata(conversationMetadata)
+    .inboundAddress;
 
   // Search highlight: ring the matching bubble, brighter for the active match.
   const matchClass = isActiveMatch
@@ -108,6 +122,7 @@ export default function MessageBubble({
   const showBubble =
     showContent ||
     imageCount > 0 ||
+    (message.attachments?.length ?? 0) > 0 ||
     Boolean(message.presentationAction);
 
   // Grouped messages tuck up under the previous bubble (net ~4px gap).
@@ -180,6 +195,12 @@ export default function MessageBubble({
         )}
       >
         <span>{senderLabel}</span>
+        {message.origin === "email" && inboundAddress && (
+          <>
+            <span aria-hidden="true">·</span>
+            <span>via {inboundAddress}</span>
+          </>
+        )}
         <span aria-hidden="true">·</span>
         <time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>
         {renderStatus()}
@@ -299,6 +320,21 @@ export default function MessageBubble({
                 className={`prose-chat${imageCount ? " mt-1.5" : ""}`}
                 dangerouslySetInnerHTML={{ __html: html }}
               />
+            )}
+            {(message.attachments?.length ?? 0) > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {message.attachments?.map((attachment) => (
+                  <a
+                    key={attachment.url}
+                    href={attachment.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex max-w-full items-center rounded-md bg-ink-1/5 px-2 py-1 text-[12px] text-ink-3 hover:bg-ink-1/10"
+                  >
+                    <span className="truncate">{attachment.filename}</span>
+                  </a>
+                ))}
+              </div>
             )}
             {renderMessageActions()}
           </div>

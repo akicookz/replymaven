@@ -451,8 +451,9 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
 
   async getRecentPublicConversationByEmail(
     email: string,
+    options?: { openOnly?: boolean; touchedSinceMs?: number },
   ): Promise<MavenConversationSummary | null> {
-    return this.conversationDirectory().getRecentByVisitorEmail(email);
+    return this.conversationDirectory().getRecentByVisitorEmail(email, options);
   }
 
   async getConversationChildPresence(conversationId: string): Promise<{

@@ -505,6 +505,13 @@
       "when": 1789888106401,
       "tag": "0071_condemned_lyja",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "6",
+      "when": 1789946021968,
+      "tag": "0072_damp_harpoon",
+      "breakpoints": true
     }
   ]
 }

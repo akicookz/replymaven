@@ -23,6 +23,7 @@ function normalizedMessage(message: PublicMessageRecord): Record<string, unknown
     author: message.author,
     content: message.content,
     imageUrls: message.imageUrls,
+    attachments: message.attachments ?? [],
     sources: message.sources,
     senderName: message.senderName,
     senderAvatar: message.senderAvatar,
@@ -52,7 +53,8 @@ export async function publicConversationImportChecksum(
   conversation: PublicConversationRecord,
   messages: PublicMessageRecord[],
 ): Promise<string> {
-  const { channelThreads: _channelThreads, ...checksumConversation } = conversation;
+  const { channelThreads, ...checksumConversation } = conversation;
+  void channelThreads;
   const bytes = new TextEncoder().encode(
     JSON.stringify(stableValue({ conversation: checksumConversation, messages })),
   );

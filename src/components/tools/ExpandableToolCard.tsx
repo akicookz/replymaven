@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import {
   Popover,
   PopoverAnchor,
@@ -32,20 +32,13 @@ function CardRow({
   subtitle,
   titleAdornment,
   status,
-  open,
-  expandable,
 }: Pick<
   ExpandableToolCardProps,
   "mark" | "title" | "subtitle" | "titleAdornment" | "status"
-> & { open: boolean; expandable: boolean }) {
+>) {
   return (
     <>
-      <div className="flex shrink-0 items-center gap-2">
-        {expandable && open ? (
-          <ChevronDown className="size-4 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="size-4 text-muted-foreground" />
-        )}
+      <div className="flex shrink-0 items-center">
         {mark}
       </div>
       <div className="min-w-0 flex-1">
@@ -59,7 +52,14 @@ function CardRow({
           <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
         )}
       </div>
-      {status}
+      {status != null && (
+        <span
+          className="flex shrink-0 items-center gap-0.5 text-xs font-medium text-muted-foreground"
+        >
+          {status}
+          <ChevronRight className="size-4" />
+        </span>
+      )}
     </>
   );
 }
@@ -85,8 +85,8 @@ export function ExpandableToolCard({
   children,
 }: ExpandableToolCardProps) {
   const shell = cn(
-    "overflow-hidden rounded-xl bg-card",
-    configured ? "" : "border-2 border-dashed border-muted",
+    "box-border overflow-hidden rounded-xl bg-card border-2",
+    configured ? "border-transparent" : "border-dashed border-muted",
   );
   const row = (
     <CardRow
@@ -95,8 +95,6 @@ export function ExpandableToolCard({
       subtitle={subtitle}
       titleAdornment={titleAdornment}
       status={status}
-      open={open}
-      expandable={mode === "panel"}
     />
   );
 

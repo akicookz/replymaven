@@ -251,6 +251,7 @@ interface PublicParentStub {
   ): Promise<MavenConversationSummary | null>;
   getRecentPublicConversationByEmail(
     email: string,
+    options?: { openOnly?: boolean; touchedSinceMs?: number },
   ): Promise<MavenConversationSummary | null>;
   listConversations(
     query: MavenConversationListQuery,
@@ -403,6 +404,7 @@ interface NewMessageInput {
   conversationId: string;
   content: string;
   imageUrls?: string[];
+  attachments?: PublicMessageRecord["attachments"];
   sources?: PublicSourceReference[];
   senderName?: string | null;
   senderAvatar?: string | null;
@@ -411,6 +413,7 @@ interface NewMessageInput {
   idempotencyKey?: string | null;
   origin?: "widget" | "dashboard" | "telegram" | "slack" | "email" | "mcp" | null;
   externalReplyTo?: string | null;
+  rfcMessageId?: string | null;
 }
 
 function reopenSystemContent(actorName: string | null | undefined): string {
@@ -428,6 +431,7 @@ function newMessage(
     author,
     content: input.content,
     imageUrls: [...(input.imageUrls ?? [])],
+    attachments: [...(input.attachments ?? [])],
     sources: structuredClone(input.sources ?? []),
     senderName: input.senderName ?? null,
     senderAvatar: input.senderAvatar ?? null,
@@ -440,6 +444,7 @@ function newMessage(
     idempotencyKey: input.idempotencyKey ?? null,
     origin: input.origin ?? null,
     externalReplyTo: input.externalReplyTo ?? null,
+    rfcMessageId: input.rfcMessageId ?? null,
   };
 }
 
@@ -525,9 +530,10 @@ export class AgentPublicConversationStore implements PublicConversationStore {
   async getRecentByVisitorEmail(
     projectId: string,
     email: string,
+    options?: { openOnly?: boolean; touchedSinceMs?: number },
   ): Promise<PublicConversationRecord | null> {
     const parent = await getPublicParent(this.context, projectId);
-    const match = await parent.getRecentPublicConversationByEmail(email);
+    const match = await parent.getRecentPublicConversationByEmail(email, options);
     return match ? this.get(projectId, match.conversationId) : null;
   }
 
@@ -1420,7 +1426,8 @@ export class AgentPublicConversationStore implements PublicConversationStore {
       projectId,
       conversationId: input.conversationId,
       content: input.content,
-      imageUrls: parseMessageImageUrls(input.imageUrl),
+      imageUrls: input.imageUrls ?? parseMessageImageUrls(input.imageUrl),
+      attachments: input.attachments,
       sources: parseMessageSources(input.sources),
       senderName: input.senderName,
       senderAvatar: input.senderAvatar,
@@ -1428,6 +1435,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
       idempotencyKey: input.idempotencyKey,
       origin: input.origin,
       externalReplyTo: input.externalReplyTo,
+      rfcMessageId: input.rfcMessageId,
     });
   }
 
@@ -1440,7 +1448,8 @@ export class AgentPublicConversationStore implements PublicConversationStore {
         projectId,
         conversationId: input.conversationId,
         content: input.content,
-        imageUrls: parseMessageImageUrls(input.imageUrl),
+        imageUrls: input.imageUrls ?? parseMessageImageUrls(input.imageUrl),
+        attachments: input.attachments,
         sources: parseMessageSources(input.sources),
         senderName: input.senderName,
         senderAvatar: input.senderAvatar,
@@ -1448,6 +1457,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
         idempotencyKey: input.idempotencyKey,
         origin: input.origin,
         externalReplyTo: input.externalReplyTo,
+        rfcMessageId: input.rfcMessageId,
       });
     } catch {
       return null;
@@ -1466,7 +1476,8 @@ export class AgentPublicConversationStore implements PublicConversationStore {
       projectId,
       conversationId: input.conversationId,
       content: input.content,
-      imageUrls: parseMessageImageUrls(input.imageUrl),
+      imageUrls: input.imageUrls ?? parseMessageImageUrls(input.imageUrl),
+      attachments: input.attachments,
       sources: parseMessageSources(input.sources),
       senderName: input.senderName,
       senderAvatar: input.senderAvatar,
@@ -1474,6 +1485,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
       idempotencyKey: input.idempotencyKey,
       origin: input.origin,
       externalReplyTo: input.externalReplyTo,
+      rfcMessageId: input.rfcMessageId,
       expected,
     });
   }

@@ -1,5 +1,6 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import type {
+  ConversationChannel,
   PublicConversationRecord,
   PublicMessageRecord,
   PublicSourceReference,
@@ -21,9 +22,7 @@ import {
   fallbackRenderContactTimingMessage,
   renderContactTimingMessage,
 } from "../llm/render-contact-timing-message";
-import { logWarn } from "../../observability";
-import { normalizeConversationHistory } from "../orchestration/normalize-history";
-import { runMavenTurn } from "../orchestration/run-maven-turn";
+import { buildContactFallbackMessage } from "../contact-support/contact-support";
 import { buildSupportTurnOpening } from "../prompt/sections";
 import {
   createStreamingStripState,
@@ -31,12 +30,15 @@ import {
   stripInternalTokensStreaming,
 } from "../streaming/internal-tokens";
 import {
+  type AiParticipation,
   type MavenStreamPart,
   type SupportPromptSettings,
 } from "../types";
-import { buildContactFallbackMessage } from "./contact-support";
+import { logWarn } from "../../observability";
+import { normalizeConversationHistory } from "./normalize-history";
+import { runMavenTurn } from "./run-maven-turn";
 
-export interface ContactSupportFollowUpOptions {
+export interface ChannelTurnOptions {
   db: DrizzleD1Database<Record<string, unknown>>;
   env: AppEnv;
   executionCtx: ExecutionContext;
@@ -45,18 +47,17 @@ export interface ContactSupportFollowUpOptions {
   project: { id: string; userId: string; name: string };
   settings: (SupportPromptSettings & Record<string, unknown>) | null;
   conversation: PublicConversationRecord;
-  formMessage: string;
+  currentMessage: string;
   isFirstVisitorTurn: boolean;
   isReturningVisitor: boolean;
-  mode?: "contact_support" | "pending_review_email";
-}
-
-function getMetadataString(
-  metadata: Record<string, unknown>,
-  key: string,
-): string | null {
-  const value = metadata[key];
-  return typeof value === "string" && value.trim() ? value : null;
+  channel?: ConversationChannel;
+  aiParticipation?: AiParticipation;
+  /**
+   * "contact_support" opens with a greeting and a response-time line, and
+   * falls back to a holding message when the model produces nothing. Standard
+   * turns stay silent instead.
+   */
+  turnKind?: "standard" | "contact_support";
 }
 
 async function collectVisibleText(
@@ -74,28 +75,28 @@ async function collectVisibleText(
   return text.trim();
 }
 
-// The route responds before this runs; deliver the reply through the child so
-// a connected widget receives it over its live agent session.
-export async function runContactSupportFollowUp(
-  options: ContactSupportFollowUpOptions,
+function getMetadataString(
+  metadata: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = metadata[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+export async function runChannelTurn(
+  options: ChannelTurnOptions,
 ): Promise<PublicMessageRecord | null> {
   const { db, env, conversation, project, settings } = options;
-  const mode = options.mode ?? "contact_support";
+  const channel = options.channel ?? "widget";
   const logContext = {
     projectId: project.id,
     conversationId: conversation.id,
   };
-  // Ownership snapshot from right after team_requested; a human joining while
-  // the model composes advances the chat state and voids the append below.
   const ownershipSnapshot = {
     status: conversation.status,
     chatState: JSON.stringify(conversation.chatState),
   };
-  const turnContext = {
-    kind: mode === "contact_support" ? "contact_support" : "standard",
-    isFirstVisitorTurn: options.isFirstVisitorTurn,
-    isReturningVisitor: options.isReturningVisitor,
-  } as const;
+  const aiParticipation = options.aiParticipation ?? "continuous";
   const visitorInfo = {
     name: conversation.visitorName,
     email: conversation.visitorEmail,
@@ -106,40 +107,45 @@ export async function runContactSupportFollowUp(
     openaiApiKey: env.OPENAI_API_KEY || null,
   });
 
+  const turnKind = options.turnKind ?? "standard";
+  const turnContext = {
+    kind: turnKind,
+    isFirstVisitorTurn: options.isFirstVisitorTurn,
+    isReturningVisitor: options.isReturningVisitor,
+  } as const;
+
   let responseOpening = "";
-  if (mode === "contact_support") {
+  if (turnKind === "contact_support") {
     const baseOpening = buildSupportTurnOpening(turnContext, visitorInfo);
-    const timingMessage = fallbackRenderContactTimingMessage();
-    responseOpening = `${baseOpening}${timingMessage}\n\n`;
-  }
-  if (mode === "contact_support" && settings?.avgResponseTime?.trim()) {
-    try {
-      const timingMessage = await runWithModelFallback({
-        runtime: modelRuntime,
-        stage: "render_contact_timing",
-        operation: (config) =>
-          renderContactTimingMessage(createLanguageModel(config), {
-            nowMs: Date.now(),
-            currentMessage: options.formMessage,
-            workingHours: settings.workingHours,
-            avgResponseTime: settings.avgResponseTime,
-            companyContext: settings.companyContext,
-            visitorLocation: {
-              timezone: getMetadataString(conversation.metadata, "timezone"),
-              city: getMetadataString(conversation.metadata, "city"),
-              region: getMetadataString(conversation.metadata, "region"),
-              country: getMetadataString(conversation.metadata, "country"),
-            },
-          }, { throwOnModelError: true }),
-        logContext,
-      });
-      const baseOpening = buildSupportTurnOpening(turnContext, visitorInfo);
-      responseOpening = `${baseOpening}${timingMessage}\n\n`;
-    } catch (error) {
-      logWarn("contact_follow_up.timing_fallback", {
-        ...logContext,
-        error: error instanceof Error ? error.message : String(error),
-      });
+    responseOpening = `${baseOpening}${fallbackRenderContactTimingMessage()}\n\n`;
+    if (settings?.avgResponseTime?.trim()) {
+      try {
+        const timingMessage = await runWithModelFallback({
+          runtime: modelRuntime,
+          stage: "render_contact_timing",
+          operation: (config) =>
+            renderContactTimingMessage(createLanguageModel(config), {
+              nowMs: Date.now(),
+              currentMessage: options.currentMessage,
+              workingHours: settings.workingHours,
+              avgResponseTime: settings.avgResponseTime,
+              companyContext: settings.companyContext,
+              visitorLocation: {
+                timezone: getMetadataString(conversation.metadata, "timezone"),
+                city: getMetadataString(conversation.metadata, "city"),
+                region: getMetadataString(conversation.metadata, "region"),
+                country: getMetadataString(conversation.metadata, "country"),
+              },
+            }, { throwOnModelError: true }),
+          logContext,
+        });
+        responseOpening = `${baseOpening}${timingMessage}\n\n`;
+      } catch (error) {
+        logWarn("channel_turn.timing_fallback", {
+          ...logContext,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 
@@ -155,8 +161,8 @@ export async function runContactSupportFollowUp(
     }));
     const conversationHistory = normalizeConversationHistory({
       rawHistory,
-      currentMessage: options.formMessage,
-      persistedCurrentMessage: options.formMessage,
+      currentMessage: options.currentMessage,
+      persistedCurrentMessage: options.currentMessage,
     });
     const guidelines = await new GuidelineService(db).getEnabledByProject(
       project.id,
@@ -187,6 +193,7 @@ export async function runContactSupportFollowUp(
           avgResponseTime: null,
         },
         promptOptions: {
+          channel,
           guidelines: guidelines.map((guideline) => ({
             condition: guideline.condition,
             instruction: guideline.instruction,
@@ -198,8 +205,9 @@ export async function runContactSupportFollowUp(
           visitorInfo,
           timeContext: { nowMs: Date.now(), conversationHistory },
           turnContext,
-          aiParticipation: "assist_until_agent",
-          escalated: true,
+          aiParticipation,
+          escalated: turnKind === "contact_support" ||
+            conversation.status === "waiting_agent",
         },
         publicToolDependencies: {
           executionCtx: options.executionCtx,
@@ -212,7 +220,7 @@ export async function runContactSupportFollowUp(
         },
       },
       conversationHistory,
-      currentMessage: options.formMessage,
+      currentMessage: options.currentMessage,
     });
     const visibleText = await collectVisibleText(turn.fullStream);
     sources = turn.collectedSources.map((source) => ({
@@ -222,18 +230,18 @@ export async function runContactSupportFollowUp(
     }));
     if (visibleText) {
       content = `${responseOpening}${visibleText}`;
-    } else if (mode === "contact_support") {
+    } else if (turnKind === "contact_support") {
       content = buildContactFallbackMessage(responseOpening);
     } else {
       content = null;
     }
     if (!visibleText) sources = [];
   } catch (error) {
-    logWarn("contact_follow_up.turn_failed", {
+    logWarn("channel_turn.turn_failed", {
       ...logContext,
       error: error instanceof Error ? error.message : String(error),
     });
-    content = mode === "contact_support"
+    content = turnKind === "contact_support"
       ? buildContactFallbackMessage(responseOpening)
       : null;
     sources = [];
@@ -254,7 +262,7 @@ export async function runContactSupportFollowUp(
       ownershipSnapshot,
     );
   if (!botMessage) {
-    logWarn("contact_follow_up.skipped_ownership_changed", logContext);
+    logWarn("channel_turn.skipped_ownership_changed", logContext);
     return null;
   }
 

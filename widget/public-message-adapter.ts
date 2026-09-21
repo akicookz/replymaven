@@ -104,6 +104,9 @@ export function adaptWidgetPublicMessages(
       author: metadata.author,
       content: readText(message),
       imageUrls: [...metadata.imageUrls],
+      attachments: Array.isArray(metadata.attachments)
+        ? [...metadata.attachments]
+        : [],
       sources: structuredClone(metadata.sources),
       senderName: metadata.senderName,
       senderAvatar: metadata.senderAvatar,

@@ -4,11 +4,12 @@ import type {
   SourceUrlUIPart,
   UIMessage,
 } from "ai";
-import type {
-  PublicMessageAuthor,
-  PublicMessageMetadata,
-  PublicMessageRecord,
-  PublicSourceReference,
+import {
+  readMessageAttachments,
+  type PublicMessageAuthor,
+  type PublicMessageMetadata,
+  type PublicMessageRecord,
+  type PublicSourceReference,
 } from "../../../../shared/maven-conversation";
 
 type PublicDataParts = Record<string, unknown> & {
@@ -74,6 +75,7 @@ export function toPublicUiMessage(
     senderAvatar: message.senderAvatar,
     userId: message.userId,
     imageUrls: [...message.imageUrls],
+    attachments: [...(message.attachments ?? [])],
     sources: structuredClone(message.sources),
     createdAt: message.createdAt,
     deliveredAt: message.deliveredAt,
@@ -83,6 +85,7 @@ export function toPublicUiMessage(
     idempotencyKey: message.idempotencyKey ?? null,
     origin: message.origin ?? null,
     externalReplyTo: message.externalReplyTo ?? null,
+    rfcMessageId: message.rfcMessageId ?? null,
   };
   return {
     id: message.id,
@@ -140,6 +143,7 @@ export function fromPublicUiMessage(
     author: message.metadata.author,
     content: textContent(message),
     imageUrls: [...message.metadata.imageUrls],
+    attachments: readMessageAttachments(message.metadata.attachments),
     sources: structuredClone(message.metadata.sources),
     senderName: message.metadata.senderName,
     senderAvatar: message.metadata.senderAvatar,
@@ -152,6 +156,7 @@ export function fromPublicUiMessage(
     idempotencyKey: message.metadata.idempotencyKey ?? null,
     origin: message.metadata.origin ?? null,
     externalReplyTo: message.metadata.externalReplyTo ?? null,
+    rfcMessageId: message.metadata.rfcMessageId ?? null,
   };
 }
 

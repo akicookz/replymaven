@@ -12,6 +12,62 @@ export interface PublicSourceReference {
   type: "webpage" | "pdf" | "faq";
 }
 
+export interface PublicMessageAttachment {
+  url: string;
+  filename: string;
+  contentType: string;
+  size: number;
+}
+
+export type ConversationChannel = "widget" | "email";
+
+export interface ConversationChannelMetadata {
+  channel: ConversationChannel;
+  subject?: string;
+  inboundAddress?: string;
+}
+
+export function readMessageAttachments(
+  value: unknown,
+): PublicMessageAttachment[] {
+  if (!Array.isArray(value)) return [];
+  const attachments: PublicMessageAttachment[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const record = item as Record<string, unknown>;
+    if (
+      typeof record.url !== "string" ||
+      typeof record.filename !== "string" ||
+      typeof record.contentType !== "string" ||
+      typeof record.size !== "number" ||
+      !Number.isFinite(record.size)
+    ) {
+      continue;
+    }
+    attachments.push({
+      url: record.url,
+      filename: record.filename,
+      contentType: record.contentType,
+      size: record.size,
+    });
+  }
+  return attachments;
+}
+
+export function readConversationChannelMetadata(
+  metadata: Record<string, unknown> | null | undefined,
+): ConversationChannelMetadata {
+  const channel = metadata?.channel === "email" ? "email" : "widget";
+  const subject = typeof metadata?.subject === "string" && metadata.subject.trim()
+    ? metadata.subject
+    : undefined;
+  const inboundAddress =
+    typeof metadata?.inboundAddress === "string" && metadata.inboundAddress.trim()
+      ? metadata.inboundAddress
+      : undefined;
+  return { channel, subject, inboundAddress };
+}
+
 export interface PublicMessageMetadata {
   v: 1;
   channel: "public";
@@ -22,6 +78,7 @@ export interface PublicMessageMetadata {
   senderAvatar: string | null;
   userId: string | null;
   imageUrls: string[];
+  attachments: PublicMessageAttachment[];
   sources: PublicSourceReference[];
   createdAt: number;
   deliveredAt: number | null;
@@ -31,6 +88,7 @@ export interface PublicMessageMetadata {
   idempotencyKey?: string | null;
   origin?: "widget" | "dashboard" | "telegram" | "slack" | "email" | "mcp" | null;
   externalReplyTo?: string | null;
+  rfcMessageId?: string | null;
 }
 
 export interface PublicMessageRecord {
@@ -39,6 +97,7 @@ export interface PublicMessageRecord {
   author: PublicMessageAuthor;
   content: string;
   imageUrls: string[];
+  attachments: PublicMessageAttachment[];
   sources: PublicSourceReference[];
   senderName: string | null;
   senderAvatar: string | null;
@@ -51,6 +110,7 @@ export interface PublicMessageRecord {
   idempotencyKey?: string | null;
   origin?: "widget" | "dashboard" | "telegram" | "slack" | "email" | "mcp" | null;
   externalReplyTo?: string | null;
+  rfcMessageId?: string | null;
 }
 
 export interface PublicChannelThreads {

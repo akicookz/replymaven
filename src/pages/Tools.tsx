@@ -5,39 +5,67 @@ import {
   Plus,
   Trash2,
   AlertCircle,
-  Wrench,
-  Pencil,
+  Cable,
   Play,
-  ChevronDown,
-  ChevronRight,
   X,
   Loader2,
-  History,
   Github,
-  Globe,
-  MessageCircle,
+  Search,
   Slack,
-  Webhook,
+  Zap,
   CheckCircle2,
-  XCircle,
-  Clock,
   Send,
+  Inbox,
+  Hash,
+  Headset,
+  Copy,
+  MoreHorizontal,
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Sheet,
+  SheetBody,
+  SheetCloseButton,
+  SheetContent,
+  SheetFooter,
+  SheetHeader,
+  SheetHeaderActions,
+  SheetHeaderContent,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
+import { Segmented } from "@/components/ui/segmented";
 import { cn } from "@/lib/utils";
+import {
+  HeaderFields,
+  type HeaderField,
+} from "@/components/tools/header-fields";
+import { EndpointField } from "@/components/tools/endpoint-field";
 import { ExpandableToolCard } from "@/components/tools/ExpandableToolCard";
-import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
 import { MobileMenuButton } from "@/components/PageHeader";
 import McpConnections from "@/components/tools/McpConnections";
+
+const EMAIL_FORWARDING_DOCS_URL =
+  "https://replymaven.com/docs/integrations/forward-your-support-inbox";
+
+function inboundEmailSubtitle(
+  addresses: ReadonlyArray<{ address: string }>,
+): string {
+  const [first, ...rest] = addresses;
+  if (!first) return "Forward support mail into ReplyMaven";
+  return rest.length > 0 ? `${first.address} +${rest.length}` : first.address;
+}
+
+function connectorStatus(configured: boolean): string {
+  return configured ? "Configure" : "Connect";
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -86,6 +114,15 @@ interface ToolExecution {
   createdAt: string;
 }
 
+function executionLine(exec: ToolExecution): string {
+  const time = new Date(exec.createdAt).toLocaleString();
+  const duration = exec.duration != null ? `${exec.duration}ms` : "no duration";
+  if (exec.errorMessage) {
+    return `${exec.status} · ${duration} · ${time} · ${exec.errorMessage}`;
+  }
+  return `${exec.status} · ${duration} · ${time}`;
+}
+
 interface ToolFormData {
   name: string;
   displayName: string;
@@ -127,6 +164,68 @@ const emptyForm: ToolFormData = {
   timeout: 10000,
   ...defaultToolPolicy,
 };
+
+type DrawerKind = "http" | "mcp";
+type McpAuthMode = "oauth" | "bearer" | "headers" | "none";
+
+interface McpFormData {
+  name: string;
+  url: string;
+  authMode: McpAuthMode;
+  bearerToken: string;
+  headers: HeaderField[];
+}
+
+const emptyMcpForm: McpFormData = {
+  name: "",
+  url: "",
+  authMode: "oauth",
+  bearerToken: "",
+  headers: [],
+};
+
+function toHeaderRecord(headers: HeaderField[]): Record<string, string> {
+  const record: Record<string, string> = {};
+  for (const header of headers) {
+    const key = header.key.trim();
+    const value = header.value.trim();
+    if (key && value) record[key] = value;
+  }
+  return record;
+}
+
+// Editing a connector never reveals stored header values, so the empty list
+// has to say whether saving now keeps or drops them.
+function describeStoredHeaders(input: {
+  editing: boolean;
+  hasStoredHeaders: boolean;
+  dirty: boolean;
+}): { title: string; detail: string } | null {
+  if (!input.editing || !input.hasStoredHeaders) return null;
+  if (!input.dirty) {
+    return {
+      title: "Saved headers are hidden.",
+      detail: "They will be kept unless you add replacements.",
+    };
+  }
+  return {
+    title: "Saved headers will be removed.",
+    detail: "Add replacements to keep authentication configured.",
+  };
+}
+
+const PARAMETER_TYPE_OPTIONS = [
+  { value: "string" as const, label: "String" },
+  { value: "number" as const, label: "Number" },
+  { value: "boolean" as const, label: "Boolean" },
+];
+
+const MCP_AUTH_OPTIONS: ReadonlyArray<{ value: McpAuthMode; label: string }> = [
+  { value: "oauth", label: "OAuth" },
+  { value: "bearer", label: "Bearer token" },
+  { value: "headers", label: "Headers" },
+  { value: "none", label: "None" },
+];
 
 // ─── Tool Presets ─────────────────────────────────────────────────────────────
 
@@ -249,7 +348,7 @@ const TOOL_PRESETS: ToolPreset[] = [
     name: "send_to_discord",
     label: "Send to Discord",
     blurb: "Post a message to a channel via webhook.",
-    icon: MessageCircle,
+    icon: Hash,
     iconBg: "bg-[#5865F2]/15",
     iconColor: "text-[#7f8bf5]",
     urlLabel: "Webhook URL",
@@ -271,7 +370,7 @@ const TOOL_PRESETS: ToolPreset[] = [
     name: "trigger_automation",
     label: "Automation Webhook",
     blurb: "Trigger a Zapier or Make scenario with context.",
-    icon: Webhook,
+    icon: Zap,
     iconBg: "bg-orange-500/15",
     iconColor: "text-orange-400",
     urlLabel: "Webhook URL",
@@ -298,7 +397,7 @@ const TOOL_PRESETS: ToolPreset[] = [
     name: "check_order_status",
     label: "HTTP Lookup",
     blurb: "GET request with a parameter, e.g. order status.",
-    icon: Globe,
+    icon: Search,
     iconBg: "bg-sky-500/15",
     iconColor: "text-sky-400",
     fields: [
@@ -443,17 +542,11 @@ function ToolPolicyFields({
     const allowedChannels = checked
       ? Array.from(new Set([...value.allowedChannels, audience]))
       : value.allowedChannels.filter((channel) => channel !== audience);
-    if (allowedChannels.length === 0) return;
     onChange({ ...value, allowedChannels });
   }
 
-  function renderAudienceRow(
-    audience: ToolAudience,
-    label: string,
-    description: string,
-  ) {
+  function renderAudienceRow(audience: ToolAudience, label: string) {
     const checked = value.allowedChannels.includes(audience);
-    const isOnlyAudience = checked && value.allowedChannels.length === 1;
     const switchId = `${id}-${audience}`;
     return (
       <label
@@ -461,23 +554,14 @@ function ToolPolicyFields({
         htmlFor={switchId}
         className="flex min-h-10 cursor-pointer items-center justify-between gap-4 rounded-lg px-1 py-1 select-none"
       >
-        <span className="min-w-0">
-          <span className="block text-sm font-medium text-foreground">
-            {label}
-          </span>
-          <span className="block text-xs text-pretty text-muted-foreground">
-            {description}
-          </span>
-        </span>
+        <span className="text-sm font-medium text-foreground">{label}</span>
         <Switch
           id={switchId}
           aria-label={label}
           checked={checked}
-          disabled={isOnlyAudience}
           onCheckedChange={(nextChecked) =>
             updateAudience(audience, nextChecked)
           }
-          size="sm"
           className="shrink-0"
         />
       </label>
@@ -485,59 +569,26 @@ function ToolPolicyFields({
   }
 
   return (
-    <div
-      className={cn(
-        "space-y-3",
-        compact ? "pt-1" : "rounded-xl bg-muted/20 p-4",
-      )}
-    >
-      <div>
-        <h3 className="text-sm font-semibold text-foreground">Availability</h3>
-        <p className="mt-0.5 text-xs text-pretty text-muted-foreground">
-          At least one audience must stay enabled.
-        </p>
-      </div>
-      <div className="space-y-1">
-        {renderAudienceRow(
-          "public",
-          "Available to visitors",
-          "Maven can use this in visitor conversations.",
-        )}
-        {renderAudienceRow(
-          "sidechat",
-          "Available in sidechat",
-          "Maven can use this while helping your team.",
-        )}
-      </div>
-      <div className="flex min-h-10 items-center justify-between gap-4 px-1 py-1">
-        <div className="min-w-0">
-          <label
-            htmlFor={`${id}-access`}
-            className="block text-sm font-medium text-foreground"
-          >
-            Access
-          </label>
-          <p className="text-xs text-pretty text-muted-foreground">
-            Choose whether this connector only reads data or can change it.
-          </p>
-        </div>
-        <Select
-          value={value.access}
-          onValueChange={(access: ToolAccess) => onChange({ ...value, access })}
-        >
-          <SelectTrigger
-            id={`${id}-access`}
-            aria-label="Access"
-            className="h-9 w-28 shrink-0 rounded-lg"
-          >
-            <SelectValue>{value.access === "write" ? "Write" : "Read"}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="read">Read</SelectItem>
-            <SelectItem value="write">Write</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+    <div className={cn("space-y-1", compact && "pt-1")}>
+      {renderAudienceRow("public", "Available to visitors")}
+      {renderAudienceRow("sidechat", "Available in sidechat")}
+      <label
+        htmlFor={`${id}-access`}
+        className="flex min-h-10 cursor-pointer items-center justify-between gap-4 rounded-lg px-1 py-1 select-none"
+      >
+        <span className="text-sm font-medium text-foreground">
+          Can make changes
+        </span>
+        <Switch
+          id={`${id}-access`}
+          aria-label="Can make changes"
+          checked={value.access === "write"}
+          onCheckedChange={(checked) =>
+            onChange({ ...value, access: checked ? "write" : "read" })
+          }
+          className="shrink-0"
+        />
+      </label>
     </div>
   );
 }
@@ -668,53 +719,50 @@ function PresetToolRow({
         </div>
       }
       title={preset.label}
-      titleAdornment={
-        <>
-          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-            Preset
-          </Badge>
-          {!configured && (
-            <Badge
-              variant="outline"
-              className="text-[10px] px-1.5 py-0 text-warning border-warning/30"
-            >
-              Not configured
-            </Badge>
-          )}
-        </>
-      }
       subtitle={preset.blurb}
+      status={connectorStatus(configured)}
       configured={configured}
       open={expanded}
       onOpenChange={setExpanded}
       panelId={panelId}
-      trailing={
-        configured ? (
-          <div className="flex shrink-0 items-center gap-1 pr-2 sm:gap-3 sm:pr-4">
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-lg">
-              <Switch
-                aria-label={`Enable ${preset.label}`}
-                checked={tool!.enabled}
-                className="relative after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']"
-                onCheckedChange={(checked) => toggle.mutate(checked)}
-                size="sm"
-              />
-            </span>
-            <button
-              type="button"
-              aria-label={`Remove ${preset.label}`}
-              onClick={() => remove.mutate()}
-              disabled={remove.isPending}
-              className="flex size-10 items-center justify-center rounded-lg text-destructive hover:bg-destructive/10 disabled:opacity-50"
-              title="Remove"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          </div>
-        ) : undefined
-      }
     >
       <div className="px-4 py-4 space-y-3">
+          {configured && (
+            <div className="flex items-center justify-between gap-3">
+              <label className="flex min-h-8 cursor-pointer items-center justify-between gap-4">
+                <span className="text-sm font-medium text-foreground">Enabled</span>
+                <Switch
+                  aria-label={`Enable ${preset.label}`}
+                  checked={tool!.enabled}
+                  onCheckedChange={(checked) => toggle.mutate(checked)}
+                  size="sm"
+                />
+              </label>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="size-8 px-0"
+                    aria-label={`More options for ${preset.label}`}
+                  >
+                    <MoreHorizontal className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-32">
+                  <DropdownMenuItem
+                    variant="destructive"
+                    disabled={remove.isPending}
+                    onSelect={() => remove.mutate()}
+                  >
+                    <Trash2 />
+                    Remove
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )}
           {preset.fields.map((field) => (
             <div key={field.key} className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">
@@ -794,6 +842,39 @@ interface SlackData {
   slackChannelId: string | null;
 }
 
+interface InboundAddress {
+  id: string;
+  address: string;
+  label: string | null;
+  ignored: boolean;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+interface InboundEmailData {
+  forwardTo: string;
+  addresses: InboundAddress[];
+}
+
+function formatInboundAge(iso: string): string {
+  const elapsed = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(elapsed) || elapsed < 60 * 1000) return "New";
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `${days}d`;
+}
+
+function inboundAddressStatus(address: InboundAddress): string {
+  if (address.ignored) return "Ignored";
+  const seenSpan =
+    Date.parse(address.lastSeenAt) - Date.parse(address.firstSeenAt);
+  if (!Number.isFinite(seenSpan) || seenSpan < 5 * 60 * 1000) return "New";
+  return `Receiving · ${formatInboundAge(address.lastSeenAt)}`;
+}
+
 interface ToolsPanelProps {
   projectId: string;
   embedded?: boolean;
@@ -808,14 +889,12 @@ export function ToolsPanel({
   const queryClient = useQueryClient();
 
   // UI state
-  const [showLogs, setShowLogs] = useState(false);
-  const [showForm, setShowForm] = useState(false);
+  const [drawerKind, setDrawerKind] = useState<DrawerKind | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ToolFormData>(emptyForm);
+  const [mcpForm, setMcpForm] = useState<McpFormData>(emptyMcpForm);
   const [customHeadersDirty, setCustomHeadersDirty] = useState(false);
   const [customHasStoredHeaders, setCustomHasStoredHeaders] = useState(false);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testParams, setTestParams] = useState<Record<string, string>>({});
   const [testResult, setTestResult] = useState<{ success: boolean; data: unknown } | null>(null);
@@ -833,6 +912,8 @@ export function ToolsPanel({
   const [slackChannelId, setSlackChannelId] = useState("");
   const [slackSaveStatus, setSlackSaveStatus] = useState<"idle" | "success" | "error">("idle");
   const [slackTestResult, setSlackTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [emailExpanded, setEmailExpanded] = useState(false);
+  const [forwardCopied, setForwardCopied] = useState(false);
 
   // ─── Queries ──────────────────────────────────────────────────────────────
 
@@ -849,6 +930,10 @@ export function ToolsPanel({
     },
   });
 
+  const customTools = (tools ?? []).filter((tool) => !PRESET_NAMES.has(tool.name));
+  const editingTool = (tools ?? []).find((tool) => tool.id === editingId) ?? null;
+  const executionsOpen = Boolean(editingId);
+
   const { data: executions, isLoading: executionsLoading } = useQuery<ToolExecution[]>({
     queryKey: ["tool-executions", projectId],
     queryFn: async () => {
@@ -856,7 +941,7 @@ export function ToolsPanel({
       if (!res.ok) throw new Error("Failed to fetch executions");
       return res.json();
     },
-    enabled: showLogs,
+    enabled: executionsOpen,
   });
 
   // ─── Telegram Preset Query ────────────────────────────────────────────────
@@ -882,6 +967,15 @@ export function ToolsPanel({
   });
 
   const slackConfigured = !!(slackData?.slackBotToken && slackData.slackSigningSecret);
+
+  const { data: inboundEmail } = useQuery<InboundEmailData>({
+    queryKey: ["inbound-email", projectId],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/inbound-email`);
+      if (!res.ok) throw new Error("Failed to fetch email config");
+      return res.json();
+    },
+  });
 
   // ─── Mutations ────────────────────────────────────────────────────────────
 
@@ -958,7 +1052,6 @@ export function ToolsPanel({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tools", projectId] });
-      if (expandedId) setExpandedId(null);
     },
   });
 
@@ -1094,17 +1187,92 @@ export function ToolsPanel({
     },
   });
 
+  const createMcp = useMutation({
+    mutationFn: async (input: {
+      name: string;
+      url: string;
+      authMode: McpAuthMode;
+      bearerToken?: string;
+      headers?: Record<string, string>;
+    }) => {
+      const res = await fetch(`/api/projects/${projectId}/sidechat/mcp/connections`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Could not connect" }));
+        throw new Error((err as { error?: string }).error ?? "Could not connect");
+      }
+      return res.json() as Promise<{ connection: { authUrl?: string; name: string } }>;
+    },
+    onSuccess: ({ connection }) => {
+      queryClient.invalidateQueries({ queryKey: ["sidechat-mcp", projectId] });
+      resetForm();
+      if (connection.authUrl) {
+        window.location.assign(connection.authUrl);
+      }
+    },
+    onError: (err: Error) => {
+      setFormError(err.message);
+    },
+  });
+
+  const ignoreInboundAddress = useMutation({
+    mutationFn: async ({
+      addressId,
+      ignored,
+    }: {
+      addressId: string;
+      ignored: boolean;
+    }) => {
+      const res = await fetch(
+        `/api/projects/${projectId}/inbound-email/addresses/${addressId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ignored }),
+        },
+      );
+      if (!res.ok) throw new Error("Failed to update address");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["inbound-email", projectId] });
+    },
+  });
+
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
   function resetForm() {
-    setShowForm(false);
+    setDrawerKind(null);
+    setEditingId(null);
+    setForm(emptyForm);
+    setMcpForm(emptyMcpForm);
+    setCustomHeadersDirty(false);
+    setCustomHasStoredHeaders(false);
+    setFormError(null);
+    setTestingId(null);
+    setTestResult(null);
+  }
+
+  function openHttpAdd() {
     setEditingId(null);
     setForm(emptyForm);
     setCustomHeadersDirty(false);
     setCustomHasStoredHeaders(false);
     setFormError(null);
+    setTestingId(null);
+    setTestResult(null);
+    setDrawerKind("http");
   }
 
+  function openMcpAdd() {
+    setEditingId(null);
+    setMcpForm(emptyMcpForm);
+    setFormError(null);
+    setDrawerKind("mcp");
+  }
 
   function startEdit(tool: Tool) {
     setCustomHasStoredHeaders(Boolean(tool.headers && Object.keys(tool.headers).length > 0));
@@ -1125,8 +1293,7 @@ export function ToolsPanel({
       access: tool.access,
     });
     setFormError(null);
-    setShowForm(true);
-    setExpandedId(null);
+    setDrawerKind("http");
   }
 
   function startTest(tool: Tool) {
@@ -1139,16 +1306,50 @@ export function ToolsPanel({
     setTestParams(params);
   }
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  function handleSubmit() {
     setFormError(null);
     if (editingId) {
       const data: Partial<ToolFormData> = { ...form };
       if (!customHeadersDirty) delete data.headers;
       updateTool.mutate({ id: editingId, data });
-    } else {
-      createTool.mutate(form);
+      return;
     }
+    createTool.mutate(form);
+  }
+
+  function submitMcp() {
+    setFormError(null);
+    if (!mcpForm.name.trim() || !mcpForm.url.trim()) {
+      setFormError("Enter a server name and HTTPS URL.");
+      return;
+    }
+    const input: {
+      name: string;
+      url: string;
+      authMode: McpAuthMode;
+      bearerToken?: string;
+      headers?: Record<string, string>;
+    } = {
+      name: mcpForm.name.trim(),
+      url: mcpForm.url.trim(),
+      authMode: mcpForm.authMode,
+    };
+    if (mcpForm.authMode === "bearer") {
+      if (!mcpForm.bearerToken) {
+        setFormError("Paste a bearer token.");
+        return;
+      }
+      input.bearerToken = mcpForm.bearerToken;
+    }
+    if (mcpForm.authMode === "headers") {
+      const headers = toHeaderRecord(mcpForm.headers);
+      if (Object.keys(headers).length === 0) {
+        setFormError("Add at least one header with a name and a value.");
+        return;
+      }
+      input.headers = headers;
+    }
+    createMcp.mutate(input);
   }
 
   function addParameter() {
@@ -1175,29 +1376,17 @@ export function ToolsPanel({
     }));
   }
 
-  function addHeader() {
-    setCustomHeadersDirty(true);
-    setForm((prev) => ({
-      ...prev,
-      headers: [...prev.headers, { key: "", value: "" }],
-    }));
-  }
+  const emailReceiving = (inboundEmail?.addresses.length ?? 0) > 0;
 
-  function updateHeader(index: number, field: "key" | "value", value: string) {
-    setCustomHeadersDirty(true);
-    setForm((prev) => ({
-      ...prev,
-      headers: prev.headers.map((h, i) => (i === index ? { ...h, [field]: value } : h)),
-    }));
-  }
+  const toolExecutions = (executions ?? [])
+    .filter((exec) => exec.toolId === editingTool?.id)
+    .slice(0, 8);
 
-  function removeHeader(index: number) {
-    setCustomHeadersDirty(true);
-    setForm((prev) => ({
-      ...prev,
-      headers: prev.headers.filter((_, i) => i !== index),
-    }));
-  }
+  const storedHeaderNotice = describeStoredHeaders({
+    editing: Boolean(editingId),
+    hasStoredHeaders: customHasStoredHeaders,
+    dirty: customHeadersDirty,
+  });
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -1213,115 +1402,96 @@ export function ToolsPanel({
               </h1>
             </div>
           </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button>
+                <Plus className="w-4 h-4 mr-2" />
+                Add Connector
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-40">
+              <DropdownMenuItem
+                disabled={(tools?.length ?? 0) >= 20}
+                onSelect={openHttpAdd}
+              >
+                HTTP Request
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={openMcpAdd}>
+                MCP Server
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       )}
 
-      {!showLogs && <McpConnections projectId={projectId} />}
-
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-foreground">
-            {showLogs ? "Execution Log" : "Connectors"}
-          </h2>
-          {showLogs && (
-            <p className="text-sm text-muted-foreground mt-1">
-              Review recent connector calls and responses.
-            </p>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {showLogs ? (
-            <Button
-              variant="outline"
-              onClick={() => setShowLogs(false)}
-            >
-              <ChevronRight className="w-4 h-4 mr-2 rotate-180" />
-              Back to Connectors
-            </Button>
-          ) : (
-            <>
-              <Button
-                variant="outline"
-                onClick={() => setShowLogs(true)}
-              >
-                <History className="w-4 h-4 mr-2" />
-                View Logs
-              </Button>
-            </>
-          )}
-          {!showLogs && (
-          <Button
-            onClick={() => {
-              resetForm();
-              setShowForm(true);
-            }}
-            disabled={(tools?.length ?? 0) >= 20}
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Add Connector
-          </Button>
-          )}
-        </div>
-      </div>
+      <McpConnections projectId={projectId} />
 
       {/* Tool limit warning */}
-      {!showLogs && (tools?.length ?? 0) >= 20 && (
+      {(tools?.length ?? 0) >= 20 && (
         <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-warning/10 text-warning text-sm">
           <AlertCircle className="w-4 h-4 shrink-0" />
           Maximum of 20 connectors reached. Delete an existing connector to add a new one.
         </div>
       )}
 
-      {/* ─── Create / Edit Form ──────────────────────────────────────────── */}
-      {!showLogs && showForm && (
-        <div className="bg-card rounded-2xl p-6 space-y-5">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-foreground">
-              {editingId ? "Edit Connector" : "New Connector"}
-            </h2>
-            <button onClick={resetForm} className="p-1 rounded-lg hover:bg-muted text-muted-foreground">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
+      <Sheet
+        open={drawerKind !== null}
+        onOpenChange={(open) => {
+          if (!open) resetForm();
+        }}
+      >
+        <SheetContent side="right" aria-describedby={undefined} className="sm:max-w-xl">
+          <SheetHeader>
+            <SheetHeaderContent>
+              <SheetTitle>
+                {drawerKind === "mcp" ? "MCP Server" : "HTTP Request"}
+              </SheetTitle>
+            </SheetHeaderContent>
+            <SheetHeaderActions>
+              <SheetCloseButton label="Close connector" />
+            </SheetHeaderActions>
+          </SheetHeader>
 
-          {formError && (
-            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 text-destructive text-sm">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              {formError}
-            </div>
-          )}
+          <SheetBody className="space-y-5 px-6 py-5">
+            {formError && (
+              <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                {formError}
+              </div>
+            )}
 
-          <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Basic Info */}
+            {drawerKind === "http" && (
+            <form
+              className="space-y-5"
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleSubmit();
+              }}
+            >
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-foreground">
                   Machine Name <span className="text-destructive">*</span>
                 </label>
-                <input
+                <Input
                   type="text"
                   value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                   placeholder="check_order_status"
                   required
                   disabled={!!editingId}
-                  className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
                 />
-                <p className="text-xs text-muted-foreground">
-                  Lowercase letters, numbers, underscores. Cannot be changed after creation.
-                </p>
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-foreground">
                   Display Name <span className="text-destructive">*</span>
                 </label>
-                <input
+                <Input
                   type="text"
                   value={form.displayName}
                   onChange={(e) => setForm((f) => ({ ...f, displayName: e.target.value }))}
                   placeholder="Check Order Status"
                   required
-                  className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               </div>
             </div>
@@ -1336,10 +1506,10 @@ export function ToolsPanel({
                 placeholder="Looks up the current status of a customer order by order ID. Returns tracking info and estimated delivery."
                 required
                 rows={2}
-                className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+                className="border-border placeholder:text-muted-foreground min-h-[72px] w-full resize-none rounded-lg border bg-input-background px-3 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
               />
               <p className="text-xs text-muted-foreground">
-                The AI uses this to decide when to call this connector. Be specific about what it does and when to use it.
+                Maven uses this to decide when to call it.
               </p>
             </div>
 
@@ -1352,115 +1522,36 @@ export function ToolsPanel({
                 setForm((current) => ({ ...current, ...policy }))
               }
             />
+            <EndpointField
+              label="Endpoint"
+              url={form.endpoint}
+              onUrlChange={(endpoint) => setForm((f) => ({ ...f, endpoint }))}
+              placeholder="https://api.example.com/orders/status"
+              required
+              method={form.method}
+              onMethodChange={(method) => setForm((f) => ({ ...f, method }))}
+              timeout={form.timeout}
+              timeoutOptions={TIMEOUT_OPTIONS}
+              onTimeoutChange={(timeout) => setForm((f) => ({ ...f, timeout }))}
+            />
 
-            {/* HTTP Config */}
-            <div className="space-y-4 rounded-xl bg-muted/20 p-4">
-              <h3 className="text-sm font-semibold text-foreground">HTTP Configuration</h3>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Endpoint</label>
-                <div className="flex flex-wrap gap-2 sm:flex-nowrap">
-                  <div className="shrink-0">
-                    <div className="flex h-[42px] rounded-lg border border-input bg-background overflow-hidden">
-                      {(["POST", "GET"] as const).map((m) => (
-                        <button
-                          key={m}
-                          type="button"
-                          onClick={() => setForm((f) => ({ ...f, method: m }))}
-                          className={cn(
-                            "px-4 text-sm font-medium transition-colors",
-                            form.method === m
-                              ? "bg-primary text-primary-foreground"
-                              : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
-                          )}
-                        >
-                          {m}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <input
-                    type="url"
-                    value={form.endpoint}
-                    onChange={(e) => setForm((f) => ({ ...f, endpoint: e.target.value }))}
-                    placeholder="https://api.example.com/orders/status"
-                    required
-                    className="order-3 w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring sm:order-none sm:min-w-0 sm:flex-1 sm:w-auto"
-                  />
-                  <Select
-                    value={String(form.timeout)}
-                    onValueChange={(v) => setForm((f) => ({ ...f, timeout: Number(v) }))}
-                  >
-                    <SelectTrigger
-                      className="w-28 h-[42px] shrink-0 rounded-xl"
-                      title="Request timeout"
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {TIMEOUT_OPTIONS.map((ms) => (
-                        <SelectItem key={ms} value={String(ms)}>
-                          {ms / 1000}s timeout
-                        </SelectItem>
-                      ))}
-                      {!TIMEOUT_OPTIONS.includes(form.timeout) && (
-                        <SelectItem value={String(form.timeout)}>
-                          {form.timeout / 1000}s timeout
-                        </SelectItem>
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </div>
-
-            {/* Headers */}
-            <div className="space-y-3 rounded-xl bg-muted/20 p-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-foreground">Headers</h3>
-                <Button type="button" variant="ghost" size="sm" onClick={addHeader} className="h-7 text-xs">
-                  <Plus className="w-3.5 h-3.5 mr-1" />
-                  Add
-                </Button>
-              </div>
-              {form.headers.length === 0 && (
-                <p className="text-xs text-muted-foreground py-1">
-                  {editingId && customHasStoredHeaders && !customHeadersDirty ? (
-                    <><strong className="font-semibold text-foreground">Saved headers are hidden.</strong> They will be kept unless you add replacements.</>
-                  ) : editingId && customHasStoredHeaders ? (
-                    <><strong className="font-semibold text-foreground">Saved headers will be removed.</strong> Add replacement headers to keep authentication configured.</>
-                  ) : (
-                    "No custom headers. Add authentication or other headers above."
-                  )}
-                </p>
-              )}
-              <div className="space-y-2">
-                {form.headers.map((header, i) => (
-                  <div key={i} className="flex flex-wrap sm:flex-nowrap items-center gap-2">
-                    <input
-                      type="text"
-                      value={header.key}
-                      onChange={(e) => updateHeader(i, "key", e.target.value)}
-                      placeholder="Header name"
-                      className="w-full sm:w-[180px] shrink-0 px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring font-mono text-xs"
-                    />
-                    <input
-                      type="text"
-                      value={header.value}
-                      onChange={(e) => updateHeader(i, "value", e.target.value)}
-                      placeholder="Value"
-                      className="flex-1 px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeHeader(i)}
-                      className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <HeaderFields
+              value={form.headers}
+              onChange={(headers) => {
+                setCustomHeadersDirty(true);
+                setForm((f) => ({ ...f, headers }));
+              }}
+              emptyState={
+                storedHeaderNotice && (
+                  <p className="py-1 text-xs text-muted-foreground">
+                    <strong className="font-semibold text-foreground">
+                      {storedHeaderNotice.title}
+                    </strong>{" "}
+                    {storedHeaderNotice.detail}
+                  </p>
+                )
+              }
+            />
 
             {/* Parameters */}
             <div className="space-y-3 rounded-xl bg-muted/20 p-4">
@@ -1478,39 +1569,24 @@ export function ToolsPanel({
                   Add
                 </Button>
               </div>
-              {form.parameters.length === 0 && (
-                <p className="text-xs text-muted-foreground py-1">
-                  No parameters. The AI will call this connector without any input data.
-                </p>
-              )}
               <div className="space-y-2">
                 {form.parameters.map((param, i) => (
                   <div key={i} className="rounded-lg bg-background p-3 space-y-2">
                     <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
-                      <input
+                      <Input
                         type="text"
                         value={param.name}
                         onChange={(e) => updateParameter(i, { name: e.target.value })}
                         placeholder="parameter_name"
-                        className="flex-1 px-3 py-1.5 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring font-mono text-xs"
+                        className="flex-1 font-mono text-xs"
                       />
-                      <div className="flex h-[34px] rounded-lg border border-input bg-background overflow-hidden shrink-0">
-                        {(["string", "number", "boolean"] as const).map((t) => (
-                          <button
-                            key={t}
-                            type="button"
-                            onClick={() => updateParameter(i, { type: t })}
-                            className={cn(
-                              "px-2.5 text-xs font-medium transition-colors capitalize",
-                              param.type === t
-                                ? "bg-primary text-primary-foreground"
-                                : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
-                            )}
-                          >
-                            {t}
-                          </button>
-                        ))}
-                      </div>
+                      <Segmented
+                        size="sm"
+                        label="Parameter type"
+                        value={param.type}
+                        options={PARAMETER_TYPE_OPTIONS}
+                        onValueChange={(type) => updateParameter(i, { type })}
+                      />
                       <label className="flex items-center gap-1.5 shrink-0 cursor-pointer select-none">
                         <Switch
                           checked={param.required}
@@ -1527,12 +1603,11 @@ export function ToolsPanel({
                         <X className="w-3.5 h-3.5" />
                       </button>
                     </div>
-                    <input
+                    <Input
                       type="text"
                       value={param.description}
                       onChange={(e) => updateParameter(i, { description: e.target.value })}
-                      placeholder="Description — helps the AI understand what to provide"
-                      className="w-full px-3 py-1.5 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring text-muted-foreground"
+                      placeholder="What the AI should provide"
                     />
                   </div>
                 ))}
@@ -1541,14 +1616,11 @@ export function ToolsPanel({
 
             {/* Response Mapping */}
             <div className="space-y-3 rounded-xl bg-muted/20 p-4">
-              <div>
-                <h3 className="text-sm font-semibold text-foreground">Response Mapping</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">Optional. Configure how the API response is processed.</p>
-              </div>
+              <h3 className="text-sm font-semibold text-foreground">Response Mapping</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-muted-foreground">Result JSON Path</label>
-                  <input
+                  <Input
                     type="text"
                     value={form.responseMapping.resultPath ?? ""}
                     onChange={(e) =>
@@ -1558,13 +1630,12 @@ export function ToolsPanel({
                       }))
                     }
                     placeholder="data.result"
-                    className="w-full h-9 px-3 rounded-lg border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring font-mono text-xs"
+                    className="font-mono text-xs"
                   />
-                  <p className="text-xs text-muted-foreground">Dot-notation path to extract from the response.</p>
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-muted-foreground">Summary Template</label>
-                  <input
+                  <Input
                     type="text"
                     value={form.responseMapping.summaryTemplate ?? ""}
                     onChange={(e) =>
@@ -1574,30 +1645,203 @@ export function ToolsPanel({
                       }))
                     }
                     placeholder="Order {{order_id}} is {{status}}"
-                    className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                   />
-                  <p className="text-xs text-muted-foreground">Template for the AI to summarize the result.</p>
                 </div>
               </div>
             </div>
+            </form>
+            )}
 
-            {/* Submit */}
-            <div className="flex gap-2 pt-2">
-              <Button type="submit" disabled={createTool.isPending || updateTool.isPending}>
-                {(createTool.isPending || updateTool.isPending) && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                {editingId ? "Update Connector" : "Create Connector"}
-              </Button>
-              <Button type="button" variant="outline" onClick={resetForm}>
-                Cancel
-              </Button>
-            </div>
-          </form>
-        </div>
-      )}
+            {drawerKind === "http" && editingTool && (
+              <div className="space-y-4">
+                <label className="flex min-h-8 cursor-pointer items-center justify-between gap-3">
+                  <span className="text-sm font-medium text-foreground">Enabled</span>
+                  <Switch
+                    aria-label={`Enable ${editingTool.displayName}`}
+                    checked={form.enabled}
+                    onCheckedChange={(checked) => {
+                      setForm((current) => ({ ...current, enabled: checked }));
+                      toggleTool.mutate({ id: editingTool.id, enabled: checked });
+                    }}
+                    size="sm"
+                  />
+                </label>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => startTest(editingTool)}
+                >
+                  <Play className="mr-1.5 size-3.5" />
+                  Test
+                </Button>
+                {testingId === editingTool.id && (
+                  <div className="space-y-3 rounded-xl bg-muted/20 p-3">
+                    {editingTool.parameters.length > 0 ? (
+                      <div className="space-y-2">
+                        {editingTool.parameters.map((param) => (
+                          <label key={param.name} className="space-y-1.5 text-sm font-medium">
+                            {param.name}
+                            <Input
+                              type="text"
+                              value={testParams[param.name] ?? ""}
+                              onChange={(event) =>
+                                setTestParams((prev) => ({
+                                  ...prev,
+                                  [param.name]: event.target.value,
+                                }))
+                              }
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">This connector takes no parameters.</p>
+                    )}
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        const parsed: Record<string, unknown> = {};
+                        for (const param of editingTool.parameters) {
+                          const val = testParams[param.name] ?? "";
+                          if (param.type === "number") parsed[param.name] = Number(val);
+                          else if (param.type === "boolean") parsed[param.name] = val === "true";
+                          else parsed[param.name] = val;
+                        }
+                        testTool.mutate({ id: editingTool.id, params: parsed });
+                      }}
+                      disabled={testTool.isPending}
+                    >
+                      {testTool.isPending
+                        ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                        : <Play className="mr-1.5 h-3.5 w-3.5" />}
+                      Run Test
+                    </Button>
+                    {testResult && (
+                      <pre
+                        className={cn(
+                          "max-h-48 overflow-auto whitespace-pre-wrap rounded-lg p-3 font-mono text-xs",
+                          testResult.success
+                            ? "bg-success/10 text-success"
+                            : "bg-destructive/10 text-destructive",
+                        )}
+                      >
+                        {typeof testResult.data === "string"
+                          ? testResult.data
+                          : JSON.stringify(testResult.data, null, 2)}
+                      </pre>
+                    )}
+                  </div>
+                )}
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium text-muted-foreground">Recent executions</p>
+                  {executionsLoading && (
+                    <p className="text-xs text-muted-foreground">Loading executions.</p>
+                  )}
+                  {!executionsLoading && toolExecutions.length === 0 && (
+                    <p className="text-xs text-muted-foreground">No recent executions.</p>
+                  )}
+                  {!executionsLoading &&
+                    toolExecutions.map((exec) => (
+                      <p key={exec.id} className="text-xs text-muted-foreground">
+                        {executionLine(exec)}
+                      </p>
+                    ))}
+                </div>
+              </div>
+            )}
+
+            {drawerKind === "mcp" && (
+              <div className="space-y-5">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-foreground">
+                    Server name
+                  </label>
+                  <Input
+                    value={mcpForm.name}
+                    onChange={(event) =>
+                      setMcpForm((current) => ({ ...current, name: event.target.value }))
+                    }
+                    placeholder="Customer data"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-foreground">
+                    HTTPS server URL
+                  </label>
+                  <Input
+                    type="url"
+                    value={mcpForm.url}
+                    onChange={(event) =>
+                      setMcpForm((current) => ({ ...current, url: event.target.value }))
+                    }
+                    placeholder="https://mcp.example.com/mcp"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-foreground">
+                    Authentication
+                  </label>
+                  <Segmented
+                    label="Authentication method"
+                    value={mcpForm.authMode}
+                    options={MCP_AUTH_OPTIONS}
+                    onValueChange={(authMode) =>
+                      setMcpForm((current) => ({ ...current, authMode }))
+                    }
+                  />
+                </div>
+                {mcpForm.authMode === "bearer" && (
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium text-foreground">
+                      Bearer token
+                    </label>
+                    <Input
+                      type="password"
+                      autoComplete="new-password"
+                      value={mcpForm.bearerToken}
+                      onChange={(event) =>
+                        setMcpForm((current) => ({ ...current, bearerToken: event.target.value }))
+                      }
+                      placeholder="Paste token"
+                    />
+                  </div>
+                )}
+                {mcpForm.authMode === "headers" && (
+                  <HeaderFields
+                    value={mcpForm.headers}
+                    onChange={(headers) =>
+                      setMcpForm((current) => ({ ...current, headers }))
+                    }
+                  />
+                )}
+              </div>
+            )}
+          </SheetBody>
+
+          <SheetFooter>
+            <Button
+              type="button"
+              disabled={
+                drawerKind === "mcp"
+                  ? createMcp.isPending
+                  : createTool.isPending || updateTool.isPending
+              }
+              onClick={() => {
+                if (drawerKind === "mcp") submitMcp();
+                else handleSubmit();
+              }}
+            >
+              {(createTool.isPending || updateTool.isPending || createMcp.isPending) && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              {drawerKind === "mcp" ? "Connect" : editingId ? "Update" : "Create"}
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
 
       {/* ─── Tools Tab ───────────────────────────────────────────────────── */}
-      {!showLogs && (
-        <>
           {/* Loading */}
           {isLoading && (
             <div className="space-y-3">
@@ -1634,23 +1878,12 @@ export function ToolsPanel({
                   </div>
                 }
                 title="Telegram Handoff"
-                titleAdornment={
-                  <>
-                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                      Preset
-                    </Badge>
-                    {!telegramConfigured && (
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-warning border-warning/30">
-                        Not configured
-                      </Badge>
-                    )}
-                  </>
-                }
                 subtitle={
                   telegramConfigured
                     ? "Live agent handoff via Telegram when the bot cannot answer"
                     : "Set up Telegram to receive live handoff notifications"
                 }
+                status={connectorStatus(telegramConfigured)}
                 configured={telegramConfigured}
                 open={telegramExpanded}
                 onOpenChange={setTelegramExpanded}
@@ -1672,21 +1905,9 @@ export function ToolsPanel({
                           placeholder={telegramConfigured ? "Enter new token to update" : "Paste your bot token from @BotFather"}
                           className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                         />
-                        <Accordion type="single" collapsible>
-                          <AccordionItem value="bot-token-help" className="border-0">
-                            <AccordionTrigger className="py-1 text-xs text-muted-foreground hover:text-foreground hover:no-underline">
-                              How do I get a bot token?
-                            </AccordionTrigger>
-                            <AccordionContent className="text-xs text-muted-foreground pb-1">
-                              <ol className="list-decimal list-inside space-y-1">
-                                <li>Open Telegram and search for <strong className="text-foreground">@BotFather</strong></li>
-                                <li>Send <code className="bg-muted px-1 rounded">/newbot</code> and follow the prompts to name your bot</li>
-                                <li>BotFather will reply with a token like <code className="bg-muted px-1 rounded">123456:ABC-DEF...</code> — copy it</li>
-                                <li>Paste it in the field above</li>
-                              </ol>
-                            </AccordionContent>
-                          </AccordionItem>
-                        </Accordion>
+                        <p className="text-xs text-muted-foreground">
+                          Get a token from @BotFather in Telegram.
+                        </p>
                       </div>
                       <div className="space-y-1.5">
                         <label className="text-xs font-medium text-muted-foreground">
@@ -1765,30 +1986,19 @@ export function ToolsPanel({
                     "w-8 h-8 rounded-lg flex items-center justify-center",
                     slackConfigured ? "bg-[#4A154B]/15" : "bg-muted",
                   )}>
-                    <Slack className={cn(
+                    <Headset className={cn(
                       "w-4 h-4",
                       slackConfigured ? "text-[#4A154B]" : "text-muted-foreground",
                     )} />
                   </div>
                 }
                 title="Slack Handoff"
-                titleAdornment={
-                  <>
-                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                      Preset
-                    </Badge>
-                    {!slackConfigured && (
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-warning border-warning/30">
-                        Not configured
-                      </Badge>
-                    )}
-                  </>
-                }
                 subtitle={
                   slackConfigured
                     ? "Live agent handoff via Slack when the bot cannot answer"
                     : "Set up Slack to receive live handoff notifications"
                 }
+                status={connectorStatus(slackConfigured)}
                 configured={slackConfigured}
                 open={slackExpanded}
                 onOpenChange={setSlackExpanded}
@@ -1894,6 +2104,114 @@ export function ToolsPanel({
                 </div>
               </ExpandableToolCard>
 
+              <ExpandableToolCard
+                mark={
+                  <div className={cn(
+                    "w-8 h-8 rounded-lg flex items-center justify-center",
+                    emailReceiving ? "bg-brand/15" : "bg-muted",
+                  )}>
+                    <Inbox className={cn(
+                      "w-4 h-4",
+                      emailReceiving
+                        ? "text-brand"
+                        : "text-muted-foreground",
+                    )} />
+                  </div>
+                }
+                title="Email"
+                subtitle={
+                  emailReceiving
+                    ? inboundEmailSubtitle(inboundEmail?.addresses ?? [])
+                    : "Forward support mail into ReplyMaven"
+                }
+                status="Configure"
+                configured={emailReceiving}
+                open={emailExpanded}
+                onOpenChange={setEmailExpanded}
+                panelId="inbound-email-panel"
+              >
+                <div className="space-y-4 px-4 py-4">
+                  <div className="space-y-1.5">
+                    <p className="text-sm font-medium text-foreground">
+                      Support inbox
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Forward your emails to{" "}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!inboundEmail?.forwardTo) return;
+                          void navigator.clipboard.writeText(inboundEmail.forwardTo);
+                          setForwardCopied(true);
+                          setTimeout(() => setForwardCopied(false), 1500);
+                        }}
+                        className="inset-ring inset-ring-border hover:bg-muted/40 inline-flex items-center gap-1.5 rounded-sm px-1.5 py-0.5 align-baseline font-mono text-xs text-foreground transition-colors"
+                      >
+                        {inboundEmail?.forwardTo ?? ""}
+                        {forwardCopied
+                          ? <CheckCircle2 className="size-3" />
+                          : <Copy className="size-3" />}
+                      </button>{" "}
+                      to be handled by Maven.{" "}
+                      <a
+                        href={EMAIL_FORWARDING_DOCS_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-foreground underline underline-offset-2"
+                      >
+                        Learn more &rarr;
+                      </a>
+                    </p>
+                  </div>
+                  {(inboundEmail?.addresses.length ?? 0) > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium text-foreground">Addresses</p>
+                      {inboundEmail?.addresses.map((address) => (
+                        <div
+                          key={address.id}
+                          className={cn(
+                            "flex min-h-10 items-center justify-between gap-3 rounded-lg px-1",
+                            address.ignored && "opacity-50",
+                          )}
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-sm text-foreground">
+                              {address.address}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {inboundAddressStatus(address)}
+                            </p>
+                          </div>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type="button"
+                                className="flex size-10 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/40"
+                                aria-label={`Address actions for ${address.address}`}
+                              >
+                                <MoreHorizontal className="size-4" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="min-w-32">
+                              <DropdownMenuItem
+                                onSelect={() =>
+                                  ignoreInboundAddress.mutate({
+                                    addressId: address.id,
+                                    ignored: !address.ignored,
+                                  })
+                                }
+                              >
+                                {address.ignored ? "Receive again" : "Ignore"}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </ExpandableToolCard>
+
               {/* ─── Preset Tools ──────────────────────────────────────────── */}
               {TOOL_PRESETS.map((preset) => (
                 <PresetToolRow
@@ -1906,365 +2224,50 @@ export function ToolsPanel({
               </div>
 
               {/* ─── Custom Tools ──────────────────────────────────────────── */}
-              {tools?.filter((tool) => !PRESET_NAMES.has(tool.name)).map((tool) => (
-                <div
-                  key={tool.id}
-                  className="bg-card rounded-xl overflow-hidden"
-                >
-                  {/* Tool Row */}
-                  <div
-                    className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors"
-                    onClick={() => setExpandedId(expandedId === tool.id ? null : tool.id)}
-                  >
-                    <div className="flex items-center gap-2 shrink-0">
-                      {expandedId === tool.id ? (
-                        <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                      ) : (
-                        <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                      )}
-                      <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center">
-                        <Wrench className="w-4 h-4 text-muted-foreground" />
+              {customTools.map((tool) => {
+                return (
+                  <ExpandableToolCard
+                    key={tool.id}
+                    mark={
+                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted">
+                        <Cable className="h-4 w-4 text-muted-foreground" />
                       </div>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-medium text-foreground truncate">
-                          {tool.displayName}
-                        </p>
-                        <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                          {tool.method}
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-muted-foreground truncate">{tool.description}</p>
-                    </div>
-                    <div className="flex items-center gap-1 sm:gap-3 shrink-0">
-                      <Switch
-                        checked={tool.enabled}
-                        onCheckedChange={(checked) => {
-                          toggleTool.mutate({ id: tool.id, enabled: checked });
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                        size="sm"
-                      />
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          startEdit(tool);
-                        }}
-                        className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"
-                        title="Edit"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          startTest(tool);
-                        }}
-                        className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"
-                        title="Test"
-                      >
-                        <Play className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteTool.mutate(tool.id);
-                        }}
-                        disabled={deleteTool.isPending}
-                        className="p-1.5 rounded-lg hover:bg-destructive/10 text-destructive disabled:opacity-50"
-                        title="Delete"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Expanded Details */}
-                  {expandedId === tool.id && (
-                    <div className="px-4 py-4 space-y-4">
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
-                        <div>
-                          <p className="text-xs font-medium text-muted-foreground mb-1">Machine Name</p>
-                          <code className="text-xs bg-muted px-2 py-1 rounded">{tool.name}</code>
-                        </div>
-                        <div>
-                          <p className="text-xs font-medium text-muted-foreground mb-1">Endpoint</p>
-                          <p className="text-xs text-foreground truncate">{tool.endpoint}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs font-medium text-muted-foreground mb-1">Timeout</p>
-                          <p className="text-xs text-foreground">{tool.timeout}ms</p>
-                        </div>
-                      </div>
-
-                      {tool.parameters.length > 0 && (
-                        <div>
-                          <p className="text-xs font-medium text-muted-foreground mb-2">Parameters</p>
-                          <div className="space-y-1">
-                            {tool.parameters.map((param, i) => (
-                              <div key={i} className="flex items-center gap-2 text-xs">
-                                <code className="bg-muted px-1.5 py-0.5 rounded">{param.name}</code>
-                                <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{param.type}</Badge>
-                                {param.required && (
-                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0">required</Badge>
-                                )}
-                                {param.description && (
-                                  <span className="text-muted-foreground">{param.description}</span>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {tool.responseMapping && (
-                        <div>
-                          <p className="text-xs font-medium text-muted-foreground mb-1">Response Mapping</p>
-                          <div className="text-xs space-y-0.5">
-                            {tool.responseMapping.resultPath && (
-                              <p><span className="text-muted-foreground">Path:</span> <code className="bg-muted px-1 rounded">{tool.responseMapping.resultPath}</code></p>
-                            )}
-                            {tool.responseMapping.summaryTemplate && (
-                              <p><span className="text-muted-foreground">Template:</span> {tool.responseMapping.summaryTemplate}</p>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Test Panel */}
-                  {testingId === tool.id && (
-                    <div className="px-4 py-4 space-y-3 bg-muted/20">
-                      <div className="flex items-center justify-between">
-                        <h4 className="text-sm font-semibold text-foreground">Test Connector</h4>
-                        <button
-                          onClick={() => {
-                            setTestingId(null);
-                            setTestResult(null);
-                          }}
-                          className="p-1 rounded-lg hover:bg-muted text-muted-foreground"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                      {tool.parameters.length > 0 ? (
-                        <div className="space-y-2">
-                          {tool.parameters.map((param) => (
-                            <div key={param.name} className="flex flex-col sm:flex-row sm:items-center gap-2">
-                              <label className="text-xs font-medium text-muted-foreground w-full sm:w-28 shrink-0">
-                                {param.name}
-                                {param.required && <span className="text-destructive ml-0.5">*</span>}
-                              </label>
-                              <input
-                                type="text"
-                                value={testParams[param.name] ?? ""}
-                                onChange={(e) =>
-                                  setTestParams((prev) => ({ ...prev, [param.name]: e.target.value }))
-                                }
-                                placeholder={`${param.type}${param.description ? ` — ${param.description}` : ""}`}
-                                className="flex-1 px-3 py-1.5 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">This connector takes no parameters.</p>
-                      )}
-                      <Button
-                        size="sm"
-                        onClick={() => {
-                          const parsed: Record<string, unknown> = {};
-                          for (const param of tool.parameters) {
-                            const val = testParams[param.name] ?? "";
-                            if (param.type === "number") parsed[param.name] = Number(val);
-                            else if (param.type === "boolean") parsed[param.name] = val === "true";
-                            else parsed[param.name] = val;
-                          }
-                          testTool.mutate({ id: tool.id, params: parsed });
-                        }}
-                        disabled={testTool.isPending}
-                      >
-                        {testTool.isPending ? (
-                          <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                        ) : (
-                          <Play className="w-3.5 h-3.5 mr-1.5" />
-                        )}
-                        Run Test
-                      </Button>
-                      {testResult && (
-                        <div
-                          className={cn(
-                            "rounded-lg p-3 text-xs font-mono whitespace-pre-wrap max-h-48 overflow-auto",
-                            testResult.success
-                              ? "bg-success/10 text-success"
-                              : "bg-destructive/10 text-destructive",
-                          )}
-                        >
-                          {typeof testResult.data === "string"
-                            ? testResult.data
-                            : JSON.stringify(testResult.data, null, 2)}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
+                    }
+                    title={tool.displayName}
+                    subtitle={tool.description}
+                    status={connectorStatus(true)}
+                    configured
+                    mode="action"
+                    onActivate={() => startEdit(tool)}
+                    trailing={
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            aria-label={`More options for ${tool.displayName}`}
+                            className="flex size-10 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
+                          >
+                            <MoreHorizontal className="size-4" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="min-w-32">
+                          <DropdownMenuItem
+                            variant="destructive"
+                            disabled={deleteTool.isPending}
+                            onSelect={() => deleteTool.mutate(tool.id)}
+                          >
+                            <Trash2 />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    }
+                  />
+                );
+              })}
 
             </div>
           )}
-        </>
-      )}
-
-      {/* ─── Execution Log Tab ───────────────────────────────────────────── */}
-      {showLogs && (
-        <>
-          {executionsLoading && (
-            <div className="space-y-3">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="h-14 rounded-xl bg-muted animate-pulse" />
-              ))}
-            </div>
-          )}
-
-          {!executionsLoading && (
-            <div className="space-y-2">
-              {executions && executions.length > 0 ? (
-                executions.map((exec) => {
-                  const tool = tools?.find((t) => t.id === exec.toolId);
-                  const isLogExpanded = expandedLogId === exec.id;
-                  const StatusIcon =
-                    exec.status === "success"
-                      ? CheckCircle2
-                      : exec.status === "timeout"
-                        ? Clock
-                        : XCircle;
-                  const statusColor =
-                    exec.status === "success"
-                      ? "text-success"
-                      : exec.status === "timeout"
-                        ? "text-warning"
-                        : "text-destructive";
-
-                  let parsedInput: Record<string, unknown> | null = null;
-                  let parsedOutput: Record<string, unknown> | null = null;
-                  if (isLogExpanded) {
-                    try {
-                      parsedInput = exec.input ? JSON.parse(exec.input) : null;
-                    } catch { parsedInput = null; }
-                    try {
-                      parsedOutput = exec.output ? JSON.parse(exec.output) : null;
-                    } catch { parsedOutput = null; }
-                  }
-
-                  return (
-                    <div
-                      key={exec.id}
-                      className="bg-card rounded-xl overflow-hidden"
-                    >
-                      {/* Summary row */}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setExpandedLogId(isLogExpanded ? null : exec.id)
-                        }
-                        className="w-full px-4 py-3 flex items-center gap-4 hover:bg-white/[0.02] transition-colors"
-                      >
-                        <StatusIcon className={cn("w-4 h-4 shrink-0", statusColor)} />
-                        <div className="flex-1 min-w-0 text-left">
-                          <p className="text-sm font-medium text-foreground truncate">
-                            {tool?.displayName ?? exec.toolId}
-                          </p>
-                          {exec.errorMessage && (
-                            <p className="text-xs text-destructive truncate">{exec.errorMessage}</p>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 sm:gap-4 shrink-0 text-xs text-muted-foreground flex-wrap">
-                          {exec.httpStatus && (
-                            <span>HTTP {exec.httpStatus}</span>
-                          )}
-                          {exec.duration != null && (
-                            <span>{exec.duration}ms</span>
-                          )}
-                          <span>
-                            {new Date(exec.createdAt).toLocaleString()}
-                          </span>
-                          {isLogExpanded ? (
-                            <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                          ) : (
-                            <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                          )}
-                        </div>
-                      </button>
-
-                      {/* Expanded details */}
-                      {isLogExpanded && (
-                        <div className="px-4 py-3 space-y-3">
-                          {/* Input */}
-                          <div>
-                            <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">
-                              Input Parameters
-                            </p>
-                            {parsedInput && Object.keys(parsedInput).length > 0 ? (
-                              <pre className="bg-black/20 rounded-lg p-3 text-xs text-muted-foreground font-mono overflow-x-auto max-h-48 overflow-y-auto">
-                                {JSON.stringify(parsedInput, null, 2)}
-                              </pre>
-                            ) : (
-                              <p className="text-xs text-muted-foreground/50 italic">
-                                No input parameters
-                              </p>
-                            )}
-                          </div>
-
-                          {/* Output */}
-                          <div>
-                            <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">
-                              Output
-                            </p>
-                            {parsedOutput ? (
-                              <pre className="bg-black/20 rounded-lg p-3 text-xs text-muted-foreground font-mono overflow-x-auto max-h-48 overflow-y-auto">
-                                {JSON.stringify(parsedOutput, null, 2)}
-                              </pre>
-                            ) : exec.output ? (
-                              <pre className="bg-black/20 rounded-lg p-3 text-xs text-muted-foreground font-mono overflow-x-auto max-h-48 overflow-y-auto">
-                                {exec.output}
-                              </pre>
-                            ) : (
-                              <p className="text-xs text-muted-foreground/50 italic">
-                                No output data
-                              </p>
-                            )}
-                          </div>
-
-                          {/* Error message (if present and not already shown) */}
-                          {exec.errorMessage && (
-                            <div>
-                              <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">
-                                Error
-                              </p>
-                              <div className="bg-destructive/10 rounded-lg p-3 text-xs text-destructive">
-                                {exec.errorMessage}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="text-center py-12">
-                  <History className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
-                  <p className="text-sm text-muted-foreground">
-                    No connector executions yet. Executions will appear here once your bot starts calling connectors.
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-        </>
-      )}
     </div>
   );
 }
@@ -2274,7 +2277,7 @@ function Tools() {
 
   if (!projectId) return null;
 
-  return <ToolsPanel projectId={projectId} embedded />;
+  return <ToolsPanel projectId={projectId} />;
 }
 
 export default Tools;

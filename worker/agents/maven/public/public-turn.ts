@@ -196,6 +196,7 @@ function botMetadata(
     senderAvatar: null,
     userId: null,
     imageUrls: [],
+    attachments: [],
     sources,
     createdAt,
     deliveredAt: null,

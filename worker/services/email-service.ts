@@ -68,18 +68,26 @@ function buildAccentStyles(accentColor?: string | null): {
 
 // ─── Shared Email Layout ──────────────────────────────────────────────────────
 
-function wrapEmail(body: string, accentColor?: string | null): string {
+function wrapEmail(
+  body: string,
+  accentColor?: string | null,
+  options?: { brand?: boolean },
+): string {
   const theme = resolveAccent(accentColor);
+  const brand = options?.brand !== false;
+  const brandFooter = brand
+    ? `<p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 40px 0 0;">&mdash; ReplyMaven Team</p>`
+    : "";
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark"><style>
 :root { color-scheme: light dark; supported-color-schemes: light dark; }
 @media (prefers-color-scheme: dark) {
   body, .email-body { background: #0a0a0c !important; }
-  .email-shell { background: #16181d !important; color: #f0f0f5 !important; }
+  .email-shell { background: #0a0a0c !important; color: #f0f0f5 !important; }
   .email-heading, .email-strong, .email-value { color: #f0f0f5 !important; }
   .email-body-text { color: #c8c8d2 !important; }
   .email-muted { color: #8a8a96 !important; }
-  .email-card { background: #0c0c10 !important; }
+  .email-card { background: #16181d !important; }
   .email-link, .email-otp { color: ${theme.darkLink} !important; }
   .email-button { background: ${theme.dark} !important; border-color: ${theme.darkBorder} !important; color: ${theme.lightForeground} !important; }
 }
@@ -88,7 +96,7 @@ body[data-ogsb] { background: #0a0a0c !important; }
 [data-ogsc] .email-body,
 [data-ogsb] .email-body { background: #0a0a0c !important; }
 [data-ogsc] .email-shell,
-[data-ogsb] .email-shell { background: #16181d !important; color: #f0f0f5 !important; }
+[data-ogsb] .email-shell { background: #0a0a0c !important; color: #f0f0f5 !important; }
 [data-ogsc] .email-heading,
 [data-ogsb] .email-heading,
 [data-ogsc] .email-strong,
@@ -100,7 +108,7 @@ body[data-ogsb] { background: #0a0a0c !important; }
 [data-ogsc] .email-muted,
 [data-ogsb] .email-muted { color: #8a8a96 !important; }
 [data-ogsc] .email-card,
-[data-ogsb] .email-card { background: #0c0c10 !important; }
+[data-ogsb] .email-card { background: #16181d !important; }
 [data-ogsc] .email-link,
 [data-ogsb] .email-link,
 [data-ogsc] .email-otp,
@@ -108,14 +116,26 @@ body[data-ogsb] { background: #0a0a0c !important; }
 [data-ogsc] .email-button,
 [data-ogsb] .email-button { background: ${theme.dark} !important; border-color: ${theme.darkBorder} !important; color: ${theme.lightForeground} !important; }
 </style></head>
-<body class="email-body" style="margin: 0; padding: 24px 16px; background: #e5e7eb;">
-<div class="email-shell" style="font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 48px 24px; background: #ffffff; color: #1f2937; font-size: 15px; line-height: 1.6; border-radius: 24px;">
-<!--[if mso]><table role="presentation" width="480" align="center" cellpadding="0" cellspacing="0"><tr><td style="padding: 48px 24px; background: #ffffff; border-radius: 24px;"><![endif]-->
+<body class="email-body" style="margin: 0; padding: 24px 16px; background: #ffffff;">
+<div class="email-shell" style="font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 560px; margin: 0 auto; padding: 0; background: #ffffff; color: #1f2937; font-size: 16px; line-height: 1.6;">
+<!--[if mso]><table role="presentation" width="560" align="center" cellpadding="0" cellspacing="0"><tr><td style="padding: 0; background: #ffffff;"><![endif]-->
 ${body}
-<p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 40px 0 0;">&mdash; ReplyMaven Team</p>
+${brandFooter}
 <!--[if mso]></td></tr></table><![endif]-->
 </div>
 </body></html>`;
+}
+
+function replySubject(subject: string | null | undefined): string {
+  const trimmed = subject?.trim();
+  if (!trimmed) return "Re: your message";
+  return /^re:/i.test(trimmed) ? trimmed : `Re: ${trimmed}`;
+}
+
+function formatRfcMessageId(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.startsWith("<") && trimmed.endsWith(">")) return trimmed;
+  return `<${trimmed}>`;
 }
 
 // Derive the text/plain alternative from a rendered HTML email. Multipart
@@ -453,6 +473,9 @@ ${msg.body}
     dashboardUrl: string;
     accentColor?: string | null;
     inReplyToMessageId?: string | null;
+    inReplyToRfcId?: string | null;
+    referencesRfcIds?: string[];
+    subject?: string | null;
     autoSubmitted?: boolean;
   }): Promise<void> {
     const {
@@ -461,12 +484,13 @@ ${msg.body}
       projectName,
       conversationId,
       messageId,
-      agentName,
       messageContent,
       imageUrls = [],
-      dashboardUrl,
       accentColor,
       inReplyToMessageId,
+      inReplyToRfcId,
+      referencesRfcIds = [],
+      subject,
       autoSubmitted,
     } = details;
 
@@ -484,50 +508,55 @@ ${msg.body}
           .map((line) =>
             line.trim() === ""
               ? "<br/>"
-              : `<p style="margin: 0 0 4px;">${line}</p>`,
+              : `<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 12px;">${line}</p>`,
           )
           .join("")
       : "";
     const imagesHtml = imageUrls
       .map((url) => {
         const abs = url.startsWith("/") ? `${APP_ORIGIN}${url}` : url;
-        return `<img src="${escapeHtml(abs)}" alt="Attachment" style="max-width: 100%; border-radius: 8px; margin: 8px 0 0;" />`;
+        return `<img src="${escapeHtml(abs)}" alt="Attachment" style="max-width: 100%; margin: 8px 0 0;" />`;
       })
       .join("");
     const lines = textLines + imagesHtml;
 
-    const styles = buildAccentStyles(accentColor);
     const headers: Record<string, string> = {
       "X-Conversation-Id": conversationId,
       "X-Project-Slug": projectSlug,
       "Message-ID": buildEmailMessageId(messageId),
     };
-    if (inReplyToMessageId) {
-      const ref = buildEmailMessageId(inReplyToMessageId);
-      headers["In-Reply-To"] = ref;
-      headers["References"] = ref;
-    }
+    const inReplyTo = inReplyToRfcId
+      ? formatRfcMessageId(inReplyToRfcId)
+      : inReplyToMessageId
+        ? buildEmailMessageId(inReplyToMessageId)
+        : null;
+    const references = [
+      ...referencesRfcIds.map(formatRfcMessageId),
+      ...(inReplyTo && !referencesRfcIds.some((id) =>
+        formatRfcMessageId(id) === inReplyTo
+      )
+        ? [inReplyTo]
+        : []),
+    ];
+    if (inReplyTo) headers["In-Reply-To"] = inReplyTo;
+    if (references.length > 0) headers.References = references.join(" ");
     if (autoSubmitted) {
       headers["Auto-Submitted"] = "auto-generated";
-      headers["Precedence"] = "bulk";
     }
 
     await this.send({
       from: `${projectName} <${projectSlug}@${EMAIL_DOMAIN}>`,
-      replyTo: `${projectSlug}@${EMAIL_DOMAIN}`,
+      replyTo: `${projectSlug}+c${conversationId}@${EMAIL_DOMAIN}`,
       to,
-      subject: `New reply from ${agentName} - ${projectName}`,
+      subject: replySubject(subject),
       headers,
       html: wrapEmail(
         `
-<p class="email-heading" style="${styles.heading} margin: 0 0 20px;">${escapeHtml(agentName)} replied</p>
-<div class="email-card" style="${CARD_STYLE} margin: 0 0 24px;">
-  <div style="font-size: 15px; ${BODY_TEXT} line-height: 1.6;">${lines}</div>
-</div>
-<a href="${dashboardUrl}" class="email-button" style="${styles.button}">View Conversation</a>
-<p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 24px 0 0;">You can reply to this email to continue the conversation.</p>
+${lines}
+<p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 32px 0 0;">ReplyMaven ref: ${escapeHtml(conversationId)}</p>
       `,
         accentColor,
+        { brand: false },
       ),
     });
   }

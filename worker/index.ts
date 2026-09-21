@@ -76,7 +76,28 @@ import {
 import { isMavenAssignee } from "../shared/maven-assignee";
 import { TelegramService } from "./services/telegram-service";
 import { resolveTelegramChatBinding } from "./services/telegram-chat-binding";
-import { parseConversationReference } from "./services/inbound-email-routing";
+import {
+  emailVisitorId,
+  originatingAddressFromHeaders,
+  parseConversationReference,
+  parseEnvelopeRecipient,
+  parseInboundAttachments,
+  parseReplyMavenRef,
+  parseSender,
+  resolveInboundConversation,
+  isAutoSubmittedMail,
+  normalizeHeaderMap,
+  OPEN_INBOUND_THREAD_MS,
+} from "./services/inbound-email-routing";
+import { cleanInboundEmailText, htmlToPlainText } from "./services/inbound-email-content";
+import { InboundAddressService } from "./services/inbound-address-service";
+import {
+  skippedAttachmentNote,
+  storeInboundAttachments,
+} from "./services/inbound-attachment-service";
+import { runChannelTurn } from "./chat-runtime/orchestration/run-channel-turn";
+import { readConversationChannelMetadata } from "../shared/maven-conversation";
+import { Resend } from "resend";
 import { migrateTelegramSecrets } from "./migrations/telegram-secret-migration";
 import {
   deriveTelegramWebhookSecret,
@@ -170,7 +191,6 @@ import {
   extractFormName,
   markContactAiUnavailable,
 } from "./chat-runtime/contact-support/contact-support";
-import { runContactSupportFollowUp } from "./chat-runtime/contact-support/run-contact-support-follow-up";
 import { createEscalation } from "./chat-runtime/post-turn/escalation";
 import { buildToolRegistry } from "./chat-runtime/tools/http-tool-executor";
 import { isReturningVisitorGap, toToolDefinition } from "./chat-runtime/types";
@@ -258,6 +278,7 @@ import {
   agentReplySchema,
   updateTelegramSchema,
   updateSlackSchema,
+  updateInboundAddressSchema,
   onboardingStep1Schema,
   onboardingContextSchema,
   onboardingWidgetSchema,
@@ -405,6 +426,15 @@ async function maskStoredToolHeaders(
   } catch {
     return null;
   }
+}
+
+function toIsoTimestamp(value: Date | number | string): string {
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "number") {
+    const ms = value < 1e12 ? value * 1000 : value;
+    return new Date(ms).toISOString();
+  }
+  return value;
 }
 
 function isConversationStale(
@@ -1403,7 +1433,7 @@ const app = new Hono<HonoAppContext>()
       (await billingService.checkMessageLimit(project.userId, subscription))
         .allowed;
     if (aiAllowed) {
-      c.executionCtx.waitUntil(runContactSupportFollowUp({
+      c.executionCtx.waitUntil(runChannelTurn({
         db,
         env: c.env,
         executionCtx: c.executionCtx,
@@ -1416,9 +1446,11 @@ const app = new Hono<HonoAppContext>()
         },
         settings,
         conversation,
-        formMessage,
+        currentMessage: formMessage,
         isFirstVisitorTurn,
         isReturningVisitor,
+        aiParticipation: "assist_until_agent",
+        turnKind: "contact_support",
       }));
     }
     return c.json(
@@ -2109,20 +2141,14 @@ const app = new Hono<HonoAppContext>()
       return c.json({ ok: true });
     }
 
-    // Extract project slug from to address ({slug}@updates.replymaven.com).
-    // Slugs are stored lowercase, so normalize the local part up front.
-    let projectSlug: string | null = null;
-    for (const addr of toAddresses) {
-      const match = addr.match(/^([^@]+)@updates\.replymaven\.com$/i);
-      if (match) {
-        projectSlug = match[1].toLowerCase();
-        break;
-      }
-    }
-
-    if (!projectSlug || RESERVED_INBOUND_LOCAL_PARTS.has(projectSlug)) {
+    const envelopeRecipient = parseEnvelopeRecipient(toAddresses);
+    if (
+      !envelopeRecipient ||
+      RESERVED_INBOUND_LOCAL_PARTS.has(envelopeRecipient.slug)
+    ) {
       return c.json({ ok: true });
     }
+    const projectSlug = envelopeRecipient.slug;
 
     const db = drizzle(c.env.DB);
     const projectService = new ProjectService(db);
@@ -2132,102 +2158,58 @@ const app = new Hono<HonoAppContext>()
       return c.json({ ok: true });
     }
 
-    // Fetch full email content + headers from Resend API
-    let emailText = "";
-    let inReplyToHeader: string | null = null;
-    let referencesHeader: string | null = null;
-    let autoSubmittedHeader: string | null = null;
-    let precedenceHeader: string | null = null;
-    let returnPathHeader: string | null = null;
-    try {
-      const emailRes = await fetch(
-        `https://api.resend.com/emails/receiving/${emailId}`,
-        {
-          headers: { Authorization: `Bearer ${c.env.RESEND_API_KEY}` },
-          signal: AbortSignal.timeout(5_000),
-        },
+    if (!c.env.RESEND_API_KEY) {
+      logError(
+        "inbound_email.fetch_failed",
+        new Error("RESEND_API_KEY is not configured"),
+        { emailId, projectSlug },
       );
-      if (emailRes.ok) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const emailData = (await emailRes.json()) as any;
-        emailText = (emailData.text ?? "").trim();
-        if (!emailText && emailData.html) {
-          emailText = emailData.html
-            .replace(/<[^>]*>/g, "")
-            .replace(/&nbsp;/g, " ")
-            .replace(/&amp;/g, "&")
-            .replace(/&lt;/g, "<")
-            .replace(/&gt;/g, ">")
-            .replace(/&quot;/g, '"')
-            .trim();
-        }
+      return c.json({ error: "Could not read the inbound email" }, 502);
+    }
 
-        // Defensively normalize the headers payload — Resend may surface it
-        // as a top-level field, an object map, or an array of {name, value}.
-        const headerLookup: Record<string, string> = {};
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const headersField = emailData.headers as any;
-        if (
-          headersField &&
-          typeof headersField === "object" &&
-          !Array.isArray(headersField)
-        ) {
-          for (const [k, v] of Object.entries(headersField)) {
-            headerLookup[k.toLowerCase()] = String(v ?? "");
-          }
-        } else if (Array.isArray(headersField)) {
-          for (const h of headersField) {
-            const name = String(h?.name ?? "").toLowerCase();
-            if (name) headerLookup[name] = String(h?.value ?? "");
-          }
-        }
-        const readHeader = (name: string): string | null =>
-          headerLookup[name.toLowerCase()] ?? null;
-
-        // `in_reply_to` and `references` are not surfaced as top-level fields
-        // by Resend — they live in the `headers` object only.
-        inReplyToHeader = readHeader("in-reply-to");
-        referencesHeader = readHeader("references");
-        autoSubmittedHeader = readHeader("auto-submitted");
-        precedenceHeader = readHeader("precedence");
-        returnPathHeader = readHeader("return-path");
-      } else {
-        // 401 here means RESEND_API_KEY cannot read inbound mail (a
-        // sending-only key), which drops every reply. Answer 5xx so Resend
-        // retries and the failure is visible in its webhook dashboard instead
-        // of looking delivered.
+    const resend = new Resend(c.env.RESEND_API_KEY);
+    let emailText = "";
+    let subject: string | null =
+      typeof payload.data?.subject === "string" ? payload.data.subject : null;
+    let rfcMessageId: string | null =
+      typeof payload.data?.message_id === "string"
+        ? payload.data.message_id
+        : null;
+    let headers: Record<string, string> = {};
+    let inboundAttachments = parseInboundAttachments(payload.data?.attachments);
+    try {
+      const received = await resend.emails.receiving.get(emailId);
+      if (received.error || !received.data) {
+        const status = received.error?.name === "validation_error" ? 400 : 502;
         logError(
           "inbound_email.fetch_failed",
-          new Error(`Resend returned ${emailRes.status}`),
+          new Error(received.error?.message ?? "Resend receiving.get failed"),
           {
             emailId,
-            status: emailRes.status,
             projectSlug,
-            restrictedKey: emailRes.status === 401,
+            errorName: received.error?.name ?? null,
+            restrictedKey: status === 400,
           },
         );
         return c.json({ error: "Could not read the inbound email" }, 502);
       }
+      const emailData = received.data;
+      emailText = (emailData.text ?? "").trim();
+      if (!emailText && emailData.html) {
+        emailText = htmlToPlainText(emailData.html);
+      }
+      headers = normalizeHeaderMap(emailData.headers);
+      subject = emailData.subject ?? subject;
+      rfcMessageId = emailData.message_id ?? rfcMessageId;
+      inboundAttachments = parseInboundAttachments(emailData.attachments);
     } catch (err) {
       logError("inbound_email.fetch_failed", err, { emailId, projectSlug });
       return c.json({ error: "Could not read the inbound email" }, 502);
     }
 
-    // Drop auto-responders to prevent feedback loops between the two sides.
-    // Conformant senders set `Auto-Submitted: auto-replied|auto-generated`,
-    // `Precedence: bulk|list|junk`, or use an empty `Return-Path: <>` (DSN).
-    const isAutoSubmitted = (() => {
-      const auto = autoSubmittedHeader?.trim().toLowerCase();
-      if (auto && auto !== "no") return true;
-      const prec = precedenceHeader?.trim().toLowerCase();
-      if (prec === "bulk" || prec === "list" || prec === "junk") return true;
-      const rp = returnPathHeader?.trim();
-      if (rp === "<>") return true;
-      return false;
-    })();
-    if (isAutoSubmitted) {
+    if (isAutoSubmittedMail(headers)) {
       console.log(
-        `[InboundEmail] Dropping auto-submitted email ${emailId} (auto=${autoSubmittedHeader}, prec=${precedenceHeader}, rp=${returnPathHeader})`,
+        `[InboundEmail] Dropping auto-submitted email ${emailId} (auto=${headers["auto-submitted"]}, prec=${headers.precedence}, rp=${headers["return-path"]})`,
       );
       await c.env.CONVERSATIONS_CACHE.put(idempotencyKey, "1", {
         expirationTtl: 60 * 60 * 24,
@@ -2235,92 +2217,125 @@ const app = new Hono<HonoAppContext>()
       return c.json({ ok: true });
     }
 
-    if (!emailText) {
+    const sender = parseSender(fromAddress) ?? parseSender(headers.from);
+    if (!sender) {
+      console.error("[InboundEmail] Could not extract email from from-field:", fromAddress);
       return c.json({ ok: true });
     }
-
-    // Strip quoted reply content (lines starting with ">", "On ... wrote:", etc.)
-    const lines = emailText.split("\n");
-    const cleanLines: string[] = [];
-    for (const line of lines) {
-      if (/^On .+ wrote:$/i.test(line.trim())) break;
-      if (/^-{2,}\s*Original Message/i.test(line.trim())) break;
-      if (/^_{2,}/.test(line.trim())) break;
-      if (line.trim().startsWith(">")) continue;
-      cleanLines.push(line);
-    }
-    const cleanedText = cleanLines.join("\n").trim();
-    if (!cleanedText) {
-      return c.json({ ok: true });
-    }
-
-    // Resend formats `from` as a string. Per their docs it is typically
-    // `"Display Name <user@example.com>"`, but bare `"user@example.com"` also
-    // appears in the wild. Extract the angle-bracketed address when present.
-    let rawFrom: string;
-    if (typeof fromAddress === "string") {
-      rawFrom = fromAddress;
-    } else if (typeof fromAddress === "object" && fromAddress?.address) {
-      rawFrom = fromAddress.address;
-    } else {
-      console.error("[InboundEmail] Unexpected from address format:", fromAddress);
-      return c.json({ ok: true });
-    }
-    const angleMatch = rawFrom.match(/<([^>]+)>/);
-    const senderEmail = (angleMatch ? angleMatch[1] : rawFrom).trim().toLowerCase();
-    if (!senderEmail) {
-      console.error("[InboundEmail] Could not extract email from from-field:", rawFrom);
+    const senderEmail = sender.email;
+    const senderName = sender.name;
+    const originatingAddress = originatingAddressFromHeaders(
+      headers,
+      envelopeRecipient.raw,
+    );
+    const inboundAddress = originatingAddress ?? envelopeRecipient.raw;
+    const cleanedText = cleanInboundEmailText(emailText);
+    if (!cleanedText && inboundAttachments.length === 0) {
       return c.json({ ok: true });
     }
 
     // ─── Locate the conversation ─────────────────────────────────────────
-    // Prefer In-Reply-To (single id), fall back to References (last id is the
-    // most recent ancestor). If neither matches, fall back to a sender-email
-    // lookup so visitor-initiated email replies still work without our headers.
     const chatService = createPublicConversationStore({ db, env: c.env });
     const referencedMessageId =
-      parseEmailMessageId(inReplyToHeader) ??
-      parseEmailMessageId(referencesHeader, { source: "references" });
+      parseEmailMessageId(headers["in-reply-to"]) ??
+      parseEmailMessageId(headers.references, { source: "references" });
+    const bodyRefConversationId =
+      parseReplyMavenRef(emailText) ?? parseConversationReference(emailText);
     let conversation = null as Awaited<
       ReturnType<typeof chatService.getRecentByVisitorEmail>
     > | null;
-    if (referencedMessageId) {
-      const sourceMessage = await chatService.getPublicMessageById(
-        referencedMessageId,
-        project.id,
-      );
-      if (sourceMessage) {
-        const conv = await chatService.get(
+
+    const loadConversation = async function loadConversation(
+      conversationId: string,
+    ): Promise<"archived" | "found" | null> {
+      const conv = await chatService.get(project.id, conversationId);
+      if (!conv) return null;
+      if (conv.archivedAt) return "archived";
+      conversation = conv;
+      return "found";
+    };
+
+    const decision = await resolveInboundConversation({
+      async byMessageId() {
+        if (!referencedMessageId) return null;
+        const sourceMessage = await chatService.getPublicMessageById(
+          referencedMessageId,
           project.id,
-          sourceMessage.conversationId,
         );
-        if (conv?.archivedAt) return c.json({ ok: true });
-        if (conv) {
-          conversation = conv;
-        }
-      }
-    }
-    // Every reply quotes the conversation link we sent, which is the only
-    // routing signal that survives: Resend replaces our `Message-ID`, so the
-    // `In-Reply-To` above references the sending provider's id, never ours.
-    if (!conversation) {
-      const referencedConversationId = parseConversationReference(emailText);
-      if (referencedConversationId) {
-        const conv = await chatService.get(
+        if (!sourceMessage) return null;
+        return loadConversation(sourceMessage.conversationId);
+      },
+      async byPlusAddress() {
+        if (!envelopeRecipient.conversationId) return null;
+        return loadConversation(envelopeRecipient.conversationId);
+      },
+      async byBodyRef() {
+        if (!bodyRefConversationId) return null;
+        return loadConversation(bodyRefConversationId);
+      },
+      async byRecentOpen() {
+        const recent = await chatService.getRecentByVisitorEmail(
           project.id,
-          referencedConversationId,
+          senderEmail,
+          {
+            openOnly: true,
+            touchedSinceMs: Date.now() - OPEN_INBOUND_THREAD_MS,
+          },
         );
-        if (conv?.archivedAt) return c.json({ ok: true });
-        if (conv) conversation = conv;
-      }
+        if (!recent) return null;
+        conversation = recent;
+        return "found";
+      },
+    });
+    if (decision.kind === "drop") {
+      return c.json({ ok: true });
     }
-    // Last resort, and visitors only: a team member replying from their own
-    // inbox is never the visitor on any conversation.
-    if (!conversation) {
-      conversation = await chatService.getRecentByVisitorEmail(
+    if (decision.kind === "create") {
+      const visitorId = await emailVisitorId(project.id, senderEmail);
+      const banned = await new VisitorBanService(db).isVisitorBanned(
         project.id,
+        visitorId,
         senderEmail,
       );
+      if (banned) return c.json({ ok: true });
+      if (!checkRateLimit(`inbound-create:${project.id}:${senderEmail}`, 8, 60 * 60 * 1000)) {
+        return c.json({ ok: true });
+      }
+      const identityService = new CustomerIdentityService(db, chatService);
+      let customerId: string | null = null;
+      const resolution = await identityService.resolveCustomer(project.id, {
+        email: senderEmail,
+      });
+      if (resolution.kind === "resolved") {
+        customerId = resolution.customerId;
+      } else if (resolution.kind === "none") {
+        const created = await identityService.createCustomer(project.id, {
+          email: senderEmail,
+          name: senderName,
+          customFields: {},
+        });
+        if (created.kind === "created") customerId = created.customer.id;
+        if (created.kind === "existing_customer") customerId = created.customerId;
+      }
+      conversation = await chatService.create({
+        projectId: project.id,
+        customerId,
+        visitorId,
+        visitorName: senderName,
+        visitorEmail: senderEmail,
+        metadata: {
+          channel: "email",
+          subject: subject ?? undefined,
+          inboundAddress,
+        },
+      });
+      if (customerId) {
+        await identityService.linkConversation(
+          project.id,
+          conversation.id,
+          customerId,
+        );
+      }
     }
     if (!conversation) {
       logWarn("inbound_email.unroutable", {
@@ -2330,23 +2345,31 @@ const app = new Hono<HonoAppContext>()
       });
       return c.json({ ok: true });
     }
+    const inboundConversation = conversation;
+    if (originatingAddress) {
+      c.executionCtx.waitUntil(
+        new InboundAddressService(db)
+          .discover(project.id, originatingAddress)
+          .then(() => undefined),
+      );
+    }
 
     // Per-conversation duplicate-content guard (defends against retries that
     // bypass the KV check, e.g. a different email_id with identical content).
     const existingMessages = await chatService.getMessagesSince(
       project.id,
-      conversation.id,
+      inboundConversation.id,
       Date.now() - 5 * 60 * 1000,
     );
-    const alreadyProcessed = existingMessages.some(
-      (m) => m.content === cleanedText,
-    );
+    const alreadyProcessed = cleanedText
+      ? existingMessages.some((message) => message.content === cleanedText)
+      : existingMessages.some((message) => message.idempotencyKey === `email:${emailId}`);
     if (alreadyProcessed) {
       return c.json({ ok: true });
     }
 
     // ─── Determine inbound role: visitor vs. agent ───────────────────────
-    const visitorEmail = conversation.visitorEmail?.toLowerCase() ?? null;
+    const visitorEmail = inboundConversation.visitorEmail?.toLowerCase() ?? null;
     const isVisitor = visitorEmail !== null && visitorEmail === senderEmail;
 
     let agentUser: {
@@ -2414,8 +2437,8 @@ const app = new Hono<HonoAppContext>()
       return c.json({ ok: true });
     }
 
-    if (conversation.status === "closed") {
-      await chatService.reopen(project.id, conversation.id);
+    if (inboundConversation.status === "closed") {
+      await chatService.reopen(project.id, inboundConversation.id);
     }
 
     const widgetService = new WidgetService(db);
@@ -2423,15 +2446,73 @@ const app = new Hono<HonoAppContext>()
 
     if (isVisitor) {
       // ─── Visitor reply branch ─────────────────────────────────────────
+      let storedAttachments = {
+        imageUrls: [] as string[],
+        attachments: [] as Array<{
+          url: string;
+          filename: string;
+          contentType: string;
+          size: number;
+        }>,
+        skipped: [] as Array<{ filename: string; reason: string }>,
+      };
+      if (inboundAttachments.length > 0) {
+        try {
+          storedAttachments = await storeInboundAttachments({
+            request: c.req.raw,
+            projectId: project.id,
+            conversationId: inboundConversation.id,
+            attachments: inboundAttachments,
+            async fetchAttachment(id) {
+              const result = await resend.emails.receiving.attachments.get({
+                emailId,
+                id,
+              });
+              const data = result.data as { download_url?: string } | null;
+              if (result.error || !data?.download_url) {
+                throw new Error(result.error?.message ?? "Attachment URL missing");
+              }
+              const downloaded = await fetch(data.download_url);
+              if (!downloaded.ok || !downloaded.body) {
+                throw new Error(`Attachment download failed: ${downloaded.status}`);
+              }
+              return downloaded;
+            },
+            async putObject(key, body, contentType) {
+              await c.env.UPLOADS.put(key, body, {
+                httpMetadata: { contentType },
+                customMetadata: {
+                  ownerType: "conversation",
+                  ownerId: inboundConversation.id,
+                  projectId: project.id,
+                },
+              });
+            },
+          });
+        } catch (error) {
+          logError("inbound_email.attachment_failed", error, {
+            emailId,
+            projectId: project.id,
+            conversationId: inboundConversation.id,
+          });
+          return c.json({ error: "Could not store attachments" }, 502);
+        }
+      }
+      const skippedNote = skippedAttachmentNote(storedAttachments.skipped);
+      const visitorContent = [cleanedText, skippedNote].filter(Boolean).join("\n\n");
       const inboundEmailMessage = await chatService.addPublicMessage(
         {
-          conversationId: conversation.id,
+          conversationId: inboundConversation.id,
           role: "visitor",
-          content: cleanedText,
+          content: visitorContent,
+          imageUrls: storedAttachments.imageUrls,
+          attachments: storedAttachments.attachments,
           sources: null,
           idempotencyKey: `email:${emailId}`,
           origin: "email",
           externalReplyTo: referencedMessageId,
+          rfcMessageId,
+          senderName: senderName ?? inboundConversation.visitorName,
         },
         project.id,
       );
@@ -2439,8 +2520,8 @@ const app = new Hono<HonoAppContext>()
       c.executionCtx.waitUntil(
         touchLinkedCustomerAfterVisitorMessage({
           projectId: project.id,
-          customerId: conversation.customerId,
-          visitorId: conversation.visitorId,
+          customerId: inboundConversation.customerId,
+          visitorId: inboundConversation.visitorId,
           occurredAt: new Date(inboundEmailMessage.createdAt),
           identityService: new CustomerIdentityService(
             db,
@@ -2449,8 +2530,8 @@ const app = new Hono<HonoAppContext>()
           logFailure(error) {
             logError("inbound_email.customer_last_seen_failed", error, {
               projectId: project.id,
-              conversationId: conversation.id,
-              customerId: conversation.customerId,
+              conversationId: inboundConversation.id,
+              customerId: inboundConversation.customerId,
             });
           },
           onTouched(customerId) {
@@ -2460,13 +2541,13 @@ const app = new Hono<HonoAppContext>()
       );
       const stillOperational = await chatService.getOperational(
         project.id,
-        conversation.id,
+        inboundConversation.id,
       );
       if (!stillOperational) return c.json({ ok: true });
 
       const chatState = await chatService.getChatState(
         project.id,
-        conversation.id,
+        inboundConversation.id,
       );
       if (
         chatState.aiParticipation === "human_only" &&
@@ -2498,11 +2579,11 @@ const app = new Hono<HonoAppContext>()
           await forwardVisitorToJoinedHumans({
             channels,
             activeHumanRoutes: chatState.activeHumanRoutes,
-            conversationId: conversation.id,
-            visitorName: conversation.visitorName ?? senderEmail,
+            conversationId: inboundConversation.id,
+            visitorName: inboundConversation.visitorName ?? senderEmail,
             content: `[via email] ${cleanedText}`,
-            channelThreads: conversation.channelThreads,
-            telegramThreadId: conversation.telegramThreadId,
+            channelThreads: inboundConversation.channelThreads,
+            telegramThreadId: inboundConversation.telegramThreadId,
             email: c.env.RESEND_API_KEY
               ? {
                   db,
@@ -2512,12 +2593,12 @@ const app = new Hono<HonoAppContext>()
                   projectName: project.name,
                   messageId: inboundEmailMessage.id,
                   visitorDisplayName:
-                    conversation.visitorName?.trim() ||
-                    conversation.visitorEmail?.trim() ||
+                    inboundConversation.visitorName?.trim() ||
+                    inboundConversation.visitorEmail?.trim() ||
                     "Visitor",
                   messageContent: cleanedText,
                   dashboardUrl:
-                    `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${conversation.id}`,
+                    `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${inboundConversation.id}`,
                   accentColor: widgetCfgForReply?.primaryColor ?? null,
                 }
               : undefined,
@@ -2525,10 +2606,13 @@ const app = new Hono<HonoAppContext>()
         } catch (err) {
           console.error("[InboundEmail] Joined-route forward failed:", err);
         }
-      } else if (chatState.aiParticipation === "assist_until_agent") {
+      } else if (chatState.aiParticipation !== "human_only") {
         const settings = await projectService.getSettings(project.id);
+        const channelMeta = readConversationChannelMetadata(
+          stillOperational.metadata,
+        );
         c.executionCtx.waitUntil((async () => {
-          const botMessage = await runContactSupportFollowUp({
+          const botMessage = await runChannelTurn({
             db,
             env: c.env,
             executionCtx: c.executionCtx,
@@ -2541,42 +2625,52 @@ const app = new Hono<HonoAppContext>()
             },
             settings,
             conversation: stillOperational,
-            formMessage: cleanedText,
-            isFirstVisitorTurn: false,
+            currentMessage: visitorContent,
+            isFirstVisitorTurn: decision.kind === "create",
             isReturningVisitor: false,
-            mode: "pending_review_email",
+            channel: channelMeta.channel,
+            aiParticipation: chatState.aiParticipation,
           });
           if (
             !botMessage ||
-            !conversation.visitorEmail ||
+            !inboundConversation.visitorEmail ||
             !c.env.RESEND_API_KEY
           ) {
             return;
           }
+          const threadMessages = await chatService.getMessages(
+            project.id,
+            inboundConversation.id,
+          );
+          const referencesRfcIds = threadMessages
+            .map((message) => message.rfcMessageId)
+            .filter((id): id is string => Boolean(id));
           await new EmailService(c.env.RESEND_API_KEY).sendAgentMessageEmail({
-            to: conversation.visitorEmail,
+            to: inboundConversation.visitorEmail,
             projectSlug: project.slug,
             projectName: project.name,
-            conversationId: conversation.id,
+            conversationId: inboundConversation.id,
             messageId: botMessage.id,
             agentName: settings?.botName?.trim() || "Maven",
             agentAvatar: null,
             messageContent: botMessage.content,
             dashboardUrl:
-              `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${conversation.id}`,
+              `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${inboundConversation.id}`,
             accentColor: widgetCfgForReply?.primaryColor ?? null,
-            inReplyToMessageId: referencedMessageId,
+            inReplyToRfcId: rfcMessageId,
+            referencesRfcIds,
+            subject: channelMeta.subject ?? subject,
             autoSubmitted: true,
           });
           await chatService.markEmailed({
             projectId: project.id,
-            conversationId: conversation.id,
+            conversationId: inboundConversation.id,
             messageId: botMessage.id,
           });
         })().catch((error: unknown) => {
-          logError("inbound_email.assist_follow_up_failed", error, {
+          logError("inbound_email.channel_turn_failed", error, {
             projectId: project.id,
-            conversationId: conversation.id,
+            conversationId: inboundConversation.id,
           });
         }));
       }
@@ -2584,7 +2678,7 @@ const app = new Hono<HonoAppContext>()
       // ─── Agent reply branch (round-trip from agent's inbox) ───────────
       const agentMessage = await chatService.appendHuman({
         projectId: project.id,
-        conversationId: conversation.id,
+        conversationId: inboundConversation.id,
         content: cleanedText,
         userId: agentUser.id,
         senderName: agentUser.name,
@@ -2598,34 +2692,36 @@ const app = new Hono<HonoAppContext>()
       }
       await chatService.markEmailed({
         projectId: project.id,
-        conversationId: conversation.id,
+        conversationId: inboundConversation.id,
         messageId: agentMessage.id,
       });
 
       // Send the visitor an email with the agent's reply so the round-trip
       // continues over email. Skip if the conversation has no visitorEmail —
       // the message still lands in the dashboard.
-      if (conversation.visitorEmail && c.env.RESEND_API_KEY) {
+      if (inboundConversation.visitorEmail && c.env.RESEND_API_KEY) {
         const emailService = new EmailService(c.env.RESEND_API_KEY);
-        const visitorEmail = conversation.visitorEmail;
-        const dashboardUrl = `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${conversation.id}`;
+        const visitorEmail = inboundConversation.visitorEmail;
+        const dashboardUrl = `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${inboundConversation.id}`;
         c.executionCtx.waitUntil(
           runWithConversationExternalAction(
               chatService,
               project.id,
-              conversation.id,
+              inboundConversation.id,
               () => emailService.sendAgentMessageEmail({
                 to: visitorEmail,
                 projectSlug: project.slug,
                 projectName: project.name,
-                conversationId: conversation.id,
+                conversationId: inboundConversation.id,
                 messageId: agentMessage.id,
                 agentName: agentUser.name,
                 agentAvatar: agentUser.avatar,
                 messageContent: cleanedText,
                 dashboardUrl,
                 accentColor: widgetCfgForReply?.primaryColor ?? null,
-                inReplyToMessageId: referencedMessageId ?? null,
+                inReplyToRfcId: rfcMessageId,
+                subject: readConversationChannelMetadata(inboundConversation.metadata).subject ??
+                  subject,
                 autoSubmitted: true,
               }),
             )
@@ -8009,6 +8105,58 @@ const app = new Hono<HonoAppContext>()
     return c.json({ ok: success });
   })
 
+  .get("/api/projects/:id/inbound-email", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const addresses = await new InboundAddressService(db).listByProject(project.id);
+    return c.json({
+      forwardTo: `${project.slug}@updates.replymaven.com`,
+      addresses: addresses.map((address) => ({
+        id: address.id,
+        address: address.address,
+        label: address.label,
+        ignored: address.ignored,
+        firstSeenAt: toIsoTimestamp(address.firstSeenAt),
+        lastSeenAt: toIsoTimestamp(address.lastSeenAt),
+      })),
+    });
+  })
+  .patch("/api/projects/:id/inbound-email/addresses/:addressId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(updateInboundAddressSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const updated = await new InboundAddressService(db).setIgnored(
+      project.id,
+      c.req.param("addressId"),
+      parsed.data.ignored,
+    );
+    if (!updated) return c.json({ error: "Not found" }, 404);
+    return c.json({
+      id: updated.id,
+      address: updated.address,
+      ignored: updated.ignored,
+    });
+  })
+
   // ─── Widget Bundle Upload to R2 ─────────────────────────────────────────────
   .post("/api/admin/upload-widget", async (c) => {
     const user = c.get("user");
@@ -8122,6 +8270,38 @@ const app = new Hono<HonoAppContext>()
       { key: uploadKey, url: publicUploadUrlForRequest(c.req.raw, uploadKey) },
       201,
     );
+  })
+
+  .get("/api/projects/:id/files/:key{.+}", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const projectId = c.req.param("id");
+    const key = c.req.param("key");
+    const db = c.get("db");
+    const project = await new ProjectService(db).getProjectById(projectId);
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    if (!key.startsWith(`${project.id}/conversation-attachments/`)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    const obj = await c.env.UPLOADS.get(key);
+    if (!obj) return c.json({ error: "Not found" }, 404);
+    const contentType = obj.httpMetadata?.contentType ?? "application/octet-stream";
+    if (contentType.toLowerCase().startsWith("image/")) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    const headers = new Headers();
+    headers.set("Content-Type", contentType);
+    headers.set(
+      "Content-Disposition",
+      `attachment; filename="${key.split("/").pop() ?? "attachment"}"`,
+    );
+    headers.set("Cache-Control", "private, no-store");
+    headers.set("X-Content-Type-Options", "nosniff");
+    headers.set("Content-Length", String(obj.size));
+    return new Response(obj.body, { headers });
   })
 
   // ─── Serve Uploads ──────────────────────────────────────────────────────────
