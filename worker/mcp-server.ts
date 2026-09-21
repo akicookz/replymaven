@@ -44,6 +44,7 @@ import {
 } from "./mcp-tool-helpers";
 import { registerHelpdeskTools } from "./mcp-helpdesk-tools";
 import { registerSidechatTools } from "./mcp-sidechat-tools";
+import { registerWidgetTools } from "./mcp-widget-tools";
 import { executeChannelBotNameCommand } from "./services/run-bot-name-command";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -174,6 +175,7 @@ function createReplyMavenMcpServer(context: McpRequestContext): McpServer {
   registerReindexResourceTool(server, context);
   registerHelpdeskTools(server, context);
   registerSidechatTools(server, context);
+  registerWidgetTools(server, context);
 
   return server;
 }

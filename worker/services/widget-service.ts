@@ -18,6 +18,8 @@ import {
   type GreetingMediaType,
 } from "../lib/greeting-media";
 
+export const MAX_GREETINGS_PER_PROJECT = 50;
+
 export interface GreetingPublic {
   id: string;
   enabled: boolean;
@@ -239,12 +241,14 @@ export class WidgetService {
     },
   ): Promise<GreetingRow> {
     const id = crypto.randomUUID();
-
-    let sortOrder = data.sortOrder;
-    if (sortOrder == null) {
-      const existing = await this.getGreetings(projectId);
-      sortOrder = existing.length;
+    const existing = await this.getGreetings(projectId);
+    if (existing.length >= MAX_GREETINGS_PER_PROJECT) {
+      throw new Error(
+        `Maximum of ${MAX_GREETINGS_PER_PROJECT} greetings allowed`,
+      );
     }
+
+    const sortOrder = data.sortOrder ?? existing.length;
 
     const insertValues: NewGreetingRow = {
       id,

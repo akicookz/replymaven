@@ -4994,16 +4994,15 @@ const app = new Hono<HonoAppContext>()
 
     const widgetService = new WidgetService(db);
 
-    const existing = await widgetService.getGreetings(project.id);
-    if (existing.length >= 50) {
-      return c.json({ error: "Maximum of 50 greetings allowed" }, 400);
+    try {
+      const row = await widgetService.createGreeting(project.id, parsed.data);
+      return c.json({ ...row, ...resolveGreetingMedia(row) }, 201);
+    } catch (err) {
+      return c.json(
+        { error: err instanceof Error ? err.message : "Failed to create greeting" },
+        400,
+      );
     }
-
-    const row = await widgetService.createGreeting(project.id, parsed.data);
-    return c.json(
-      { ...row, ...resolveGreetingMedia(row) },
-      201,
-    );
   })
   .patch("/api/projects/:id/greetings/reorder", async (c) => {
     const user = c.get("user");
