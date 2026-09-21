@@ -5,9 +5,12 @@ import {
   getClientScopes,
   getUnknownMcpScopes,
   MCP_OAUTH_SCOPES,
+  type McpOAuthScope,
   McpOAuthService,
   normalizeScopeString,
+  parseScopeString,
 } from "./services/mcp-oauth-service";
+import { renderMcpConsentPage } from "./oauth-render/consent-page";
 import { type McpOAuthClientRow } from "./db";
 
 // ─── Metadata ────────────────────────────────────────────────────────────────
@@ -103,7 +106,22 @@ export async function handleMcpAuthorizeGet(
   const validation = await validateAuthorizeParams(c, getUrlParams(c));
   if (!validation.ok) return validation.response;
 
-  return c.html(renderConsentPage(validation.request, user.name), 200, {
+  const request = validation.request;
+  const page = renderMcpConsentPage({
+    clientName: request.client.clientName,
+    userName: user.name,
+    scopes: parseScopeString(request.scope),
+    hiddenFields: {
+      response_type: "code",
+      client_id: request.client.id,
+      redirect_uri: request.redirectUri,
+      state: request.state ?? "",
+      code_challenge: request.codeChallenge,
+      code_challenge_method: request.codeChallengeMethod,
+    },
+  });
+
+  return c.html(`<!doctype html>${page.toString()}`, 200, {
     "Cache-Control": "no-store",
   });
 }
@@ -124,6 +142,16 @@ export async function handleMcpAuthorizePost(
       validation.request.state,
       "access_denied",
       "The authorization request was denied.",
+    );
+  }
+
+  // Every box cleared reads as a refusal, not as the default scope.
+  if (!readScopeParam(form)) {
+    return redirectWithOAuthError(
+      validation.request.redirectUri,
+      validation.request.state,
+      "access_denied",
+      "No permissions were granted.",
     );
   }
 
@@ -279,7 +307,7 @@ async function validateAuthorizeParams(
     };
   }
 
-  const rawScope = readParam(params, "scope") ?? client.scope;
+  const rawScope = readScopeParam(params) ?? client.scope;
   const unknownScopes = getUnknownMcpScopes(rawScope);
   if (unknownScopes.length > 0) {
     return {
@@ -293,14 +321,14 @@ async function validateAuthorizeParams(
     };
   }
 
-  const scope = normalizeScopeString(rawScope);
+  // Downgrade to what this client actually holds instead of rejecting, so
+  // adding a scope never breaks clients registered before it existed.
   const clientScopes = new Set(getClientScopes(client));
-  const hasUnsupportedScope = scope
+  const scope = normalizeScopeString(rawScope)
     .split(" ")
-    .some((value) =>
-      !clientScopes.has(value as (typeof MCP_OAUTH_SCOPES)[number])
-    );
-  if (hasUnsupportedScope) {
+    .filter((value) => clientScopes.has(value as McpOAuthScope))
+    .join(" ");
+  if (!scope) {
     return {
       ok: false,
       response: redirectWithOAuthError(
@@ -356,90 +384,6 @@ function redirectToLogin(c: Context<HonoAppContext>): Response {
   return c.redirect(loginUrl.toString(), 302);
 }
 
-// ─── HTML ────────────────────────────────────────────────────────────────────
-
-function renderConsentPage(
-  request: ValidAuthorizeRequest,
-  userName: string,
-): string {
-  const scopes = request.scope
-    .split(" ")
-    .map((scope) => `<li>${escapeHtml(formatScope(scope))}</li>`)
-    .join("");
-
-  return `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Authorize ReplyMaven MCP</title>
-    <style>
-      :root { color-scheme: light; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f7f5f2; color: #1d1b18; }
-      main { width: min(92vw, 480px); background: #fff; border: 1px solid #ded8cf; border-radius: 20px; padding: 28px; box-shadow: 0 24px 70px rgba(29, 27, 24, 0.12); }
-      h1 { font-size: 24px; line-height: 1.2; margin: 0 0 10px; }
-      p { color: #615b53; line-height: 1.5; margin: 0 0 18px; }
-      ul { margin: 0 0 24px; padding-left: 20px; color: #38342f; line-height: 1.7; }
-      .client { font-weight: 700; color: #1d1b18; }
-      .actions { display: flex; gap: 10px; justify-content: flex-end; }
-      button { border: 0; border-radius: 999px; padding: 11px 18px; font: inherit; cursor: pointer; }
-      .deny { background: #eee8df; color: #38342f; }
-      .allow { background: #1d1b18; color: #fff; }
-      .account { font-size: 13px; margin-top: 18px; }
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>Authorize ReplyMaven MCP</h1>
-      <p><span class="client">${escapeHtml(request.client.clientName)}</span> is requesting access to your ReplyMaven account.</p>
-      <ul>${scopes}</ul>
-      <form method="post" action="/api/mcp/authorize">
-        ${hiddenInput("response_type", "code")}
-        ${hiddenInput("client_id", request.client.id)}
-        ${hiddenInput("redirect_uri", request.redirectUri)}
-        ${hiddenInput("scope", request.scope)}
-        ${hiddenInput("state", request.state ?? "")}
-        ${hiddenInput("code_challenge", request.codeChallenge)}
-        ${hiddenInput("code_challenge_method", request.codeChallengeMethod)}
-        <div class="actions">
-          <button class="deny" type="submit" name="decision" value="deny">Deny</button>
-          <button class="allow" type="submit" name="decision" value="allow">Authorize</button>
-        </div>
-      </form>
-      <p class="account">Signed in as ${escapeHtml(userName)}.</p>
-    </main>
-  </body>
-</html>`;
-}
-
-function hiddenInput(name: string, value: string): string {
-  return `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`;
-}
-
-function formatScope(scope: string): string {
-  switch (scope) {
-    case "projects:read":
-      return "Read projects, resources, and conversations";
-    case "conversations:reply":
-      return "Send agent replies to conversations";
-    case "resources:write":
-      return "Create and update webpage and FAQ knowledge resources";
-    case "helpdesk:write":
-      return "Create, publish, and manage help center articles and categories";
-    default:
-      return scope;
-  }
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
 // ─── Request Parsing ─────────────────────────────────────────────────────────
 
 function getUrlParams(c: Context<HonoAppContext>): URLSearchParams {
@@ -449,6 +393,16 @@ function getUrlParams(c: Context<HonoAppContext>): URLSearchParams {
 function readParam(params: URLSearchParams | FormData, name: string): string | null {
   const value = params.get(name);
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+/** Consent posts one `scope` entry per checked box; clients send one string. */
+function readScopeParam(params: URLSearchParams | FormData): string | null {
+  const joined = params
+    .getAll("scope")
+    .filter((value): value is string => typeof value === "string")
+    .join(" ")
+    .trim();
+  return joined ? joined : null;
 }
 
 function readFormString(form: FormData, name: string): string | null {

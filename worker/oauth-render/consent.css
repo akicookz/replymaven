@@ -1,0 +1,25 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400..700&display=swap");
+@import "tailwindcss";
+@import "../../src/theme.css";
+@source "./*.tsx";
+
+html {
+  font-family: var(--font-sans);
+}
+
+/* Buttons stay enabled while submitting: a disabled submitter is dropped from
+   the form's entry list, which would lose the decision value. */
+form[data-pending] button {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* Switch. The thumb is a grandchild of the checkbox's sibling, which peer-*
+   variants cannot reach. Track and travel match src/components/ui/switch.tsx. */
+input[name="scope"]:checked + .rm-switch {
+  background-color: var(--brand);
+}
+input[name="scope"]:checked + .rm-switch > span {
+  transform: translateX(calc(100% - 2px));
+  background-color: var(--primary-foreground);
+}

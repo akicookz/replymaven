@@ -19,9 +19,38 @@ export const MCP_OAUTH_SCOPES = [
   "conversations:reply",
   "resources:write",
   "helpdesk:write",
+  "widget:write",
 ] as const;
 
 export type McpOAuthScope = (typeof MCP_OAUTH_SCOPES)[number];
+
+export interface McpOAuthScopeInfo {
+  title: string;
+  detail: string;
+}
+
+export const MCP_OAUTH_SCOPE_INFO: Record<McpOAuthScope, McpOAuthScopeInfo> = {
+  "projects:read": {
+    title: "Read your workspace",
+    detail: "Projects, resources, and conversations.",
+  },
+  "conversations:reply": {
+    title: "Reply to visitors",
+    detail: "Send messages that visitors see in chat.",
+  },
+  "resources:write": {
+    title: "Manage knowledge",
+    detail: "Add and edit webpage and FAQ resources.",
+  },
+  "helpdesk:write": {
+    title: "Manage the help center",
+    detail: "Write, publish, and archive articles.",
+  },
+  "widget:write": {
+    title: "Manage the widget",
+    detail: "Create and edit greeting cards.",
+  },
+};
 
 type AppDb = DrizzleD1Database<Record<string, unknown>>;
 
