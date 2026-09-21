@@ -2964,7 +2964,8 @@ import {
   // renderGreetings() wipes the greeting stack's contents; the two are never
   // visible together — greetings require no conversation, the preview needs one.
   const previewStack = document.createElement("div");
-  // Shares the stack layout; the extra class is what tells the two apart.
+  // Shares the stack layout. Nothing here reads rm-preview-stack; it exists so
+  // devtools and host CSS can tell the two stacks apart.
   previewStack.className = "rm-greeting-stack rm-preview-stack";
 
   // ─── Greeting Stack (welcome + news cards) ──────────────────────────────────
@@ -3778,11 +3779,13 @@ import {
   /** The thread is gone: leave it rather than land the visitor back on it. */
   function leaveConversationView(): void {
     if (isInlineBarVariant && !conversationId) {
-      // closeChatWidget() re-renders greetings and resets the inline bar.
+      // closeChatWidget() resets the inline bar and re-renders greetings.
       closeChatWidget();
       return;
     }
     showHomeScreen();
+    // Closed panel: nothing else brings the stack back until the next load.
+    renderGreetings({ force: true });
   }
 
   function showFormScreen() {
@@ -6321,14 +6324,15 @@ import {
     const greeting = greetingsList.find((g) => g.id === id);
     if (!greeting || !greeting.enabled) return false;
     if (isOpen || isBanned) return false;
-    // Same bypass openChatWidget() makes: an explicit call outranks targeting.
-    if (hiddenByPageTargeting) {
-      container.style.display = "";
-      hiddenByPageTargeting = false;
-    }
     // An unseen reply outranks a marketing card; both use the same coordinates.
     if (previewStack.querySelector(".rm-greeting-card:not(.dismissed)")) {
       return false;
+    }
+    // Same bypass openChatWidget() makes: an explicit call outranks targeting.
+    // After the aborts above, so a refused call leaves the page as it found it.
+    if (hiddenByPageTargeting) {
+      container.style.display = "";
+      hiddenByPageTargeting = false;
     }
 
     let card = findGreetingCard(id);
@@ -6872,7 +6876,15 @@ import {
   }
 
   // ─── Public API ─────────────────────────────────────────────────────────────
+  const WIDGET_SCREENS: WidgetScreen[] = ["home", "chat", "form", "greetings"];
+
+  /** Hosts bind these to DOM events, so anything but a known screen is dropped. */
+  function readScreen(value: unknown): WidgetScreen | undefined {
+    return WIDGET_SCREENS.find((screen) => screen === value);
+  }
+
   function openScreen(screen?: WidgetScreen, args?: ScreenArgs): void {
+    screen = readScreen(screen);
     if (screen === "greetings") {
       if (args?.id) {
         openGreetingById(args.id);
@@ -6885,6 +6897,7 @@ import {
   }
 
   function toggleScreen(screen?: WidgetScreen, args?: ScreenArgs): void {
+    screen = readScreen(screen);
     if (screen === "greetings") {
       if (args?.id) {
         toggleGreetingById(args.id);
@@ -6897,6 +6910,7 @@ import {
   }
 
   function closeScreen(screen?: WidgetScreen, args?: ScreenArgs): void {
+    screen = readScreen(screen);
     if (screen === "greetings") {
       dismissGreetingById(args?.id);
       return;

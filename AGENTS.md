@@ -863,12 +863,12 @@ Grouped, not exhaustive. `worker/index.ts` and `worker/routes/*.ts` are the sour
 | GET/POST/PATCH/DELETE | `/api/team[s]`, `/api/team/invite`, `/api/team/accept/:inviteId` | Members, invites, team switching |
 | GET/POST | `/api/billing/{subscription,checkout,portal,usage-log}` | Stripe subscription and usage |
 | GET/POST/DELETE | `/api/mcp/{register,authorize,token,revoke,connections}` | MCP OAuth client registration and consent |
+| GET/PUT/POST | `/api/profile`, `/api/onboarding/*` | Account profile and first-run onboarding |
+| POST | `/api/upload`, `/api/help-images/upload` | Upload files to R2 |
 
 Scopes are `projects:read`, `conversations:reply`, `resources:write`, `helpdesk:write`, and `widget:write` (`worker/services/mcp-oauth-service.ts`). The consent screen (`worker/oauth-render/consent-page.tsx`) lists each as a switch the user can turn off, so a token can be granted a subset of what the client asked for. Authorize is refused when every switch is off. A request for a scope the client's stored registration predates is downgraded to the scopes it holds, not rejected, so adding a scope never breaks clients registered before it existed.
 
-Greeting tools live in `worker/mcp-widget-tools.ts`: `list_greetings` (`projects:read`), plus `create_greeting`, `update_greeting`, `delete_greeting`, and `reorder_greetings` (`widget:write`). They cover text, CTA, and externally hosted images only — video and uploaded artwork need a stored `/api/uploads/...` path and there is no MCP upload tool for widget media.
-| GET/PUT/POST | `/api/profile`, `/api/onboarding/*` | Account profile and first-run onboarding |
-| POST | `/api/upload`, `/api/help-images/upload` | Upload files to R2 |
+Greeting tools live in `worker/mcp-widget-tools.ts`: `list_greetings` (`projects:read` or `widget:write`), plus `create_greeting`, `update_greeting`, `delete_greeting`, and `reorder_greetings` (`widget:write`). They cover text, CTA, and externally hosted images only — video and uploaded artwork need a stored `/api/uploads/...` path and there is no MCP upload tool for widget media.
 
 ---
 
@@ -1026,6 +1026,7 @@ Proactive cards shown above the launcher before any conversation exists.
 - `allowedPages` targets the card to specific pages, matched client-side against the current URL.
 - An unseen-reply preview always outranks greetings. Both stacks occupy the same coordinates and a real support reply is the more urgent card.
 - `open("greetings")` re-renders ignoring dismissals; `open("greetings", { id })` reveals one card now, skipping its delay and cancelling its auto-hide, and expands it when the card is rich. Only one card is expanded at a time. `close("greetings", { id })` dismisses one, `close("greetings")` all.
+- `toggle("greetings", { id })` collapses the card when it is the expanded one and switches to it otherwise. A compact card has no expanded state, so toggling one only reveals it; use `close("greetings", { id })` to remove it.
 - `"greetings"` is the card stack above the launcher, not a panel screen yet. The name is already plural so it survives the move into the panel.
 - `widget-service.ts` back-derives the legacy `introMessage`, `introMessageAuthor`, `introMessageDelay`, and `introMessageDuration` config fields from the first greeting so widget bundles still in the wild keep working.
 

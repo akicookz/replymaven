@@ -1,8 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { type GreetingRow } from "./db";
-import { WidgetService } from "./services/widget-service";
-import { resolveGreetingMedia } from "./lib/greeting-media";
+import {
+  serializeGreeting,
+  WidgetService,
+} from "./services/widget-service";
 import {
   createGreetingSchema,
   reorderGreetingsSchema,
@@ -11,8 +12,8 @@ import {
 import {
   confirmedMutationSchema,
   getAccessibleProject,
+  requireAnyScope,
   requireScope,
-  serializeDate,
   textResult,
   type McpRequestContext,
 } from "./mcp-tool-helpers";
@@ -61,29 +62,6 @@ const greetingFields = {
   ),
 };
 
-function summarizeGreeting(row: GreetingRow) {
-  return {
-    id: row.id,
-    enabled: row.enabled,
-    ...resolveGreetingMedia(row),
-    imagePosition: row.imagePosition,
-    imageAspect: row.imageAspect,
-    title: row.title,
-    description: row.description,
-    ctaText: row.ctaText,
-    ctaLink: row.ctaLink,
-    authorId: row.authorId,
-    allowedPages: row.allowedPages
-      ? (JSON.parse(row.allowedPages) as string[])
-      : null,
-    delaySeconds: row.delaySeconds,
-    durationSeconds: row.durationSeconds,
-    sortOrder: row.sortOrder,
-    createdAt: serializeDate(row.createdAt),
-    updatedAt: serializeDate(row.updatedAt),
-  };
-}
-
 // ─── Read Tools ───────────────────────────────────────────────────────────────
 
 function registerListGreetingsTool(
@@ -107,12 +85,12 @@ function registerListGreetingsTool(
       },
     },
     async ({ projectId }) => {
-      requireScope(context, "projects:read");
+      requireAnyScope(context, ["projects:read", "widget:write"]);
 
       const project = await getAccessibleProject(context, projectId);
       const rows = await new WidgetService(context.db).getGreetings(project.id);
 
-      return textResult({ greetings: rows.map(summarizeGreeting) });
+      return textResult({ greetings: rows.map(serializeGreeting) });
     },
   );
 }
@@ -155,7 +133,7 @@ function registerCreateGreetingTool(
         data,
       );
 
-      return textResult({ ok: true, greeting: summarizeGreeting(greeting) });
+      return textResult({ ok: true, greeting: serializeGreeting(greeting) });
     },
   );
 }
@@ -199,7 +177,7 @@ function registerUpdateGreetingTool(
       );
       if (!greeting) throw new Error("Greeting not found");
 
-      return textResult({ ok: true, greeting: summarizeGreeting(greeting) });
+      return textResult({ ok: true, greeting: serializeGreeting(greeting) });
     },
   );
 }
@@ -272,7 +250,7 @@ function registerReorderGreetingsTool(
       await service.reorderGreetings(project.id, ids);
       const rows = await service.getGreetings(project.id);
 
-      return textResult({ ok: true, greetings: rows.map(summarizeGreeting) });
+      return textResult({ ok: true, greetings: rows.map(serializeGreeting) });
     },
   );
 }

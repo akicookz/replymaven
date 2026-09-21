@@ -14,7 +14,11 @@ import {
 import { createAuth } from "./auth";
 import { type AppEnv, type HonoAppContext, type Plan } from "./types";
 import { ProjectService } from "./services/project-service";
-import { WidgetService } from "./services/widget-service";
+import {
+  MAX_GREETINGS_PER_PROJECT,
+  serializeGreeting,
+  WidgetService,
+} from "./services/widget-service";
 import {
   getAssignableUsers,
   isAllowedAssignee,
@@ -50,7 +54,6 @@ import {
   publicUploadUrl,
   publicUploadUrlForRequest,
 } from "./lib/public-upload-url";
-import { resolveGreetingMedia } from "./lib/greeting-media";
 import { AiService } from "./services/ai-service";
 import { executeChannelBotNameCommand } from "./services/run-bot-name-command";
 import { runAgentChannelInbound } from "./services/run-agent-channel-inbound";
@@ -4955,27 +4958,7 @@ const app = new Hono<HonoAppContext>()
 
     const widgetService = new WidgetService(db);
     const rows = await widgetService.getGreetings(project.id);
-    const greetings = rows.map((row) => ({
-      id: row.id,
-      enabled: row.enabled,
-      ...resolveGreetingMedia(row),
-      imagePosition: row.imagePosition,
-      imageAspect: row.imageAspect,
-      title: row.title,
-      description: row.description,
-      ctaText: row.ctaText,
-      ctaLink: row.ctaLink,
-      authorId: row.authorId,
-      allowedPages: row.allowedPages
-        ? (JSON.parse(row.allowedPages) as string[])
-        : null,
-      delaySeconds: row.delaySeconds,
-      durationSeconds: row.durationSeconds,
-      sortOrder: row.sortOrder,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    }));
-    return c.json(greetings);
+    return c.json(rows.map(serializeGreeting));
   })
   .post("/api/projects/:id/greetings", async (c) => {
     const user = c.get("user");
@@ -4994,15 +4977,16 @@ const app = new Hono<HonoAppContext>()
 
     const widgetService = new WidgetService(db);
 
-    try {
-      const row = await widgetService.createGreeting(project.id, parsed.data);
-      return c.json({ ...row, ...resolveGreetingMedia(row) }, 201);
-    } catch (err) {
+    const existing = await widgetService.getGreetings(project.id);
+    if (existing.length >= MAX_GREETINGS_PER_PROJECT) {
       return c.json(
-        { error: err instanceof Error ? err.message : "Failed to create greeting" },
+        { error: `Maximum of ${MAX_GREETINGS_PER_PROJECT} greetings allowed` },
         400,
       );
     }
+
+    const row = await widgetService.createGreeting(project.id, parsed.data);
+    return c.json(serializeGreeting(row), 201);
   })
   .patch("/api/projects/:id/greetings/reorder", async (c) => {
     const user = c.get("user");
@@ -5045,7 +5029,7 @@ const app = new Hono<HonoAppContext>()
       parsed.data,
     );
     if (!updated) return c.json({ error: "Not found" }, 404);
-    return c.json({ ...updated, ...resolveGreetingMedia(updated) });
+    return c.json(serializeGreeting(updated));
   })
   .delete("/api/projects/:id/greetings/:greetingId", async (c) => {
     const user = c.get("user");

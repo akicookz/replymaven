@@ -35,6 +35,18 @@ export function requireScope(
   }
 }
 
+/** For reads a write scope should also cover, now that scopes are grantable one by one. */
+export function requireAnyScope(
+  context: McpRequestContext,
+  scopes: McpOAuthScope[],
+): void {
+  if (!scopes.some((scope) => context.scopes.includes(scope))) {
+    throw new Error(
+      `MCP token is missing a required scope: ${scopes.join(" or ")}`,
+    );
+  }
+}
+
 export async function getAccessibleProject(
   context: McpRequestContext,
   projectId: string,

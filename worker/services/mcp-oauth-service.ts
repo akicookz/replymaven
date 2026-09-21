@@ -271,6 +271,10 @@ export class McpOAuthService {
       .set({ usedAt: now })
       .where(eq(mcpOAuthAuthCodes.id, codeRow.id));
 
+    // Re-authorizing replaces the grant. Without this, narrowing scopes on the
+    // consent screen would leave the earlier, broader token working.
+    await this.revokeAuthorizationsForClient(codeRow.userId, codeRow.clientId);
+
     const authorizationId = crypto.randomUUID();
     await this.db.insert(mcpOAuthAuthorizations).values({
       id: authorizationId,
@@ -376,6 +380,35 @@ export class McpOAuthService {
       .update(mcpOAuthTokens)
       .set({ revokedAt: now })
       .where(eq(mcpOAuthTokens.authorizationId, token.authorizationId));
+  }
+
+  private async revokeAuthorizationsForClient(
+    userId: string,
+    clientId: string,
+  ): Promise<void> {
+    const rows = await this.db
+      .select({ id: mcpOAuthAuthorizations.id })
+      .from(mcpOAuthAuthorizations)
+      .where(
+        and(
+          eq(mcpOAuthAuthorizations.userId, userId),
+          eq(mcpOAuthAuthorizations.clientId, clientId),
+          isNull(mcpOAuthAuthorizations.revokedAt),
+        ),
+      );
+    if (rows.length === 0) return;
+
+    const now = new Date();
+    for (const row of rows) {
+      await this.db
+        .update(mcpOAuthAuthorizations)
+        .set({ revokedAt: now })
+        .where(eq(mcpOAuthAuthorizations.id, row.id));
+      await this.db
+        .update(mcpOAuthTokens)
+        .set({ revokedAt: now })
+        .where(eq(mcpOAuthTokens.authorizationId, row.id));
+    }
   }
 
   private async getActiveAuthorization(

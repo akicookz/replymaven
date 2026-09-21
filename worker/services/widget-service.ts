@@ -20,6 +20,30 @@ import {
 
 export const MAX_GREETINGS_PER_PROJECT = 50;
 
+/** The greeting shape the dashboard route and the MCP tools both return. */
+export function serializeGreeting(row: GreetingRow) {
+  return {
+    id: row.id,
+    enabled: row.enabled,
+    ...resolveGreetingMedia(row),
+    imagePosition: row.imagePosition,
+    imageAspect: row.imageAspect,
+    title: row.title,
+    description: row.description,
+    ctaText: row.ctaText,
+    ctaLink: row.ctaLink,
+    authorId: row.authorId,
+    allowedPages: row.allowedPages
+      ? (JSON.parse(row.allowedPages) as string[])
+      : null,
+    delaySeconds: row.delaySeconds,
+    durationSeconds: row.durationSeconds,
+    sortOrder: row.sortOrder,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
 export interface GreetingPublic {
   id: string;
   enabled: boolean;
@@ -333,7 +357,13 @@ export class WidgetService {
   async reorderGreetings(projectId: string, ids: string[]): Promise<void> {
     const existing = await this.getGreetings(projectId);
     const validIds = new Set(existing.map((g) => g.id));
-    const filtered = ids.filter((id) => validIds.has(id));
+    const listed = ids.filter((id) => validIds.has(id));
+    // Anything omitted keeps its relative order behind the listed ids, so a
+    // partial list cannot leave an unlisted card sorting ahead of a moved one.
+    const filtered = [
+      ...listed,
+      ...existing.map((g) => g.id).filter((id) => !listed.includes(id)),
+    ];
 
     for (let i = 0; i < filtered.length; i++) {
       await this.db
