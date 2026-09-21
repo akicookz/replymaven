@@ -2762,7 +2762,7 @@ import {
 
   const formCloseBtn = createOverflowMenu(
     () => chatWindow.classList.contains("expanded"),
-    (expanded) => chatWindow.classList.toggle("expanded", expanded),
+    setPanelExpanded,
     () => closeChatWidget(),
     "rm-header-menu-wrap",
     () => !isInlineBarVariant,
@@ -2807,7 +2807,7 @@ import {
 
   const closeBtn = createOverflowMenu(
     () => chatWindow.classList.contains("expanded"),
-    (expanded) => chatWindow.classList.toggle("expanded", expanded),
+    setPanelExpanded,
     () => closeChatWidget(),
     "rm-header-menu-wrap",
     () => !isInlineBarVariant,
@@ -2964,7 +2964,8 @@ import {
   // renderGreetings() wipes the greeting stack's contents; the two are never
   // visible together — greetings require no conversation, the preview needs one.
   const previewStack = document.createElement("div");
-  previewStack.className = "rm-greeting-stack";
+  // Shares the stack layout; the extra class is what tells the two apart.
+  previewStack.className = "rm-greeting-stack rm-preview-stack";
 
   // ─── Greeting Stack (welcome + news cards) ──────────────────────────────────
   const greetingStack = document.createElement("div");
@@ -3066,6 +3067,7 @@ import {
   }
 
   let greetingsList: GreetingPublic[] = [];
+  let hasTicketForm = false;
   const greetingTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const greetingDurationTimers = new Map<
     string,
@@ -3352,6 +3354,11 @@ import {
     video.addEventListener("error", () => error.classList.add("visible"));
     video.addEventListener("loadeddata", () => error.classList.remove("visible"));
     return player;
+  }
+
+  function setPanelExpanded(expanded: boolean): void {
+    if (isInlineBarVariant) return;
+    chatWindow.classList.toggle("expanded", expanded);
   }
 
   function createOverflowMenu(
@@ -3666,6 +3673,12 @@ import {
   });
 
   // ─── View State ──────────────────────────────────────────────────────────────
+  // "greetings" is the card stack above the launcher, not a panel screen yet.
+  type WidgetScreen = "home" | "chat" | "form" | "greetings";
+  interface ScreenArgs {
+    id?: string;
+  }
+
   let currentView: "home" | "chat" | "form" = "home";
 
   function showChatScreen() {
@@ -3728,13 +3741,9 @@ import {
   }
 
   function showHomeScreen() {
-    // In center-inline mode there is no home screen — go to chat or close
+    // The inline variant has no home surface; chat is its resting screen.
     if (isInlineBarVariant) {
-      if (conversationId) {
-        showChatScreen();
-      } else {
-        closeChatWidget();
-      }
+      showChatScreen();
       return;
     }
     currentView = "home";
@@ -3763,15 +3772,36 @@ import {
     clearUnreadBadge();
     hideTyping();
     syncConversationModeUi();
+    leaveConversationView();
+  }
+
+  /** The thread is gone: leave it rather than land the visitor back on it. */
+  function leaveConversationView(): void {
+    if (isInlineBarVariant && !conversationId) {
+      // closeChatWidget() re-renders greetings and resets the inline bar.
+      closeChatWidget();
+      return;
+    }
     showHomeScreen();
-    renderGreetings({ force: true });
   }
 
   function showFormScreen() {
+    // The form body is only built when the project configured one, so without
+    // it this screen would be an empty panel.
+    if (!hasTicketForm) {
+      showHomeScreen();
+      return;
+    }
     currentView = "form";
     homeView.classList.add("hidden");
     chatView.classList.remove("active");
     formView.classList.add("active");
+  }
+
+  function showScreen(screen: WidgetScreen): void {
+    if (screen === "chat") return showChatScreen();
+    if (screen === "form") return showFormScreen();
+    showHomeScreen();
   }
 
   // ─── Visibility Tracking ─────────────────────────────────────────────────────
@@ -4420,6 +4450,7 @@ import {
 
       // ─── Inquiry Form Setup (build form fields if enabled) ──────────────────
       if (loadedConfig.inquiryForm) {
+        hasTicketForm = true;
         const cf = loadedConfig.inquiryForm as {
           description: string | null;
           fields: Array<{ label: string; type: string; required: boolean }>;
@@ -5979,7 +6010,7 @@ import {
     };
 
     // Greetings shouldn't normally be up while a conversation exists, but the
-    // forced showGreetings() API can put them there — the preview wins.
+    // forced open("greetings") can put them there — the preview wins.
     hideGreetingStack();
     previewStack.innerHTML = "";
     previewStack.appendChild(card);
@@ -6240,6 +6271,110 @@ import {
     greetingDurationTimers.clear();
   }
 
+  function isRichGreeting(greeting: GreetingPublic): boolean {
+    return Boolean(
+      greeting.imageUrl || getGreetingVideoUrl(greeting) || greeting.ctaText,
+    );
+  }
+
+  function findGreetingCard(id: string): HTMLElement | null {
+    // Hosts pass the id straight in, so escape rather than throw on a bad one.
+    return greetingStack.querySelector<HTMLElement>(
+      `.rm-greeting-card[data-greeting-id="${CSS.escape(id)}"]:not(.dismissed)`,
+    );
+  }
+
+  function collapseExpandedGreetings(exceptId?: string): void {
+    const cards = greetingStack.querySelectorAll<HTMLElement>(
+      ".rm-greeting-card.expanded",
+    );
+    for (const card of cards) {
+      if (card.dataset.greetingId === exceptId) continue;
+      card.classList.remove("expanded");
+    }
+    greetingStack.classList.toggle(
+      "expanded",
+      Boolean(
+        greetingStack.querySelector(
+          ".rm-greeting-card.expanded:not(.dismissed)",
+        ),
+      ),
+    );
+  }
+
+  function revealGreetingNow(card: HTMLElement, id: string): void {
+    const delayTimer = greetingTimers.get(id);
+    if (delayTimer) {
+      clearTimeout(delayTimer);
+      greetingTimers.delete(id);
+    }
+    const durationTimer = greetingDurationTimers.get(id);
+    if (durationTimer) {
+      clearTimeout(durationTimer);
+      greetingDurationTimers.delete(id);
+    }
+    card.classList.remove("dismissed");
+    card.classList.add("visible");
+  }
+
+  function openGreetingById(id: string): boolean {
+    const greeting = greetingsList.find((g) => g.id === id);
+    if (!greeting || !greeting.enabled) return false;
+    if (isOpen || isBanned) return false;
+    // Same bypass openChatWidget() makes: an explicit call outranks targeting.
+    if (hiddenByPageTargeting) {
+      container.style.display = "";
+      hiddenByPageTargeting = false;
+    }
+    // An unseen reply outranks a marketing card; both use the same coordinates.
+    if (previewStack.querySelector(".rm-greeting-card:not(.dismissed)")) {
+      return false;
+    }
+
+    let card = findGreetingCard(id);
+    if (!card) {
+      renderGreetings({ includeId: id });
+      card = findGreetingCard(id);
+    }
+    if (!card) return false;
+
+    collapseExpandedGreetings(id);
+    revealGreetingNow(card, id);
+    if (isRichGreeting(greeting)) {
+      card.classList.add("expanded");
+      greetingStack.classList.add("expanded");
+    }
+    return true;
+  }
+
+  function toggleGreetingById(id: string): boolean {
+    const card = findGreetingCard(id);
+    if (card?.classList.contains("expanded")) {
+      collapseExpandedGreetings();
+      return false;
+    }
+    return openGreetingById(id);
+  }
+
+  function dismissGreetingById(id?: string): void {
+    if (id) {
+      const card = findGreetingCard(id);
+      if (card) {
+        dismissGreetingCard(card, id, true);
+      } else {
+        addDismissedGreetingId(id);
+      }
+      return;
+    }
+    const cards = Array.from(
+      greetingStack.querySelectorAll(".rm-greeting-card"),
+    ) as HTMLElement[];
+    for (const card of cards) {
+      const cardId = card.getAttribute("data-greeting-id");
+      if (cardId) dismissGreetingCard(card, cardId, true);
+    }
+  }
+
   function buildGreetingCard(greeting: GreetingPublic): HTMLElement {
     const card = document.createElement("div");
     card.className = "rm-greeting-card";
@@ -6249,7 +6384,7 @@ import {
     card.dataset.bgStyle = bgStyle;
 
     const videoUrl = getGreetingVideoUrl(greeting);
-    const isRich = Boolean(greeting.imageUrl) || Boolean(videoUrl) || Boolean(greeting.ctaText);
+    const isRich = isRichGreeting(greeting);
     if (!isRich) card.classList.add("compact");
     if (!isRich && greeting.author?.name) card.classList.add("has-author");
     if (videoUrl) {
@@ -6392,7 +6527,10 @@ import {
     }, 350);
   }
 
-  function renderGreetings(options?: { force?: boolean }): void {
+  function renderGreetings(options?: {
+    force?: boolean;
+    includeId?: string;
+  }): void {
     if (expandedVideoOwner && greetingStack.contains(expandedVideoOwner)) {
       closeExpandedVideo();
     }
@@ -6407,15 +6545,18 @@ import {
     if (isBanned) return;
     // An unseen-reply preview outranks marketing greetings — both stacks
     // occupy the same coordinates, and a support reply is the more urgent
-    // card. Applies to the forced showGreetings() API path too. Matches any
+    // card. Applies to the forced open("greetings") path too. Matches any
     // non-dismissed card (not just .visible) so a preview still inside its
     // reveal delay can't be covered.
     if (previewStack.querySelector(".rm-greeting-card:not(.dismissed)")) {
       return;
     }
 
+    const includeId = options?.includeId;
     const visible = greetingsList.filter((g) => {
       if (!g.enabled) return false;
+      // Summoned by id: past its dismissal and its page targeting.
+      if (g.id === includeId) return true;
       if (!force && isGreetingDismissed(g.id)) return false;
       if (g.allowedPages && g.allowedPages.length > 0) {
         if (!matchesCurrentPage(g.allowedPages)) return false;
@@ -6630,7 +6771,7 @@ import {
     clearUnreadBadge();
     hideTyping();
     syncConversationModeUi();
-    showHomeScreen();
+    leaveConversationView();
 
     void restoreConversation();
   }
@@ -6641,7 +6782,13 @@ import {
     return window.matchMedia("(max-width: 480px)").matches;
   }
 
-  function openChatWidget() {
+  function openChatWidget(screen?: WidgetScreen) {
+    // Already open: just switch screens, don't re-run the open side effects.
+    if (isOpen) {
+      if (screen) showScreen(screen);
+      ensureLatestMessageVisible();
+      return;
+    }
     // Bypass page targeting when opened programmatically
     if (hiddenByPageTargeting) {
       container.style.display = "";
@@ -6662,12 +6809,10 @@ import {
       document.documentElement.style.overflow = "hidden";
     }
     // Route to appropriate screen based on conversation state
-    if (!isInlineBarVariant) {
-      if (conversationId && conversationStatus !== "closed") {
-        showChatScreen();
-      } else {
-        showHomeScreen();
-      }
+    if (conversationId && conversationStatus !== "closed") {
+      showChatScreen();
+    } else {
+      showHomeScreen();
     }
     // For center-inline: keep the bar visible as the input, skip home screen
     if (isInlineBarVariant) {
@@ -6689,6 +6834,7 @@ import {
         }
       }, 100);
     }
+    if (screen) showScreen(screen);
     ensureLatestMessageVisible();
     // Don't auto-focus the chat input -- the home screen is shown first (non-inline variant)
   }
@@ -6717,23 +6863,56 @@ import {
     }
   }
 
-  function toggleChatWidget() {
-    if (isOpen) {
+  function toggleChatWidget(screen?: WidgetScreen) {
+    if (isOpen && (!screen || currentView === screen)) {
       closeChatWidget();
-    } else {
-      openChatWidget();
+      return;
     }
+    openChatWidget(screen);
   }
 
   // ─── Public API ─────────────────────────────────────────────────────────────
+  function openScreen(screen?: WidgetScreen, args?: ScreenArgs): void {
+    if (screen === "greetings") {
+      if (args?.id) {
+        openGreetingById(args.id);
+      } else {
+        renderGreetings({ force: true });
+      }
+      return;
+    }
+    openChatWidget(screen);
+  }
+
+  function toggleScreen(screen?: WidgetScreen, args?: ScreenArgs): void {
+    if (screen === "greetings") {
+      if (args?.id) {
+        toggleGreetingById(args.id);
+      } else {
+        renderGreetings({ force: true });
+      }
+      return;
+    }
+    toggleChatWidget(screen);
+  }
+
+  function closeScreen(screen?: WidgetScreen, args?: ScreenArgs): void {
+    if (screen === "greetings") {
+      dismissGreetingById(args?.id);
+      return;
+    }
+    closeChatWidget();
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).ReplyMaven = {
-    open: openChatWidget,
-    close: closeChatWidget,
-    toggle: toggleChatWidget,
+    open: openScreen,
+    toggle: toggleScreen,
+    close: closeScreen,
+    expand: () => setPanelExpanded(true),
+    shrink: () => setPanelExpanded(false),
     sendMessage: (text: string) => {
-      if (!isOpen) openChatWidget();
-      showChatScreen();
+      openChatWidget("chat");
       handleSendMessage(text);
     },
     identify: (info: {
@@ -6772,38 +6951,6 @@ import {
     },
     requestNotifications: () => {
       requestNotificationPermission();
-    },
-    openInquiryForm: () => {
-      // Legacy public API name — kept for embedded widgets already in the wild.
-      if (!isOpen) openChatWidget();
-      showFormScreen();
-    },
-    openTicketForm: () => {
-      if (!isOpen) openChatWidget();
-      showFormScreen();
-    },
-    showGreetings: () => {
-      renderGreetings({ force: true });
-    },
-    dismissGreeting: (id?: string) => {
-      if (id) {
-        const card = greetingStack.querySelector(
-          `[data-greeting-id="${id}"]`,
-        ) as HTMLElement | null;
-        if (card) {
-          dismissGreetingCard(card, id, true);
-        } else {
-          addDismissedGreetingId(id);
-        }
-        return;
-      }
-      const cards = Array.from(
-        greetingStack.querySelectorAll(".rm-greeting-card"),
-      ) as HTMLElement[];
-      for (const card of cards) {
-        const cardId = card.getAttribute("data-greeting-id");
-        if (cardId) dismissGreetingCard(card, cardId, true);
-      }
     },
   };
 

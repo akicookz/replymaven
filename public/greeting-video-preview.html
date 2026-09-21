@@ -221,10 +221,10 @@
     <script>
       document.getElementById("replay-greetings").addEventListener("click", () => {
         window.ReplyMaven?.close();
-        window.ReplyMaven?.showGreetings();
+        window.ReplyMaven?.open("greetings");
       });
       document.getElementById("open-contact-form").addEventListener("click", () => {
-        window.ReplyMaven?.openInquiryForm();
+        window.ReplyMaven?.open("form");
       });
       document.addEventListener("click", (event) => {
         const target = event.target;

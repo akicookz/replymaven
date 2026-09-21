@@ -46,7 +46,7 @@ ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbo
 
 ### Core Features
 
-- **Embeddable chat widget** -- standalone JS embed script (`<script>` tag) that users install on their pages. Supports programmatic invocation (`open`, `close`, `toggle`, `sendMessage`, `identify`, `reset`, `setPageContext`, `setMetadata`, `requestNotifications`, `openTicketForm`, `showGreetings`, `dismissGreeting`). Talks native Agent chat over a WebSocket to the conversation's `MavenChatAgent` child. Automatically sends current page URL and title as context with each message.
+- **Embeddable chat widget** -- standalone JS embed script (`<script>` tag) that users install on their pages. Supports programmatic invocation: `open`/`toggle`/`close` all take an optional screen (`home`, `chat`, `form`, `greetings`) plus `{ id }` for a greeting card, alongside `expand`, `shrink`, `sendMessage`, `identify`, `reset`, `setPageContext`, `setMetadata`, and `requestNotifications`. Talks native Agent chat over a WebSocket to the conversation's `MavenChatAgent` child. Automatically sends current page URL and title as context with each message.
 - **Dashboard** -- React SPA where users configure their bot, manage resources, review conversations, and customize the widget's look and feel.
 - **Resource management** -- users add web pages, FAQs, and PDFs as knowledge sources. These are stored in R2 and indexed via Cloudflare AI Search for RAG retrieval.
 - **Tone of voice** -- configurable AI personality (professional, friendly, casual, formal, or custom prompt).
@@ -863,6 +863,10 @@ Grouped, not exhaustive. `worker/index.ts` and `worker/routes/*.ts` are the sour
 | GET/POST/PATCH/DELETE | `/api/team[s]`, `/api/team/invite`, `/api/team/accept/:inviteId` | Members, invites, team switching |
 | GET/POST | `/api/billing/{subscription,checkout,portal,usage-log}` | Stripe subscription and usage |
 | GET/POST/DELETE | `/api/mcp/{register,authorize,token,revoke,connections}` | MCP OAuth client registration and consent |
+
+Scopes are `projects:read`, `conversations:reply`, `resources:write`, `helpdesk:write`, and `widget:write` (`worker/services/mcp-oauth-service.ts`). The consent screen (`worker/oauth-render/consent-page.tsx`) lists each as a switch the user can turn off, so a token can be granted a subset of what the client asked for. Authorize is refused when every switch is off. A request for a scope the client's stored registration predates is downgraded to the scopes it holds, not rejected, so adding a scope never breaks clients registered before it existed.
+
+Greeting tools live in `worker/mcp-widget-tools.ts`: `list_greetings` (`projects:read`), plus `create_greeting`, `update_greeting`, `delete_greeting`, and `reorder_greetings` (`widget:write`). They cover text, CTA, and externally hosted images only — video and uploaded artwork need a stored `/api/uploads/...` path and there is no MCP upload tool for widget media.
 | GET/PUT/POST | `/api/profile`, `/api/onboarding/*` | Account profile and first-run onboarding |
 | POST | `/api/upload`, `/api/help-images/upload` | Upload files to R2 |
 
@@ -882,9 +886,15 @@ The widget is a standalone JS file (`widget-embed.js`) built separately via Vite
 The script creates an iframe or shadow DOM element containing the chat UI. It exposes a programmatic API on `window.ReplyMaven`:
 
 ```javascript
-window.ReplyMaven.open()
-window.ReplyMaven.close()
-window.ReplyMaven.toggle()
+// screen: "home" | "chat" | "form" | "greetings"
+window.ReplyMaven.open()                            // auto-routes: chat if live, else home
+window.ReplyMaven.open("form")
+window.ReplyMaven.open("greetings", { id })         // reveal now, expand if the card is rich
+window.ReplyMaven.toggle("chat")                    // same screen closes, a different one switches
+window.ReplyMaven.close()                           // close the panel
+window.ReplyMaven.close("greetings", { id })        // dismiss one card; no id dismisses all
+window.ReplyMaven.expand()                          // widen the panel (the header menu's Expand)
+window.ReplyMaven.shrink()
 window.ReplyMaven.sendMessage("Hello")
 window.ReplyMaven.identify({ name: "John", email: "john@example.com" })
 await window.ReplyMaven.identify({ token })
@@ -892,9 +902,6 @@ window.ReplyMaven.reset()
 window.ReplyMaven.setPageContext({ page: "Pricing", plan: "Pro" })
 window.ReplyMaven.setMetadata({ internalId: "abc123" })
 window.ReplyMaven.requestNotifications()
-window.ReplyMaven.openTicketForm()   // openInquiryForm() is the legacy alias
-window.ReplyMaven.showGreetings()
-window.ReplyMaven.dismissGreeting(id)
 ```
 
 ### Customer Continuity
@@ -1018,7 +1025,8 @@ Proactive cards shown above the launcher before any conversation exists.
 - `delaySeconds` controls the reveal, `durationSeconds` the auto-hide. Auto-hide does not persist; an explicit dismissal writes the id to `localStorage` under the `greetings_dismissed` key.
 - `allowedPages` targets the card to specific pages, matched client-side against the current URL.
 - An unseen-reply preview always outranks greetings. Both stacks occupy the same coordinates and a real support reply is the more urgent card.
-- `window.ReplyMaven.showGreetings()` re-renders ignoring dismissals; `dismissGreeting(id?)` dismisses one or all.
+- `open("greetings")` re-renders ignoring dismissals; `open("greetings", { id })` reveals one card now, skipping its delay and cancelling its auto-hide, and expands it when the card is rich. Only one card is expanded at a time. `close("greetings", { id })` dismisses one, `close("greetings")` all.
+- `"greetings"` is the card stack above the launcher, not a panel screen yet. The name is already plural so it survives the move into the panel.
 - `widget-service.ts` back-derives the legacy `introMessage`, `introMessageAuthor`, `introMessageDelay`, and `introMessageDuration` config fields from the first greeting so widget bundles still in the wild keep working.
 
 ---
