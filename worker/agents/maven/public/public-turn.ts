@@ -169,10 +169,8 @@ interface CreatePublicTurnResponseInput {
   conversationId: string;
   botName: string | null;
   ownershipRevision: number;
-  openingText?: string;
-  immediateText?: string;
   resolvedFallbackText?: string;
-  runTurn?: () => Promise<MavenTurnResult>;
+  runTurn: () => Promise<MavenTurnResult>;
   onOutcome(outcome: {
     messageId: string;
     ownershipRevision: number;
@@ -226,15 +224,8 @@ export function createPublicTurnResponse(
         messageMetadata: botMetadata(input, [], createdAt),
       });
       let textStarted = false;
-      // Phases stop once the turn's own reply streams — not when the
-      // server-owned opening greeting does, or the whole model run would show
-      // a frozen greeting with no status.
+      // Phases stop once the turn's own reply streams.
       let turnTextStarted = false;
-      // The opening greeting is held until real reply text exists. Emitting
-      // it upfront left a half bubble ("Hi Name,") sitting alone for the
-      // whole model run; held, the visitor sees phases first and the greeting
-      // arrives as the first words of the actual reply.
-      let pendingOpening = input.openingText ?? "";
       // Phase keys only; the widget owns the user-facing copy.
       function emitActivity(phase: string): void {
         if (turnTextStarted) return;
@@ -250,11 +241,6 @@ export function createPublicTurnResponse(
           writer.write({ type: "text-start", id: textPartId });
           textStarted = true;
         }
-        if (pendingOpening) {
-          const opening = pendingOpening;
-          pendingOpening = "";
-          writer.write({ type: "text-delta", id: textPartId, delta: opening });
-        }
         writer.write({ type: "text-delta", id: textPartId, delta });
       }
       function emitTurnText(delta: string): void {
@@ -268,25 +254,20 @@ export function createPublicTurnResponse(
       let internalTokens: InternalToken[] = [];
       let sources: PublicSourceReference[] = [];
       let httpExecutionIds: string[] = [];
-      if (input.immediateText !== undefined) {
-        emitTurnText(input.immediateText);
-      } else {
-        if (!input.runTurn) throw new Error("Public turn runner is required");
-        emitActivity("thinking");
-        const turn = await input.runTurn();
-        httpExecutionIds = turn.httpExecutionIds;
-        const collected = await collectPublicTurnStream(
-          turn.fullStream,
-          emitTurnText,
-          emitActivity,
-        );
-        internalTokens = collected.internalTokens;
-        sources = turn.collectedSources.map((source) => ({
-          title: source.title,
-          url: source.url ?? null,
-          type: source.type,
-        }));
-      }
+      emitActivity("thinking");
+      const turn = await input.runTurn();
+      httpExecutionIds = turn.httpExecutionIds;
+      const collected = await collectPublicTurnStream(
+        turn.fullStream,
+        emitTurnText,
+        emitActivity,
+      );
+      internalTokens = collected.internalTokens;
+      sources = turn.collectedSources.map((source) => ({
+        title: source.title,
+        url: source.url ?? null,
+        type: source.type,
+      }));
       if (
         !textStarted &&
         input.resolvedFallbackText &&

@@ -42,8 +42,6 @@ import { createModelRuntimeState } from "../../chat-runtime/llm/create-language-
 import { normalizeConversationHistory } from "../../chat-runtime/orchestration/normalize-history";
 import { runMavenTurn } from "../../chat-runtime/orchestration/run-maven-turn";
 import { parseVisitorAiInvocation } from "../../chat-runtime/routing/public-turn-gates";
-import { classifyTaskScope } from "../../chat-runtime/workflows/classify-task-scope";
-import { buildSupportTurnOpening } from "../../chat-runtime/prompt/sections";
 import { type AppEnv } from "../../types";
 import type {
   DeletePublicMessageResult,
@@ -77,7 +75,6 @@ import {
   applyChatOwnershipEvent,
   fallbackAiParticipationForStatus,
   inferLegacyActiveHumanRoutes,
-  isReturningVisitorGap,
   joinActiveHumanRoute,
   mergeChatStateForPersistence,
   parseChatState,
@@ -1479,16 +1476,8 @@ export class MavenChatAgent extends AIChatAgent<
       ? aiInvocation.content
       : submitted.content;
     const pageContext = this.readPublicPageContext(options?.body?.pageContext);
-    const scope = classifyTaskScope({
-      message: messageForAi,
-      pageContext,
-    });
     const assistantMessageId = crypto.randomUUID();
     const originalMessages = this.messages as PublicUIMessage[];
-    const immediateText = scope.kind === "in_scope_support"
-      ? undefined
-      : scope.response ??
-        "I can only help with this product, website, and support-related questions here.";
     const modelRuntime = createModelRuntimeState({
       model: this.env.AI_MODEL,
       geminiApiKey: this.env.GEMINI_API_KEY || null,
@@ -1499,21 +1488,12 @@ export class MavenChatAgent extends AIChatAgent<
       content: message.content,
       createdAt: message.createdAt,
     }));
-    const isFirstVisitorTurn = rawHistory.filter((message) =>
-      message.role === "visitor"
-    ).length === 1;
     const turnContext = {
       kind: "standard",
-      isFirstVisitorTurn,
-      isReturningVisitor: !isFirstVisitorTurn && isReturningVisitorGap(
-        rawHistory.at(-2)?.createdAt ?? null,
-        Date.now(),
-      ),
+      isNewConversation: rawHistory.filter((message) =>
+        message.role === "visitor"
+      ).length === 1,
     } as const;
-    const openingText = buildSupportTurnOpening(turnContext, {
-      name: currentState.visitorName,
-      email: currentState.visitorEmail,
-    });
     const conversationHistory = normalizeConversationHistory({
       rawHistory,
       currentMessage: messageForAi,
@@ -1540,13 +1520,10 @@ export class MavenChatAgent extends AIChatAgent<
       conversationId: currentState.id,
       botName: settings?.botName ?? null,
       ownershipRevision: currentState.ownershipRevision,
-      openingText,
       resolvedFallbackText: currentState.status === "active"
         ? "Glad I could help! Feel free to reach out anytime if you have more questions."
         : undefined,
-      ...(immediateText === undefined ? {} : { immediateText }),
-      runTurn: immediateText === undefined
-        ? () => runMavenTurn({
+      runTurn: () => runMavenTurn({
             context: {
               channel: "public",
               projectId,
@@ -1592,6 +1569,10 @@ export class MavenChatAgent extends AIChatAgent<
                 timeContext: {
                   nowMs: Date.now(),
                   conversationHistory,
+                  visitorTimezone: typeof currentState.metadata.timezone ===
+                      "string"
+                    ? currentState.metadata.timezone
+                    : null,
                 },
                 turnContext,
                 aiParticipation: currentChatState.aiParticipation,
@@ -1613,8 +1594,7 @@ export class MavenChatAgent extends AIChatAgent<
             conversationHistory,
             currentMessage: messageForAi,
             image,
-          })
-        : undefined,
+          }),
       onOutcome: (outcome) => {
         this.publicTurnOutcomeStore().complete({
           ...outcome,

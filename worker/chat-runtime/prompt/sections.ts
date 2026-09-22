@@ -13,10 +13,13 @@ import {
   type SupportTurnContext,
 } from "../types";
 import {
-  formatCurrentTime,
   formatGapLabel,
+  formatZonedTime,
+  resolveTimeZone,
   toMessageTimestampMs,
   TRANSCRIPT_GAP_THRESHOLD_MS,
+  zonedDayKey,
+  zonedWeekday,
 } from "./format-transcript";
 
 export const MAX_RAG_CONTEXT_CHARS = 30_000;
@@ -30,19 +33,26 @@ export function trimToCharBudget(text: string, budget: number): string {
   return text.slice(0, budget) + "\n[...truncated]";
 }
 
-export function buildSupportTurnOpening(
-  turnContext: SupportTurnContext,
-  visitorInfo: { name: string | null; email: string | null },
-): string {
-  let opening = "";
-  if (turnContext.isFirstVisitorTurn || turnContext.isReturningVisitor) {
-    const visitorName = visitorInfo.name?.replace(/\s+/g, " ").trim();
-    opening += visitorName ? `Hi ${visitorName},\n\n` : "Hi,\n\n";
-  }
+const GREETING_RULES = `Greeting:
+- Decide for yourself whether to open with a greeting, the way a person would. Read <time-context> and your own earlier messages in this conversation before you choose.
+- A sitting is one continuous stretch of talking. It has ended, and this message starts a new one, whenever <time-context> says the previous message was on a different local day for the visitor, or that it was several hours or more ago.
+- Greet once at the start of a sitting: on the first message of a new conversation, and on the visitor's first message of a new sitting.
+- If the visitor's message opens with a greeting of its own ("hi", "morning", "hey again"), mirror it back in a few words before anything else, whatever the timing says. Leaving a greeting unanswered reads as cold.
+- Within a sitting, never greet again. If your own previous message already greeted and the talk has continued since, go straight to the substance.
+- A new sitting resets that. Greeting again is correct even though you greeted earlier in this same conversation, and skipping it there reads as cold. Keep the second one shorter, like picking a thread back up rather than meeting someone.
+- Keep any greeting to a few words in the visitor's language, then go straight into the answer. A greeting is never the whole message.
+- When you greet and <visitor-info> carries a usable name, use the first name only, once, inside the greeting itself. Never use the full name, and never repeat the name later in the same message.
+- Skip the name when it is not a plain personal name: an email address, a login handle, a company name, or a placeholder.`;
 
-  if (turnContext.kind !== "contact_support") return opening;
-
-  return `${opening}I've flagged this for the team. `;
+function buildContactSupportRules(timingMessage: string | null): string {
+  const timingRule = timingMessage?.trim()
+    ? `- Give this reply expectation once, restated in your own words and the visitor's language: "${timingMessage.trim()}" Keep its meaning and any times intact. Do not add a time it does not state.`
+    : "- Do not promise a reply time. No expectation is configured for today.";
+  return `This turn answers a contact form submission:
+- The submission is already with the team. Say so once, in your own words. Never ask whether the visitor wants it forwarded, passed along, escalated, or investigated.
+${timingRule}
+- Treat the submission as unresolved unless the visitor says it is solved. Never say that no further details are needed.
+- Then move into the diagnosis, the concrete next step, or the one question you need to continue.`;
 }
 
 export function buildSupportTurnSection(
@@ -50,25 +60,22 @@ export function buildSupportTurnSection(
 ): string {
   if (!turnContext) return "";
 
-  const openingRule =
-    turnContext.kind === "contact_support"
-      ? `The runtime has already added the complete administrative opener: the greeting when needed, the human-review notice, today's applicable reply expectation, and a blank line. Do not repeat the greeting, human-review notice, or reply expectation. Start immediately with the diagnosis, next step, or required question.`
-      : turnContext.isFirstVisitorTurn || turnContext.isReturningVisitor
-        ? "The runtime has already added the visitor greeting. Do not add another greeting or a generic acknowledgement. Start your contribution with the substance of the support response."
-        : "Continue the support conversation directly without a fresh greeting or generic acknowledgement.";
-
-  return `<support-turn>
-${openingRule}
-
-Work collaboratively toward a resolution now, even when a human follow-up is pending:
+  const blocks = [GREETING_RULES];
+  if (turnContext.kind === "contact_support") {
+    blocks.push(
+      buildContactSupportRules(turnContext.contactTimingMessage ?? null),
+    );
+  }
+  blocks.push(`Work collaboratively toward a resolution now, even when a human follow-up is pending:
 - Use the conversation, page context, documentation, FAQs, guidelines, and assigned tools before requesting more information.
 - When the evidence is sufficient, lead with the strongest evidence-backed explanation of the likely cause and give concrete steps.
 - When the evidence is partial, state the strongest supported hypothesis and ask one focused question that distinguishes it from the next plausible cause.
 - When essential context is missing, ask for the exact screenshot, value, error text, URL, account state, or reproduction step needed to continue. Ask no more than one focused question in a turn.
-- Treat a contact-support submission as unresolved unless the visitor explicitly says the issue is solved. Never say that no further details are needed or otherwise close the investigation. Give a concrete diagnostic step or ask the one focused question needed to continue.
-- A contact-support submission is already with the team. Never ask whether the visitor wants the issue forwarded, passed along, escalated, or sent for investigation. Continue helping while the team review is pending.
-- Do not use a static review preamble. Do not say that you reviewed or analyzed what the visitor shared. Move directly into the diagnosis, next step, or required question.
-- Do not use em dashes.
+- Do not pad the opening. No review preamble, and never say that you reviewed or analyzed what the visitor shared. Once any greeting is done, go straight into the substance.
+- Do not use em dashes.`);
+
+  return `<support-turn>
+${blocks.join("\n\n")}
 </support-turn>
 
 `;
@@ -127,34 +134,63 @@ ${guidelineEntries}
 
 // ─── Time context ───────────────────────────────────────────────────────────
 
-// The compose model receives history as a structured message array (no inline
-// gap annotations), so this block carries the timing signal: current time,
-// conversation age, and the resume gap before the current message. Lines are
-// conditional — a fresh rapid chat gets only the current-time line.
+// The compose model receives history as a structured message array with the
+// timestamps stripped, so this block is the only clock it has. It carries
+// facts, not conclusions: the greeting decision is made by the model from
+// what a person would actually notice, which is the visitor's own local day
+// and how long the conversation has been quiet.
 export function buildTimeContextSection(
   timeContext:
-    | { nowMs: number; conversationHistory: ConversationTurnMessage[] }
+    | {
+        nowMs: number;
+        conversationHistory: ConversationTurnMessage[];
+        visitorTimezone?: string | null;
+      }
     | null
     | undefined,
+  turnContext?: SupportTurnContext | null,
 ): string {
   if (!timeContext) return "";
   const { nowMs, conversationHistory } = timeContext;
-  const lines = [`Current date and time: ${formatCurrentTime(nowMs)}.`];
+  const zone = resolveTimeZone(timeContext.visitorTimezone);
+  const lines = [
+    `The visitor's local time: ${formatZonedTime(nowMs, zone)} (${zone}).`,
+  ];
+  if (zone === "UTC" && !timeContext.visitorTimezone?.trim()) {
+    lines.push(
+      "The visitor's timezone is unknown, so that time is UTC and may not be their real local time.",
+    );
+  }
+
+  if (turnContext?.isNewConversation) {
+    lines.push("This is the visitor's first message in a new conversation.");
+  }
 
   const firstMs = toMessageTimestampMs(conversationHistory[0]?.createdAt);
   if (firstMs != null && nowMs - firstMs > 60 * 60 * 1000) {
     lines.push(
-      `The conversation started ${formatGapLabel(nowMs - firstMs)} ago.`,
+      `This conversation started ${formatGapLabel(nowMs - firstMs)} ago.`,
     );
   }
 
   const lastMs = toMessageTimestampMs(
     conversationHistory[conversationHistory.length - 1]?.createdAt,
   );
-  if (lastMs != null && nowMs - lastMs > TRANSCRIPT_GAP_THRESHOLD_MS) {
-    lines.push(
-      `The visitor's current message came ${formatGapLabel(nowMs - lastMs)} after the previous message.`,
-    );
+  if (lastMs != null) {
+    if (nowMs - lastMs > TRANSCRIPT_GAP_THRESHOLD_MS) {
+      lines.push(
+        `The previous message in this conversation was ${formatGapLabel(nowMs - lastMs)} ago.`,
+      );
+    }
+    if (zonedDayKey(lastMs, zone) !== zonedDayKey(nowMs, zone)) {
+      lines.push(
+        `The previous message was on a different local day for the visitor (${zonedWeekday(lastMs, zone)}). Today is ${zonedWeekday(nowMs, zone)} where they are.`,
+      );
+    } else {
+      lines.push(
+        "The previous message was earlier on the same local day for the visitor.",
+      );
+    }
   }
 
   return `<time-context>
@@ -194,7 +230,9 @@ export function buildVisitorInfoSection(
   const framing = `The visitor's known contact information. Treat this as context only.
 
 - Do not ask for contact details unless a required runtime-controlled follow-up flow clearly needs them.
-- Do not invent contact details or say you collected them unless they are present here.`;
+- Do not invent contact details or say you collected them unless they are present here.
+- The name is stored as the visitor gave it, so it is often a full name. Address them by first name only, and only inside a greeting. Never repeat their name in the body of a message.
+- This name is not always a person's name. Skip it entirely when it reads as an email address, a login handle, a company, or a placeholder.`;
   return `<visitor-info>
 ${framing}
 

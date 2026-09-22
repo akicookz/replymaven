@@ -81,3 +81,49 @@ export function formatTranscript(
 
   return lines.join("\n");
 }
+
+// ─── Visitor-local time ─────────────────────────────────────────────────────
+
+// An unknown or malformed IANA zone must never fail a turn, so every helper
+// below falls back to UTC rather than throwing.
+export function resolveTimeZone(timezone: string | null | undefined): string {
+  const zone = timezone?.trim();
+  if (!zone) return "UTC";
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: zone });
+    return zone;
+  } catch {
+    return "UTC";
+  }
+}
+
+// "Tuesday, 23 September 2026, 16:05"
+export function formatZonedTime(ms: number, timezone: string): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: timezone,
+  }).format(new Date(ms));
+}
+
+// "2026-09-23" in the given zone, for same-day comparisons.
+export function zonedDayKey(ms: number, timezone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: timezone,
+  }).format(new Date(ms));
+}
+
+export function zonedWeekday(ms: number, timezone: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    timeZone: timezone,
+  }).format(new Date(ms));
+}

@@ -54,6 +54,8 @@ export interface SupportPromptOptions {
   timeContext?: {
     nowMs: number;
     conversationHistory: ConversationTurnMessage[];
+    /** IANA zone from Cloudflare geo. Falsy or invalid falls back to UTC. */
+    visitorTimezone?: string | null;
   } | null;
   toolEvidenceSummary?: string | null;
   retrievalAttempted?: boolean;
@@ -222,21 +224,20 @@ export function canPersistAiOutput(options: {
   );
 }
 
+// Facts about the turn, not decisions about it. Whether to greet, how to
+// phrase the greeting, and whether to use the visitor's name are the model's
+// call: the prompt hands it the timing in <time-context> and its own earlier
+// messages, exactly what a human reads before deciding to say hello again.
 export interface SupportTurnContext {
   kind: "standard" | "contact_support";
-  isFirstVisitorTurn: boolean;
-  isReturningVisitor: boolean;
-}
-
-// A same-day pause continues mid-conversation; an overnight return greets.
-export const RETURNING_VISITOR_GAP_MS = 8 * 60 * 60 * 1000;
-
-export function isReturningVisitorGap(
-  previousActivityAt: number | null,
-  nowMs: number,
-): boolean {
-  return previousActivityAt !== null &&
-    nowMs - previousActivityAt >= RETURNING_VISITOR_GAP_MS;
+  /** True only for the first visitor message of a brand-new conversation. */
+  isNewConversation: boolean;
+  /**
+   * contact_support only: the reply-time expectation for today, already
+   * rendered and validated by render-contact-timing-message. The compose
+   * model restates it in its own voice and the visitor's language.
+   */
+  contactTimingMessage?: string | null;
 }
 
 export interface ContactAcceptedPayload {

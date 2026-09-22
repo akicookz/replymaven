@@ -196,7 +196,7 @@ import {
 } from "./chat-runtime/contact-support/contact-support";
 import { createEscalation } from "./chat-runtime/post-turn/escalation";
 import { buildToolRegistry } from "./chat-runtime/tools/http-tool-executor";
-import { isReturningVisitorGap, toToolDefinition } from "./chat-runtime/types";
+import { toToolDefinition } from "./chat-runtime/types";
 import { logError, logWarn } from "./observability";
 import { slugify } from "./lib/slugify";
 import { parseHelpTopNav } from "./lib/help-top-nav";
@@ -1304,7 +1304,6 @@ const app = new Hono<HonoAppContext>()
       });
     }
 
-    const previousActivityAt = created ? null : conversation.lastActivityAt;
     const formMessage = buildContactFormMessage(
       parsed.data.data,
       visitorName,
@@ -1323,9 +1322,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Conversation archived" }, 410);
     }
     const formVisitorMessage = formVisitorResult.message;
-    const isFirstVisitorTurn = formVisitorResult.isFirstVisitorTurn;
-    const isReturningVisitor = !isFirstVisitorTurn &&
-      isReturningVisitorGap(previousActivityAt, Date.now());
+    const isNewConversation = formVisitorResult.isFirstVisitorTurn;
 
     const settings = await projectService.getSettings(project.id);
     const statusAfterTeamRequest = await chatService.prepareContactSupportOwnership(
@@ -1420,8 +1417,6 @@ const app = new Hono<HonoAppContext>()
       visitorName: conversation.visitorName,
       visitorEmail: conversation.visitorEmail,
       botName: settings?.botName ?? null,
-      isFirstVisitorTurn,
-      isReturningVisitor,
     });
 
     // team_requested leaves the AI in assist_until_agent, so Maven answers in
@@ -1450,8 +1445,7 @@ const app = new Hono<HonoAppContext>()
         settings,
         conversation,
         currentMessage: formMessage,
-        isFirstVisitorTurn,
-        isReturningVisitor,
+        isNewConversation,
         aiParticipation: "assist_until_agent",
         turnKind: "contact_support",
       }));
@@ -2629,8 +2623,7 @@ const app = new Hono<HonoAppContext>()
             settings,
             conversation: stillOperational,
             currentMessage: visitorContent,
-            isFirstVisitorTurn: decision.kind === "create",
-            isReturningVisitor: false,
+            isNewConversation: decision.kind === "create",
             channel: channelMeta.channel,
             aiParticipation: chatState.aiParticipation,
           });

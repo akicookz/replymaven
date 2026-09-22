@@ -1,10 +1,15 @@
-import { buildSupportTurnOpening } from "../prompt/sections";
 import { fallbackRenderContactTimingMessage } from "../llm/render-contact-timing-message";
-
-export function buildContactFallbackMessage(responseOpening: string): string {
-  return `${responseOpening}I couldn't investigate this immediately.`;
-}
 import { type ContactAcceptedPayload } from "../types";
+
+// Only reached when the model produced nothing at all (empty stream or a
+// failed turn), so there is no generated text to fall back to. Everything the
+// visitor sees on the normal path is written by the model.
+export function buildContactFallbackMessage(
+  timingMessage?: string | null,
+): string {
+  const timing = timingMessage?.trim() || fallbackRenderContactTimingMessage();
+  return `This is with our team now. ${timing}`;
+}
 
 export function buildContactFormMessage(
   formData: Record<string, string>,
@@ -62,18 +67,8 @@ export function buildContactAcceptedPayload(options: {
   visitorName: string | null;
   visitorEmail: string | null;
   botName: string | null;
-  isFirstVisitorTurn: boolean;
-  isReturningVisitor: boolean;
 }): ContactAcceptedPayload {
-  const responseOpening = `${buildSupportTurnOpening(
-    {
-      kind: "contact_support",
-      isFirstVisitorTurn: options.isFirstVisitorTurn,
-      isReturningVisitor: options.isReturningVisitor,
-    },
-    { name: options.visitorName, email: options.visitorEmail },
-  )}${fallbackRenderContactTimingMessage()}\n\n`;
-  const fallbackMessage = buildContactFallbackMessage(responseOpening);
+  const fallbackMessage = buildContactFallbackMessage(null);
 
   return {
     conversationId: options.conversationId,

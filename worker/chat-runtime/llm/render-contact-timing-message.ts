@@ -71,8 +71,10 @@ export type RenderedContactTimingAssessment = z.infer<
   typeof renderContactTimingSchema
 >;
 
+// The prompt below interpolates this same constant for the unknown case, so
+// the validator's exact-match check can never drift from what we asked for.
 export function fallbackRenderContactTimingMessage(): string {
-  return "Response time can vary.";
+  return "The team should get back to you as soon as possible.";
 }
 
 export function isRenderedContactTimingMessageValid(
@@ -278,7 +280,7 @@ Rules:
 - When replies are expected but slower, explain that naturally and then give the applicable expectation, for example: "Today is Saturday, so the team may be a little slower than usual. You can expect a reply within 8-12 hours."
 - When the team is off, say so and communicate the clearest supported expectation. Calculate the next working day or time only when it follows reliably from the configured schedule, for example: "The team is off today and will be back Monday. You can expect a reply after they return." If the return time cannot be calculated, say they should get back to the visitor when they are back.
 - Only claim a public holiday when the company location is explicit and you can determine the holiday reliably. Otherwise classify today using the weekday and configured schedule.
-- If availability or timing cannot be determined reliably, write exactly: "The team should get back to you as soon as possible."
+- If availability or timing cannot be determined reliably, write exactly: "${fallbackRenderContactTimingMessage()}"
 - Treat the examples as guidance, not fixed templates. Use natural wording that fits the actual situation and avoids unnecessary explanation.
 - Do not repeat the working-hours schedule, do not list multiple response windows, do not greet the visitor, and do not mention that the inquiry was flagged.
 - Do not use an em dash.

@@ -23,7 +23,6 @@ import {
   renderContactTimingMessage,
 } from "../llm/render-contact-timing-message";
 import { buildContactFallbackMessage } from "../contact-support/contact-support";
-import { buildSupportTurnOpening } from "../prompt/sections";
 import {
   createStreamingStripState,
   flushStreamingStripState,
@@ -48,14 +47,13 @@ export interface ChannelTurnOptions {
   settings: (SupportPromptSettings & Record<string, unknown>) | null;
   conversation: PublicConversationRecord;
   currentMessage: string;
-  isFirstVisitorTurn: boolean;
-  isReturningVisitor: boolean;
+  isNewConversation: boolean;
   channel?: ConversationChannel;
   aiParticipation?: AiParticipation;
   /**
-   * "contact_support" opens with a greeting and a response-time line, and
-   * falls back to a holding message when the model produces nothing. Standard
-   * turns stay silent instead.
+   * "contact_support" hands the model today's reply expectation and falls back
+   * to a holding message when the model produces nothing. Standard turns stay
+   * silent instead.
    */
   turnKind?: "standard" | "contact_support";
 }
@@ -108,19 +106,14 @@ export async function runChannelTurn(
   });
 
   const turnKind = options.turnKind ?? "standard";
-  const turnContext = {
-    kind: turnKind,
-    isFirstVisitorTurn: options.isFirstVisitorTurn,
-    isReturningVisitor: options.isReturningVisitor,
-  } as const;
 
-  let responseOpening = "";
+  // Rendered up front so the compose model can weave today's expectation into
+  // its own sentences. It is never prepended to the reply.
+  let contactTimingMessage: string | null = null;
   if (turnKind === "contact_support") {
-    const baseOpening = buildSupportTurnOpening(turnContext, visitorInfo);
-    responseOpening = `${baseOpening}${fallbackRenderContactTimingMessage()}\n\n`;
-    if (settings?.avgResponseTime?.trim()) {
+    if (settings?.avgResponseTime?.trim() || settings?.workingHours?.trim()) {
       try {
-        const timingMessage = await runWithModelFallback({
+        contactTimingMessage = await runWithModelFallback({
           runtime: modelRuntime,
           stage: "render_contact_timing",
           operation: (config) =>
@@ -139,15 +132,23 @@ export async function runChannelTurn(
             }, { throwOnModelError: true }),
           logContext,
         });
-        responseOpening = `${baseOpening}${timingMessage}\n\n`;
       } catch (error) {
         logWarn("channel_turn.timing_fallback", {
           ...logContext,
           error: error instanceof Error ? error.message : String(error),
         });
+        contactTimingMessage = fallbackRenderContactTimingMessage();
       }
+    } else {
+      contactTimingMessage = fallbackRenderContactTimingMessage();
     }
   }
+
+  const turnContext = {
+    kind: turnKind,
+    isNewConversation: options.isNewConversation,
+    contactTimingMessage,
+  } as const;
 
   let content: string | null;
   let sources: PublicSourceReference[] = [];
@@ -203,7 +204,14 @@ export async function runChannelTurn(
             "agentHandbackInstructions",
           ),
           visitorInfo,
-          timeContext: { nowMs: Date.now(), conversationHistory },
+          timeContext: {
+            nowMs: Date.now(),
+            conversationHistory,
+            visitorTimezone: getMetadataString(
+              conversation.metadata,
+              "timezone",
+            ),
+          },
           turnContext,
           aiParticipation,
           escalated: turnKind === "contact_support" ||
@@ -229,9 +237,9 @@ export async function runChannelTurn(
       type: source.type,
     }));
     if (visibleText) {
-      content = `${responseOpening}${visibleText}`;
+      content = visibleText;
     } else if (turnKind === "contact_support") {
-      content = buildContactFallbackMessage(responseOpening);
+      content = buildContactFallbackMessage(contactTimingMessage);
     } else {
       content = null;
     }
@@ -242,7 +250,7 @@ export async function runChannelTurn(
       error: error instanceof Error ? error.message : String(error),
     });
     content = turnKind === "contact_support"
-      ? buildContactFallbackMessage(responseOpening)
+      ? buildContactFallbackMessage(contactTimingMessage)
       : null;
     sources = [];
   }
