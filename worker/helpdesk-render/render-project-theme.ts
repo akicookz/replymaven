@@ -1,5 +1,6 @@
 import type { WidgetConfigRow } from "../db/schema";
 import { resolveWidgetFont } from "../../shared/widget-fonts";
+import { helpFontFamily } from "./build-font-link";
 
 const HEX_RE = /^#[0-9a-fA-F]{3,8}$/;
 const COLOR_FN_RE = /^(oklch|rgb|rgba|hsl|hsla)\(\s*[0-9a-zA-Z%.,\-\s/+*]+\s*\)$/i;
@@ -58,7 +59,7 @@ export function renderProjectTheme(widgetConfig: WidgetConfigRow | null): string
   const radius = normalizeRadius(widgetConfig?.borderRadius);
   const fontName = sanitizeFontName(widgetConfig?.fontFamily);
   const fontStack = fontName
-    ? `"${fontName}", system-ui, sans-serif`
+    ? `"${helpFontFamily(fontName)}", system-ui, sans-serif`
     : "system-ui, sans-serif";
 
   // Light is the brand default; readers flip to dark via the top-bar toggle

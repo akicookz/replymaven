@@ -5,11 +5,14 @@ import { applyPatch, parsePatch } from "diff";
 import {
   helpArticles,
   helpCategories,
+  helpTabs,
   resources,
   type HelpArticleRow,
   type HelpCategoryRow,
+  type HelpTabRow,
   type NewHelpArticleRow,
   type NewHelpCategoryRow,
+  type NewHelpTabRow,
   type NewResourceRow,
 } from "../db";
 import { slugify } from "../lib/slugify";
@@ -18,7 +21,34 @@ import { buildFrontmatterMarkdown } from "../helpdesk-render/build-frontmatter-m
 import { applyHelpArticleSeoDefaults } from "../helpdesk-render/apply-help-article-seo-defaults";
 import { helpArticleR2RefreshAction } from "../helpdesk-render/help-article-r2-refresh";
 
+export const MAX_HELP_TABS = 6;
+
+interface CreateTabInput {
+  name: string;
+}
+
+interface UpdateTabInput {
+  name?: string;
+  sortOrder?: number;
+}
+
+export interface HelpTabWithCount extends HelpTabRow {
+  categoryCount: number;
+}
+
+/** Thrown when a tab write is refused. `code` is surfaced to callers. */
+export class HelpTabWriteError extends Error {
+  constructor(
+    message: string,
+    readonly code: "tab_limit" | "tab_not_empty" | "tab_not_found",
+  ) {
+    super(message);
+    this.name = "HelpTabWriteError";
+  }
+}
+
 interface CreateCategoryInput {
+  tabId?: string;
   name: string;
   slug?: string;
   description?: string | null;
@@ -27,6 +57,7 @@ interface CreateCategoryInput {
 }
 
 interface UpdateCategoryInput {
+  tabId?: string;
   name?: string;
   slug?: string;
   description?: string | null;
@@ -109,6 +140,177 @@ export class HelpdeskService {
     private r2: R2Bucket,
   ) {}
 
+  // ─── Tabs ──────────────────────────────────────────────────────────────────
+
+  async listTabs(projectId: string): Promise<HelpTabRow[]> {
+    return this.db
+      .select()
+      .from(helpTabs)
+      .where(eq(helpTabs.projectId, projectId))
+      .orderBy(asc(helpTabs.sortOrder), asc(helpTabs.createdAt));
+  }
+
+  async getTabById(id: string, projectId: string): Promise<HelpTabRow | null> {
+    const rows = await this.db
+      .select()
+      .from(helpTabs)
+      .where(and(eq(helpTabs.id, id), eq(helpTabs.projectId, projectId)))
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
+  /** Active categories per tab. Categories with no tab count toward the first tab. */
+  async listTabsWithCategoryCounts(
+    projectId: string,
+  ): Promise<HelpTabWithCount[]> {
+    const [tabs, rows] = await Promise.all([
+      this.listTabs(projectId),
+      this.db
+        .select({
+          tabId: helpCategories.tabId,
+          count: sql<number>`count(*)`,
+        })
+        .from(helpCategories)
+        .where(
+          and(
+            eq(helpCategories.projectId, projectId),
+            isNull(helpCategories.archivedAt),
+          ),
+        )
+        .groupBy(helpCategories.tabId),
+    ]);
+    const firstTabId = tabs[0]?.id ?? null;
+    const counts = new Map<string, number>();
+    for (const row of rows) {
+      const tabId = row.tabId ?? firstTabId;
+      if (!tabId) continue;
+      counts.set(tabId, (counts.get(tabId) ?? 0) + Number(row.count));
+    }
+    return tabs.map((tab) => ({
+      ...tab,
+      categoryCount: counts.get(tab.id) ?? 0,
+    }));
+  }
+
+  /**
+   * The first tab of a project adopts every category that has no tab, so
+   * once tabs exist each category belongs to one.
+   */
+  async createTab(
+    data: CreateTabInput,
+    projectId: string,
+  ): Promise<HelpTabRow> {
+    const existing = await this.listTabs(projectId);
+    if (existing.length >= MAX_HELP_TABS) {
+      throw new HelpTabWriteError(
+        `A help center can have at most ${MAX_HELP_TABS} tabs.`,
+        "tab_limit",
+      );
+    }
+    const last = existing[existing.length - 1];
+    const id = crypto.randomUUID();
+    const row: NewHelpTabRow = {
+      id,
+      projectId,
+      name: data.name,
+      sortOrder: last ? last.sortOrder + 1 : 0,
+    };
+    if (existing.length === 0) {
+      await this.db.batch([
+        this.db.insert(helpTabs).values(row),
+        this.db
+          .update(helpCategories)
+          .set({ tabId: id })
+          .where(
+            and(
+              eq(helpCategories.projectId, projectId),
+              isNull(helpCategories.tabId),
+            ),
+          ),
+      ]);
+    } else {
+      await this.db.insert(helpTabs).values(row);
+    }
+    return (await this.getTabById(id, projectId))!;
+  }
+
+  async updateTab(
+    id: string,
+    projectId: string,
+    updates: UpdateTabInput,
+  ): Promise<HelpTabRow | null> {
+    const existing = await this.getTabById(id, projectId);
+    if (!existing) return null;
+    const patch: Partial<NewHelpTabRow> = {};
+    if (updates.name !== undefined) patch.name = updates.name;
+    if (updates.sortOrder !== undefined) patch.sortOrder = updates.sortOrder;
+    if (Object.keys(patch).length > 0) {
+      await this.db
+        .update(helpTabs)
+        .set(patch)
+        .where(and(eq(helpTabs.id, id), eq(helpTabs.projectId, projectId)));
+    }
+    return this.getTabById(id, projectId);
+  }
+
+  async reorderTabs(projectId: string, items: ReorderItem[]): Promise<void> {
+    const existing = await this.listTabs(projectId);
+    const valid = new Set(existing.map((t) => t.id));
+    for (const item of items) {
+      if (!valid.has(item.id)) continue;
+      await this.db
+        .update(helpTabs)
+        .set({ sortOrder: item.sortOrder })
+        .where(
+          and(eq(helpTabs.id, item.id), eq(helpTabs.projectId, projectId)),
+        );
+    }
+  }
+
+  /** Only an empty tab can be deleted. Archived categories keep no tab. */
+  async deleteTab(id: string, projectId: string): Promise<boolean> {
+    const tabs = await this.listTabsWithCategoryCounts(projectId);
+    const tab = tabs.find((t) => t.id === id);
+    if (!tab) return false;
+    if (tab.categoryCount > 0) {
+      throw new HelpTabWriteError(
+        "Move or archive this tab's categories first.",
+        "tab_not_empty",
+      );
+    }
+    await this.db.batch([
+      this.db
+        .update(helpCategories)
+        .set({ tabId: null })
+        .where(
+          and(
+            eq(helpCategories.projectId, projectId),
+            eq(helpCategories.tabId, id),
+          ),
+        ),
+      this.db
+        .delete(helpTabs)
+        .where(and(eq(helpTabs.id, id), eq(helpTabs.projectId, projectId))),
+    ]);
+    return true;
+  }
+
+  /** An explicit tab must exist; without one a category joins the first tab, if any. */
+  private async resolveCategoryTabId(
+    projectId: string,
+    tabId: string | undefined,
+  ): Promise<string | null> {
+    if (tabId) {
+      const tab = await this.getTabById(tabId, projectId);
+      if (!tab) {
+        throw new HelpTabWriteError("Tab not found", "tab_not_found");
+      }
+      return tab.id;
+    }
+    const tabs = await this.listTabs(projectId);
+    return tabs[0]?.id ?? null;
+  }
+
   // ─── Categories ────────────────────────────────────────────────────────────
 
   async listCategories(projectId: string): Promise<HelpCategoryRow[]> {
@@ -190,10 +392,12 @@ export class HelpdeskService {
     );
 
     const sortOrder = data.sortOrder ?? (await this.nextCategorySortOrder(projectId));
+    const tabId = await this.resolveCategoryTabId(projectId, data.tabId);
     const id = crypto.randomUUID();
     const row: NewHelpCategoryRow = {
       id,
       projectId,
+      tabId,
       name: data.name,
       slug,
       description: data.description ?? null,
@@ -214,6 +418,9 @@ export class HelpdeskService {
 
     const patch: Partial<NewHelpCategoryRow> = {};
 
+    if (updates.tabId !== undefined && updates.tabId !== existing.tabId) {
+      patch.tabId = await this.resolveCategoryTabId(projectId, updates.tabId);
+    }
     if (updates.name !== undefined) patch.name = updates.name;
     if (updates.description !== undefined) patch.description = updates.description;
     if (updates.icon !== undefined) patch.icon = updates.icon;

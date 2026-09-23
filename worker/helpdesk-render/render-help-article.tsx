@@ -8,6 +8,7 @@ import type {
 import type { HelpArticleNav } from "../services/helpdesk-service";
 import type { HelpTopNavItem } from "../lib/help-top-nav";
 import { buildHelpUrl } from "./build-help-url";
+import { breadcrumbListJsonLd } from "./breadcrumb-json-ld";
 import { resolveHelpUploadUrl } from "./resolve-help-upload-url";
 import { extractFirstImage } from "../../shared/extract-first-image";
 import { Layout } from "./layout";
@@ -16,11 +17,13 @@ import type { TocEntry } from "./render-markdown";
 import { HelpSidebar } from "./sidebar";
 import { splitHelpArticleLead } from "./split-help-article-lead";
 import { HelpTopBar } from "./top-bar";
+import type { HelpNav } from "./help-tabs";
 import type { HelpThemeDefault } from "./help-theme-default";
 import type { HelpAnalyticsEmbed } from "../lib/help-analytics";
 
 interface RenderHelpArticleProps {
   project: ProjectRow;
+  nav: HelpNav;
   category: HelpCategoryRow;
   categories: HelpCategoryRow[];
   articlesByCategory: Map<string, HelpArticleNav[]>;
@@ -71,17 +74,39 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
 
   const jsonLd = {
     "@context": "https://schema.org",
-    "@type": "Article",
-    headline: props.article.title,
-    description: description,
-    url: canonical,
-    datePublished,
-    dateModified,
-    articleSection: props.category.name,
-    ...(ogImage ? { image: ogImage.url } : {}),
-    author: { "@type": "Organization", name: props.project.name },
-    publisher: { "@type": "Organization", name: props.project.name },
-    mainEntityOfPage: { "@type": "WebPage", "@id": canonical },
+    "@graph": [
+      {
+        "@type": "Article",
+        headline: props.article.title,
+        description: description,
+        url: canonical,
+        datePublished,
+        dateModified,
+        articleSection: props.category.name,
+        ...(ogImage ? { image: ogImage.url } : {}),
+        author: { "@type": "Organization", name: props.project.name },
+        publisher: { "@type": "Organization", name: props.project.name },
+        mainEntityOfPage: { "@type": "WebPage", "@id": canonical },
+      },
+      breadcrumbListJsonLd([
+        {
+          name: props.project.name,
+          url: buildHelpUrl({
+            projectSlug: props.project.slug,
+            customUrl: props.helpCustomUrl,
+          }),
+        },
+        {
+          name: props.category.name,
+          url: buildHelpUrl({
+            projectSlug: props.project.slug,
+            customUrl: props.helpCustomUrl,
+            category: props.category.slug,
+          }),
+        },
+        { name: props.article.title, url: canonical },
+      ]),
+    ],
   };
 
   return (
@@ -109,6 +134,7 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
           widgetConfig={props.widgetConfig}
           helpCustomUrl={props.helpCustomUrl}
           topNav={props.topNav}
+          nav={props.nav}
         />
       }
       sidebar={
@@ -121,6 +147,7 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
           helpCustomUrl={props.helpCustomUrl}
           widgetConfig={props.widgetConfig}
           topNav={props.topNav}
+          nav={props.nav}
         />
       }
     >
@@ -159,6 +186,7 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
         <MobileCategoryNav
           project={props.project}
           categories={props.categories}
+          articlesByCategory={props.articlesByCategory}
           activeCategorySlug={props.category.slug}
           helpCustomUrl={props.helpCustomUrl}
         />

@@ -199,6 +199,33 @@ export const quickActions = sqliteTable(
 export type QuickActionRow = typeof quickActions.$inferSelect;
 export type NewQuickActionRow = typeof quickActions.$inferInsert;
 
+// ─── Help Tabs ────────────────────────────────────────────────────────────────
+
+export const helpTabs = sqliteTable(
+  "help_tabs",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("idx_help_tabs_project_sort").on(table.projectId, table.sortOrder),
+  ],
+);
+
+export type HelpTabRow = typeof helpTabs.$inferSelect;
+export type NewHelpTabRow = typeof helpTabs.$inferInsert;
+
 // ─── Help Categories ──────────────────────────────────────────────────────────
 
 export const helpCategories = sqliteTable(
@@ -208,6 +235,9 @@ export const helpCategories = sqliteTable(
     projectId: text("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
+    // Null only while the project has no tabs; renderers treat it as the first tab.
+    // No ON DELETE action: SQLite ADD COLUMN drops it, so deleteTab clears this first.
+    tabId: text("tab_id").references(() => helpTabs.id),
     name: text("name").notNull(),
     slug: text("slug").notNull(),
     description: text("description"),
@@ -1187,6 +1217,7 @@ export const schema = {
   guidelines,
   visitorBans,
   greetings,
+  helpTabs,
   helpCategories,
   helpArticles,
   projectInboundAddresses,

@@ -261,14 +261,19 @@ function weightCss(weight: WidgetFontFace["weight"]): string {
   return `${weight[0]} ${weight[1]}`;
 }
 
-export function fontFaceCss(font: WidgetFontOption): string {
+export function fontFaceCss(
+  font: WidgetFontOption,
+  options: { display?: "swap" | "optional"; family?: string } = {},
+): string {
+  const display = options.display ?? "swap";
+  const family = options.family ?? font.value;
   return font.faces
     .map((face) => {
       const style = face.style ?? "normal";
       return (
-        `@font-face{font-family:${JSON.stringify(font.value)};` +
+        `@font-face{font-family:${JSON.stringify(family)};` +
         `font-style:${style};font-weight:${weightCss(face.weight)};` +
-        `font-display:swap;src:url(${JSON.stringify(face.src)}) format("woff2")}`
+        `font-display:${display};src:url(${JSON.stringify(face.src)}) format("woff2")}`
       );
     })
     .join("");

@@ -1,9 +1,10 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { type HelpArticleRow, type HelpCategoryRow } from "./db";
+import { type HelpArticleRow, type HelpCategoryRow, type HelpTabRow } from "./db";
 import {
   HelpArticleWriteError,
   HelpdeskService,
+  HelpTabWriteError,
 } from "./services/helpdesk-service";
 import { ProjectService } from "./services/project-service";
 import { triggerAutoRagSync } from "./services/autorag-sync";
@@ -19,8 +20,10 @@ import {
 import {
   createHelpArticleSchema,
   createHelpCategorySchema,
+  createHelpTabSchema,
   updateHelpArticleSchema,
   updateHelpCategorySchema,
+  updateHelpTabSchema,
 } from "./validation";
 import {
   confirmedMutationSchema,
@@ -46,6 +49,10 @@ export function registerHelpdeskTools(
   server: McpServer,
   context: McpRequestContext,
 ): void {
+  registerListHelpTabsTool(server, context);
+  registerCreateHelpTabTool(server, context);
+  registerUpdateHelpTabTool(server, context);
+  registerDeleteHelpTabTool(server, context);
   registerListHelpCategoriesTool(server, context);
   registerListHelpArticlesTool(server, context);
   registerSearchHelpArticlesTool(server, context);
@@ -64,6 +71,174 @@ function helpdeskService(context: McpRequestContext): HelpdeskService {
   return new HelpdeskService(context.db, context.env.UPLOADS);
 }
 
+// ─── Tab Tools ────────────────────────────────────────────────────────────────
+
+function registerListHelpTabsTool(
+  server: McpServer,
+  context: McpRequestContext,
+): void {
+  server.registerTool(
+    "list_help_tabs",
+    {
+      title: "List help tabs",
+      description:
+        "List the help center's tabs (for example Docs, Changelog, API) in order, with active category counts. Each category belongs to one tab; the top bar shows tabs once two or more have published articles.",
+      inputSchema: {
+        projectId: z.string().min(1).describe("ReplyMaven project ID."),
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ projectId }) => {
+      requireScope(context, "projects:read");
+
+      const project = await getAccessibleProject(context, projectId);
+      const tabs = await helpdeskService(context).listTabsWithCategoryCounts(
+        project.id,
+      );
+      return textResult({
+        tabs: tabs.map((tab) => summarizeHelpTab(tab, tab.categoryCount)),
+      });
+    },
+  );
+}
+
+function registerCreateHelpTabTool(
+  server: McpServer,
+  context: McpRequestContext,
+): void {
+  server.registerTool(
+    "create_help_tab",
+    {
+      title: "Create help tab",
+      description:
+        "Create a help center tab, appended last. The first tab a project creates takes every existing category. Max 6 tabs.",
+      inputSchema: {
+        projectId: z.string().min(1).describe("ReplyMaven project ID."),
+        name: createHelpTabSchema.shape.name.describe(
+          "Tab name, max 24 characters.",
+        ),
+        confirm: confirmedMutationSchema,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    async ({ projectId, name }) => {
+      requireScope(context, "helpdesk:write");
+
+      const project = await getAccessibleProject(context, projectId);
+      const created = await runTabWrite(() =>
+        helpdeskService(context).createTab({ name }, project.id),
+      );
+      scheduleHelpPageCachePurge(context.executionCtx, project.id);
+
+      return textResult({ ok: true, tab: summarizeHelpTab(created) });
+    },
+  );
+}
+
+function registerUpdateHelpTabTool(
+  server: McpServer,
+  context: McpRequestContext,
+): void {
+  server.registerTool(
+    "update_help_tab",
+    {
+      title: "Update help tab",
+      description:
+        "Rename a help center tab or change its position. Omitted fields keep their current value. The first tab owns the help home.",
+      inputSchema: {
+        projectId: z.string().min(1).describe("ReplyMaven project ID."),
+        tabId: z.string().min(1).describe("Help tab ID."),
+        name: updateHelpTabSchema.shape.name.describe(
+          "Replacement name, max 24 characters.",
+        ),
+        sortOrder: updateHelpTabSchema.shape.sortOrder.describe(
+          "Replacement position in the tab list.",
+        ),
+        confirm: confirmedMutationSchema,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    async ({ projectId, tabId, name, sortOrder }) => {
+      requireScope(context, "helpdesk:write");
+
+      const project = await getAccessibleProject(context, projectId);
+      const updated = await helpdeskService(context).updateTab(
+        tabId,
+        project.id,
+        { name, sortOrder },
+      );
+      if (!updated) throw new Error("Tab not found");
+      scheduleHelpPageCachePurge(context.executionCtx, project.id);
+
+      return textResult({ ok: true, tab: summarizeHelpTab(updated) });
+    },
+  );
+}
+
+function registerDeleteHelpTabTool(
+  server: McpServer,
+  context: McpRequestContext,
+): void {
+  server.registerTool(
+    "delete_help_tab",
+    {
+      title: "Delete help tab",
+      description:
+        "Delete an empty help center tab. Fails while the tab has active categories; move them with update_help_category or archive them first.",
+      inputSchema: {
+        projectId: z.string().min(1).describe("ReplyMaven project ID."),
+        tabId: z.string().min(1).describe("Help tab ID."),
+        confirm: confirmedMutationSchema,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    async ({ projectId, tabId }) => {
+      requireScope(context, "helpdesk:write");
+
+      const project = await getAccessibleProject(context, projectId);
+      const deleted = await runTabWrite(() =>
+        helpdeskService(context).deleteTab(tabId, project.id),
+      );
+      if (!deleted) throw new Error("Tab not found");
+      scheduleHelpPageCachePurge(context.executionCtx, project.id);
+
+      return textResult({ ok: true, message: "Tab deleted." });
+    },
+  );
+}
+
+/** Surfaces the refusal code (tab_limit, tab_not_empty, tab_not_found) to the agent. */
+async function runTabWrite<T>(write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch (err) {
+    if (err instanceof HelpTabWriteError) {
+      throw new Error(`${err.code}: ${err.message}`);
+    }
+    throw err;
+  }
+}
+
 // ─── Read Tools ───────────────────────────────────────────────────────────────
 
 function registerListHelpCategoriesTool(
@@ -75,7 +250,7 @@ function registerListHelpCategoriesTool(
     {
       title: "List help categories",
       description:
-        "List the help center's categories with per-category article counts (drafts included).",
+        "List the help center's categories with per-category article counts (drafts included). Each category carries the tabId it belongs to; null means the project has no tabs.",
       inputSchema: {
         projectId: z.string().min(1).describe("ReplyMaven project ID."),
       },
@@ -279,6 +454,9 @@ function registerCreateHelpCategoryTool(
         "Create a help center category. The slug is derived from the name when omitted and de-duplicated automatically.",
       inputSchema: {
         projectId: z.string().min(1).describe("ReplyMaven project ID."),
+        tabId: createHelpCategorySchema.shape.tabId.describe(
+          "Optional tab from list_help_tabs. Defaults to the first tab when the project has tabs.",
+        ),
         name: createHelpCategorySchema.shape.name.describe(
           "Category name, max 100 characters.",
         ),
@@ -303,12 +481,13 @@ function registerCreateHelpCategoryTool(
         openWorldHint: false,
       },
     },
-    async ({ projectId, name, slug, description, icon, sortOrder }) => {
+    async ({ projectId, tabId, name, slug, description, icon, sortOrder }) => {
       requireScope(context, "helpdesk:write");
 
       const project = await getAccessibleProject(context, projectId);
       const created = await helpdeskService(context).createCategory(
         {
+          tabId,
           name: name.trim(),
           slug,
           description: description ?? null,
@@ -333,10 +512,13 @@ function registerUpdateHelpCategoryTool(
     {
       title: "Update help category",
       description:
-        "Update a help center category's name, slug, description, or position. Omitted fields keep their current value.",
+        "Update a help center category's tab, name, slug, description, or position. Omitted fields keep their current value. Moving a category to another tab does not change its URL.",
       inputSchema: {
         projectId: z.string().min(1).describe("ReplyMaven project ID."),
         categoryId: z.string().min(1).describe("Help category ID."),
+        tabId: updateHelpCategorySchema.shape.tabId.describe(
+          "Move the category to this tab (from list_help_tabs).",
+        ),
         name: updateHelpCategorySchema.shape.name.describe(
           "Replacement name, max 100 characters.",
         ),
@@ -361,14 +543,23 @@ function registerUpdateHelpCategoryTool(
         openWorldHint: false,
       },
     },
-    async ({ projectId, categoryId, name, slug, description, icon, sortOrder }) => {
+    async ({
+      projectId,
+      categoryId,
+      tabId,
+      name,
+      slug,
+      description,
+      icon,
+      sortOrder,
+    }) => {
       requireScope(context, "helpdesk:write");
 
       const project = await getAccessibleProject(context, projectId);
       const updated = await helpdeskService(context).updateCategory(
         categoryId,
         project.id,
-        { name, slug, description, icon, sortOrder },
+        { tabId, name, slug, description, icon, sortOrder },
       );
       if (!updated) throw new Error("Category not found");
       scheduleHelpPageCachePurge(context.executionCtx, project.id);
@@ -857,12 +1048,27 @@ function registerImportHelpImageTool(
 
 // ─── Serialization ────────────────────────────────────────────────────────────
 
+function summarizeHelpTab(
+  tab: HelpTabRow,
+  categoryCount?: number,
+): Record<string, unknown> {
+  return {
+    id: tab.id,
+    name: tab.name,
+    sortOrder: tab.sortOrder,
+    ...(categoryCount === undefined ? {} : { categoryCount }),
+    createdAt: serializeDate(tab.createdAt),
+    updatedAt: serializeDate(tab.updatedAt),
+  };
+}
+
 function summarizeHelpCategory(
   category: HelpCategoryRow,
   articleCount?: number,
 ): Record<string, unknown> {
   return {
     id: category.id,
+    tabId: category.tabId,
     name: category.name,
     slug: category.slug,
     description: category.description,

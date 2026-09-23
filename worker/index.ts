@@ -117,7 +117,10 @@ import {
 } from "./services/email-service";
 import { ToolService } from "./services/tool-service";
 import { GuidelineService } from "./services/guideline-service";
-import { HelpdeskService } from "./services/helpdesk-service";
+import {
+  HelpdeskService,
+  HelpTabWriteError,
+} from "./services/helpdesk-service";
 import { McpOAuthService } from "./services/mcp-oauth-service";
 import { renderHelpIndex } from "./helpdesk-render/render-help-index";
 import { renderHelpCategory } from "./helpdesk-render/render-help-category";
@@ -144,6 +147,7 @@ import {
 } from "./helpdesk-render/sanitize-help-home-background-url";
 import { sanitizeHelpThemeDefault } from "./helpdesk-render/help-theme-default";
 import { groupArticlesByCategory } from "./helpdesk-render/group-articles";
+import { buildHelpNav, resolveHelpTabs } from "./helpdesk-render/help-tabs";
 import {
   dispatchPublicHelp,
   helpHtmlHeaders,
@@ -310,6 +314,8 @@ import {
   updateGreetingSchema,
   reorderGreetingsSchema,
   createHelpCategorySchema,
+  createHelpTabSchema,
+  updateHelpTabSchema,
   updateHelpCategorySchema,
   createHelpArticleSchema,
   updateHelpArticleSchema,
@@ -1882,10 +1888,12 @@ const app = new Hono<HonoAppContext>()
       },
     );
 
+    const activeTabId = page.tabContext.tabIdForCategory(category);
     const html = renderHelpArticle({
       project: page.project,
+      nav: buildHelpNav(page.tabContext, activeTabId, page.settings?.botName),
       category,
-      categories: page.categories,
+      categories: page.tabContext.categoriesForTab(activeTabId),
       articlesByCategory: page.articlesByCategory,
       article,
       bodyHtml,
@@ -1921,11 +1929,23 @@ const app = new Hono<HonoAppContext>()
           )
         : [];
 
+    const homeTabId = page.tabContext.homeTabId;
+    const tabNames = new Map<string, string>();
+    if (page.tabContext.links.length > 0) {
+      for (const category of page.categories) {
+        const name = page.tabContext.tabName(
+          page.tabContext.tabIdForCategory(category),
+        );
+        if (name) tabNames.set(category.id, name);
+      }
+    }
     const html = renderHelpSearch({
       project: page.project,
+      nav: buildHelpNav(page.tabContext, homeTabId, page.settings?.botName),
       query,
       results,
-      categories: page.categories,
+      tabNames,
+      categories: page.tabContext.categoriesForTab(homeTabId),
       articlesByCategory: page.articlesByCategory,
       widgetConfig: page.widgetConfig,
       helpCustomUrl: page.helpCustomUrl,
@@ -1955,10 +1975,12 @@ const app = new Hono<HonoAppContext>()
       );
     }
 
+    const activeTabId = page.tabContext.tabIdForCategory(category);
     const html = renderHelpCategory({
       project: page.project,
+      nav: buildHelpNav(page.tabContext, activeTabId, page.settings?.botName),
       category,
-      categories: page.categories,
+      categories: page.tabContext.categoriesForTab(activeTabId),
       articles: page.articlesByCategory.get(category.id) ?? [],
       articlesByCategory: page.articlesByCategory,
       widgetConfig: page.widgetConfig,
@@ -1980,10 +2002,18 @@ const app = new Hono<HonoAppContext>()
     if (!started.ok) return started.response;
     const { page } = started;
 
-    const enriched = page.categories.map((cat) => ({
-      ...cat,
-      articleCount: page.articlesByCategory.get(cat.id)?.length ?? 0,
-    }));
+    // Home belongs to the first visible tab: its sidebar and category grid.
+    const homeTabId = page.tabContext.homeTabId;
+    const enriched = page.tabContext
+      .categoriesForTab(homeTabId)
+      .map((cat) => {
+        const articles = page.articlesByCategory.get(cat.id) ?? [];
+        return {
+          ...cat,
+          articleCount: articles.length,
+          firstArticleSlug: articles[0]?.slug ?? null,
+        };
+      });
 
     const categoryById = new Map(
       page.categories.map((cat) => [cat.id, cat]),
@@ -2015,6 +2045,7 @@ const app = new Hono<HonoAppContext>()
 
     const html = renderHelpIndex({
       project: page.project,
+      nav: buildHelpNav(page.tabContext, homeTabId, page.settings?.botName),
       categories: enriched,
       articlesByCategory: page.articlesByCategory,
       widgetConfig: page.widgetConfig,
@@ -6312,6 +6343,116 @@ const app = new Hono<HonoAppContext>()
   )
 
   // ─── Help Center (Dashboard) ────────────────────────────────────────────────
+  .get("/api/projects/:id/help/tabs", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new HelpdeskService(db, c.env.UPLOADS);
+    return c.json(await service.listTabsWithCategoryCounts(project.id));
+  })
+  .post("/api/projects/:id/help/tabs", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(createHelpTabSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new HelpdeskService(db, c.env.UPLOADS);
+    try {
+      const created = await service.createTab(parsed.data, project.id);
+      scheduleHelpPageCachePurge(c.executionCtx, project.id);
+      return c.json(created, 201);
+    } catch (err) {
+      if (err instanceof HelpTabWriteError) {
+        return c.json({ error: err.message, code: err.code }, 409);
+      }
+      throw err;
+    }
+  })
+  .post("/api/projects/:id/help/tabs/reorder", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(reorderHelpItemsSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new HelpdeskService(db, c.env.UPLOADS);
+    await service.reorderTabs(project.id, parsed.data.items);
+    scheduleHelpPageCachePurge(c.executionCtx, project.id);
+    return c.json({ ok: true });
+  })
+  .patch("/api/projects/:id/help/tabs/:tabId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(updateHelpTabSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new HelpdeskService(db, c.env.UPLOADS);
+    const updated = await service.updateTab(
+      c.req.param("tabId"),
+      project.id,
+      parsed.data,
+    );
+    if (!updated) return c.json({ error: "Not found" }, 404);
+    scheduleHelpPageCachePurge(c.executionCtx, project.id);
+    return c.json(updated);
+  })
+  .delete("/api/projects/:id/help/tabs/:tabId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new HelpdeskService(db, c.env.UPLOADS);
+    try {
+      const deleted = await service.deleteTab(c.req.param("tabId"), project.id);
+      if (!deleted) return c.json({ error: "Not found" }, 404);
+      scheduleHelpPageCachePurge(c.executionCtx, project.id);
+      return c.json({ ok: true });
+    } catch (err) {
+      if (err instanceof HelpTabWriteError) {
+        return c.json({ error: err.message, code: err.code }, 409);
+      }
+      throw err;
+    }
+  })
   .get("/api/projects/:id/help/categories", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -6527,10 +6668,11 @@ const app = new Hono<HonoAppContext>()
 
     const service = new HelpdeskService(db, c.env.UPLOADS);
     const widgetService = new WidgetService(db);
-    const [widgetConfigRow, settings, categories, allPublished] =
+    const [widgetConfigRow, settings, tabs, categories, allPublished] =
       await Promise.all([
         widgetService.getWidgetConfig(project.id),
         projectService.getSettings(project.id),
+        service.listTabs(project.id),
         service.listCategories(project.id),
         service.listPublishedArticleNav(project.id),
       ]);
@@ -6544,6 +6686,7 @@ const app = new Hono<HonoAppContext>()
       category = {
         id: "preview-category",
         projectId: project.id,
+        tabId: null,
         name: "Uncategorized",
         slug: "preview",
         description: null,
@@ -6605,11 +6748,29 @@ const app = new Hono<HonoAppContext>()
 
     const articlesByCategory = groupArticlesByCategory(allPublished);
     const topNav = parseHelpTopNav(settings?.helpTopNav);
+    const previewCustomUrl = resolveHelpCustomUrl(
+      project.slug,
+      settings?.helpCustomUrl,
+    );
+    const tabContext = resolveHelpTabs({
+      tabs,
+      categories: categoriesForRender,
+      articlesByCategory,
+      projectSlug: project.slug,
+      customUrl: previewCustomUrl,
+    });
+    const activeTabId = tabContext.tabIdForCategory(category);
+    // A draft's category may have no published article yet; keep it in the preview sidebar.
+    const tabCategories = tabContext.categoriesForTab(activeTabId);
+    const previewCategories = tabCategories.some((c) => c.id === category.id)
+      ? tabCategories
+      : [...tabCategories, category];
 
     const html = renderHelpArticle({
       project,
+      nav: buildHelpNav(tabContext, activeTabId, settings?.botName),
       category,
-      categories: categoriesForRender,
+      categories: previewCategories,
       articlesByCategory,
       article,
       bodyHtml,

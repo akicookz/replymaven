@@ -4,16 +4,19 @@ import type { HelpArticleNav } from "../services/helpdesk-service";
 import type { HelpTopNavItem } from "../lib/help-top-nav";
 import { Layout } from "./layout";
 import { buildHelpUrl } from "./build-help-url";
+import { breadcrumbListJsonLd } from "./breadcrumb-json-ld";
 import { HelpIcon } from "./icons";
 import { resolveHelpUploadUrl } from "./resolve-help-upload-url";
 import { HelpSidebar } from "./sidebar";
 import { HelpTopBar } from "./top-bar";
+import type { HelpNav } from "./help-tabs";
 import { MobileCategoryNav } from "./mobile-category-nav";
 import type { HelpThemeDefault } from "./help-theme-default";
 import type { HelpAnalyticsEmbed } from "../lib/help-analytics";
 
 interface RenderHelpCategoryProps {
   project: ProjectRow;
+  nav: HelpNav;
   category: HelpCategoryRow;
   categories: HelpCategoryRow[];
   articles: HelpArticleNav[];
@@ -35,6 +38,19 @@ export function renderHelpCategory(props: RenderHelpCategoryProps) {
   });
   const title = props.category.name;
   const description = props.category.description?.trim() ?? "";
+  const jsonLd = {
+    "@context": "https://schema.org",
+    ...breadcrumbListJsonLd([
+      {
+        name: props.project.name,
+        url: buildHelpUrl({
+          projectSlug: props.project.slug,
+          customUrl: props.helpCustomUrl,
+        }),
+      },
+      { name: props.category.name, url: canonical },
+    ]),
+  };
 
   return (
     <Layout
@@ -43,6 +59,7 @@ export function renderHelpCategory(props: RenderHelpCategoryProps) {
       canonicalUrl={canonical}
       projectSlug={props.project.slug}
       widgetConfig={props.widgetConfig}
+      jsonLd={jsonLd}
       customCss={props.customCss}
       analytics={props.analytics}
       helpCustomUrl={props.helpCustomUrl}
@@ -54,6 +71,7 @@ export function renderHelpCategory(props: RenderHelpCategoryProps) {
           widgetConfig={props.widgetConfig}
           helpCustomUrl={props.helpCustomUrl}
           topNav={props.topNav}
+          nav={props.nav}
         />
       }
       sidebar={
@@ -66,6 +84,7 @@ export function renderHelpCategory(props: RenderHelpCategoryProps) {
           helpCustomUrl={props.helpCustomUrl}
           widgetConfig={props.widgetConfig}
           topNav={props.topNav}
+          nav={props.nav}
         />
       }
     >
@@ -93,6 +112,7 @@ export function renderHelpCategory(props: RenderHelpCategoryProps) {
         <MobileCategoryNav
           project={props.project}
           categories={props.categories}
+          articlesByCategory={props.articlesByCategory}
           activeCategorySlug={props.category.slug}
           helpCustomUrl={props.helpCustomUrl}
         />

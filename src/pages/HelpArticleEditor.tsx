@@ -24,12 +24,15 @@ import {
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
 import { MobileMenuButton } from "@/components/PageHeader";
 import { HelpEditorSkeleton } from "@/components/help-editor/editor-skeleton";
+import { resolveCategoryTabId } from "@/lib/help-tabs";
 import { cn } from "@/lib/utils";
 import { useSaveHotkey } from "@/hooks/use-save-hotkey";
 import type { DerivedMeta } from "@/components/help-article-editor";
@@ -47,8 +50,34 @@ const HelpArticleEditor = lazy(
 
 interface CategoryResponse {
   id: string;
+  tabId: string | null;
   name: string;
   slug: string;
+}
+
+interface TabResponse {
+  id: string;
+  name: string;
+}
+
+interface CategoryGroup {
+  tab: TabResponse | null;
+  categories: CategoryResponse[];
+}
+
+function groupCategoriesByTab(
+  categories: CategoryResponse[],
+  tabs: TabResponse[],
+): CategoryGroup[] {
+  if (tabs.length === 0) return [{ tab: null, categories }];
+  return tabs
+    .map((tab) => ({
+      tab,
+      categories: categories.filter(
+        (c) => resolveCategoryTabId(c, tabs) === tab.id,
+      ),
+    }))
+    .filter((group) => group.categories.length > 0);
 }
 
 interface ArticleResponse {
@@ -219,6 +248,16 @@ function HelpArticleEditorPage() {
     queryFn: async () => {
       const res = await fetch(`/api/projects/${projectId}/help/categories`);
       if (!res.ok) throw new Error("Failed to load categories");
+      return res.json();
+    },
+    enabled: !!projectId,
+  });
+
+  const tabsQuery = useQuery<TabResponse[]>({
+    queryKey: ["help-tabs", projectId],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/help/tabs`);
+      if (!res.ok) throw new Error("Failed to load tabs");
       return res.json();
     },
     enabled: !!projectId,
@@ -533,6 +572,10 @@ function HelpArticleEditorPage() {
   });
 
   const categories = categoriesQuery.data ?? [];
+  const categoryGroups = groupCategoriesByTab(
+    categories,
+    tabsQuery.data ?? [],
+  );
   const titleWarnings =
     form.title.length > TITLE_WARN
       ? [
@@ -610,11 +653,20 @@ function HelpArticleEditorPage() {
                       <SelectValue placeholder="Pick a category" />
                     </SelectTrigger>
                     <SelectContent>
-                      {categories.map((cat) => (
-                        <SelectItem key={cat.id} value={cat.id}>
-                          {cat.name}
-                        </SelectItem>
-                      ))}
+                      {categoryGroups.map((group) => {
+                        const items = group.categories.map((cat) => (
+                          <SelectItem key={cat.id} value={cat.id}>
+                            {cat.name}
+                          </SelectItem>
+                        ));
+                        if (!group.tab) return items;
+                        return (
+                          <SelectGroup key={group.tab.id}>
+                            <SelectLabel>{group.tab.name}</SelectLabel>
+                            {items}
+                          </SelectGroup>
+                        );
+                      })}
                     </SelectContent>
                   </Select>
                 </div>

@@ -6,6 +6,7 @@ import { Layout } from "./layout";
 import { buildHelpUrl } from "./build-help-url";
 import { HelpSidebar } from "./sidebar";
 import { HelpTopBar } from "./top-bar";
+import type { HelpNav } from "./help-tabs";
 import type { HelpThemeDefault } from "./help-theme-default";
 import type { HelpAnalyticsEmbed } from "../lib/help-analytics";
 import { type HelpSearchResult } from "./help-search";
@@ -14,8 +15,11 @@ export type { HelpSearchResult };
 
 interface RenderHelpSearchProps {
   project: ProjectRow;
+  nav: HelpNav;
   query: string;
   results: HelpSearchResult[];
+  /** Category id to tab name, set only when tabs show in the top bar. */
+  tabNames: Map<string, string>;
   categories: HelpCategoryRow[];
   articlesByCategory: Map<string, HelpArticleNav[]>;
   widgetConfig: WidgetConfigRow | null;
@@ -56,6 +60,7 @@ export function renderHelpSearch(props: RenderHelpSearchProps) {
           widgetConfig={props.widgetConfig}
           helpCustomUrl={props.helpCustomUrl}
           topNav={props.topNav}
+          nav={props.nav}
         />
       }
       sidebar={
@@ -68,6 +73,7 @@ export function renderHelpSearch(props: RenderHelpSearchProps) {
           helpCustomUrl={props.helpCustomUrl}
           widgetConfig={props.widgetConfig}
           topNav={props.topNav}
+          nav={props.nav}
         />
       }
     >
@@ -139,7 +145,10 @@ export function renderHelpSearch(props: RenderHelpSearchProps) {
                   })}
                 >
                   <p class="help-search-result-breadcrumb">
-                    {result.category.name}
+                    {searchResultBreadcrumb(
+                      props.tabNames.get(result.category.id),
+                      result.category.name,
+                    )}
                   </p>
                   <h2 class="help-search-result-title">
                     {result.article.title}
@@ -157,6 +166,13 @@ export function renderHelpSearch(props: RenderHelpSearchProps) {
       </div>
     </Layout>
   );
+}
+
+function searchResultBreadcrumb(
+  tabName: string | undefined,
+  categoryName: string,
+): string {
+  return tabName ? `${tabName} · ${categoryName}` : categoryName;
 }
 
 function searchResultLabel(query: string, count: number): string {

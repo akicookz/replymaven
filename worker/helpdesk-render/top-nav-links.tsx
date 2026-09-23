@@ -12,7 +12,7 @@ export function HelpTopNavLinks(props: {
         const isExternal = item.href.startsWith("https://");
         const classes =
           item.classes?.trim() ||
-          "inline-flex h-9 items-center justify-center px-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground";
+          "inline-flex h-8 items-center justify-center px-2.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground";
         return (
           <a
             href={item.href}

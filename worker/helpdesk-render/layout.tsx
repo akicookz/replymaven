@@ -2,7 +2,7 @@
 import type { WidgetConfigRow } from "../db/schema";
 import helpCss from "./help.css?inline";
 import { renderProjectTheme } from "./render-project-theme";
-import { buildFontFaceCss } from "./build-font-link";
+import { buildFontFaceCss, buildFontPreloadUrls } from "./build-font-link";
 import { sanitizeCustomCss } from "../../shared/sanitize-custom-css";
 import {
   helpHomeBackgroundImageCss,
@@ -10,6 +10,8 @@ import {
   sanitizeHelpHomeBackgroundUrl,
 } from "./sanitize-help-home-background-url";
 import { resolveHelpUploadUrl } from "./resolve-help-upload-url";
+import { buildHelpUrl } from "./build-help-url";
+import { HelpSearchForm } from "./help-home-widgets";
 import {
   helpThemeBootScript,
   sanitizeHelpThemeDefault,
@@ -57,6 +59,7 @@ export interface LayoutProps {
 export function Layout(props: LayoutProps) {
   const themeOverrides = renderProjectTheme(props.widgetConfig);
   const fontCss = buildFontFaceCss(props.widgetConfig?.fontFamily ?? null) ?? "";
+  const fontPreloads = buildFontPreloadUrls(props.widgetConfig?.fontFamily ?? null);
   const customCss = sanitizeCustomCss(props.customCss);
   const analyticsScripts = buildHelpAnalyticsScripts(props.analytics ?? [], {
     customHost: helpAnalyticsCustomHost(props.helpCustomUrl),
@@ -68,6 +71,10 @@ export function Layout(props: LayoutProps) {
   const homeBackgroundFit = sanitizeHelpHomeBackgroundFit(
     props.homeBackgroundFit,
   );
+  const searchAction = `${buildHelpUrl({
+    projectSlug: props.projectSlug,
+    customUrl: props.helpCustomUrl,
+  })}/search`;
   const homeBackgroundCss = homeBackgroundUrl
     ? helpHomeBackgroundImageCss({
         url: homeBackgroundUrl,
@@ -81,6 +88,15 @@ export function Layout(props: LayoutProps) {
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        {fontPreloads.map((href) => (
+          <link
+            rel="preload"
+            as="font"
+            type="font/woff2"
+            href={href}
+            crossorigin=""
+          />
+        ))}
         {/* Set the theme before first paint (saved choice → project default →
             system pref) and wire the top-bar toggle via event delegation. */}
         <script
@@ -215,9 +231,21 @@ export function Layout(props: LayoutProps) {
         ) : (
           props.children
         )}
+        <dialog
+          class="help-search-dialog"
+          id="rm-help-search"
+          aria-label="Search help center"
+        >
+          <HelpSearchForm action={searchAction} />
+        </dialog>
         <script
           dangerouslySetInnerHTML={{
             __html: HELP_NAV_SCRIPT,
+          }}
+        />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: HELP_TOPBAR_SCRIPT,
           }}
         />
         <script
@@ -272,6 +300,82 @@ const HELP_NAV_SCRIPT = `
     if (e.key === 'Escape') setOpen(false);
   });
   desktop.addEventListener('change', function(){ setOpen(false); });
+})();
+`;
+
+// Search dialog (button, Cmd/Ctrl K, "/"), active tab kept in view with edge
+// fades, and the Ask button. The async widget script runs before window load
+// and sets window.ReplyMaven at once, so a missing API at load means no widget.
+const HELP_TOPBAR_SCRIPT = `
+(function(){
+  var dialog = document.getElementById('rm-help-search');
+  function openSearch(){
+    if (!dialog || dialog.open) return;
+    dialog.showModal();
+    var input = dialog.querySelector('input[name="q"]');
+    if (input) { input.focus(); input.select(); }
+  }
+  if (!/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-help-search-kbd]'), function(k){
+      k.textContent = 'Ctrl K';
+    });
+  }
+  document.addEventListener('click', function(e){
+    var t = e.target;
+    if (t && t.closest && t.closest('[data-help-search-open]')) {
+      e.preventDefault();
+      openSearch();
+      return;
+    }
+    if (dialog && t === dialog) dialog.close();
+  });
+  document.addEventListener('keydown', function(e){
+    var t = e.target;
+    var typing = t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      openSearch();
+    } else if (e.key === '/' && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      openSearch();
+    }
+  });
+
+  var tabs = document.querySelector('.help-tabs');
+  if (tabs) {
+    var syncFade = function(){
+      var max = tabs.scrollWidth - tabs.clientWidth;
+      tabs.classList.toggle('is-clipped-start', tabs.scrollLeft > 1);
+      tabs.classList.toggle('is-clipped-end', tabs.scrollLeft < max - 1);
+    };
+    var active = tabs.querySelector('.help-tab.active');
+    if (active) {
+      var a = active.getBoundingClientRect();
+      var c = tabs.getBoundingClientRect();
+      if (a.left < c.left) tabs.scrollLeft += a.left - c.left - 16;
+      else if (a.right > c.right) tabs.scrollLeft += a.right - c.right + 16;
+    }
+    syncFade();
+    tabs.addEventListener('scroll', syncFade, { passive: true });
+    window.addEventListener('resize', syncFade);
+    window.addEventListener('load', syncFade);
+  }
+
+  var ask = document.querySelector('[data-help-ask]');
+  if (ask) {
+    var openChat = function(){
+      if (window.ReplyMaven) window.ReplyMaven.open('chat');
+    };
+    var loaded = document.readyState === 'complete';
+    window.addEventListener('load', function(){
+      loaded = true;
+      if (!window.ReplyMaven) ask.hidden = true;
+    });
+    ask.addEventListener('click', function(){
+      if (window.ReplyMaven || loaded) openChat();
+      else window.addEventListener('load', openChat, { once: true });
+    });
+  }
 })();
 `;
 

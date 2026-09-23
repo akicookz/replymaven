@@ -512,6 +512,13 @@
       "when": 1789946021968,
       "tag": "0072_damp_harpoon",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "6",
+      "when": 1790147188478,
+      "tag": "0073_gigantic_scorpion",
+      "breakpoints": true
     }
   ]
 }

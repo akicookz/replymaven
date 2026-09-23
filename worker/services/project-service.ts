@@ -15,6 +15,7 @@ import { encrypt } from "./encryption-service";
 import { TeamService } from "./team-service";
 
 export interface HelpPresentationSettings {
+  botName: string | null;
   helpCustomUrl: string | null;
   helpTopNav: string | null;
   helpCustomCss: string | null;
@@ -126,6 +127,7 @@ export class ProjectService {
       .select({
         project: projects,
         settingsProjectId: projectSettings.projectId,
+        botName: projectSettings.botName,
         helpCustomUrl: projectSettings.helpCustomUrl,
         helpTopNav: projectSettings.helpTopNav,
         helpCustomCss: projectSettings.helpCustomCss,
@@ -148,6 +150,7 @@ export class ProjectService {
       project: row.project,
       settings: row.settingsProjectId
         ? {
+            botName: row.botName,
             helpCustomUrl: row.helpCustomUrl,
             helpTopNav: row.helpTopNav,
             helpCustomCss: row.helpCustomCss,

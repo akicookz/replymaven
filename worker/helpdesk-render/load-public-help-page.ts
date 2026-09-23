@@ -1,5 +1,10 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import type { HelpCategoryRow, ProjectRow, WidgetConfigRow } from "../db/schema";
+import type {
+  HelpCategoryRow,
+  HelpTabRow,
+  ProjectRow,
+  WidgetConfigRow,
+} from "../db/schema";
 import type { HelpTopNavItem } from "../lib/help-top-nav";
 import { parseHelpTopNav } from "../lib/help-top-nav";
 import {
@@ -16,6 +21,7 @@ import {
 } from "../services/project-service";
 import { resolveHelpCustomUrl } from "./build-help-url";
 import { groupArticlesByCategory } from "./group-articles";
+import { resolveHelpTabs, type HelpTabContext } from "./help-tabs";
 import {
   sanitizeHelpThemeDefault,
   type HelpThemeDefault,
@@ -25,6 +31,8 @@ export interface PublicHelpPageContext {
   project: ProjectRow;
   settings: HelpPresentationSettings | null;
   widgetConfig: WidgetConfigRow | null;
+  tabs: HelpTabRow[];
+  tabContext: HelpTabContext;
   categories: HelpCategoryRow[];
   publishedArticles: HelpArticleNav[];
   articlesByCategory: Map<string, HelpArticleNav[]>;
@@ -46,22 +54,33 @@ export async function loadPublicHelpPage(
   if (!loaded) return null;
 
   const helpService = new HelpdeskService(db, uploads);
-  const [categories, publishedArticles] = await Promise.all([
+  const [tabs, categories, publishedArticles] = await Promise.all([
+    helpService.listTabs(loaded.project.id),
     helpService.listCategories(loaded.project.id),
     helpService.listPublishedArticleNav(loaded.project.id),
   ]);
+  const articlesByCategory = groupArticlesByCategory(publishedArticles);
+  const helpCustomUrl = resolveHelpCustomUrl(
+    loaded.project.slug,
+    loaded.settings?.helpCustomUrl,
+  );
 
   return {
     project: loaded.project,
     settings: loaded.settings,
     widgetConfig: loaded.widgetConfig,
+    tabs,
+    tabContext: resolveHelpTabs({
+      tabs,
+      categories,
+      articlesByCategory,
+      projectSlug: loaded.project.slug,
+      customUrl: helpCustomUrl,
+    }),
     categories,
     publishedArticles,
-    articlesByCategory: groupArticlesByCategory(publishedArticles),
-    helpCustomUrl: resolveHelpCustomUrl(
-      loaded.project.slug,
-      loaded.settings?.helpCustomUrl,
-    ),
+    articlesByCategory,
+    helpCustomUrl,
     topNav: parseHelpTopNav(loaded.settings?.helpTopNav),
     customCss: loaded.settings?.helpCustomCss ?? null,
     analytics: parseHelpAnalytics(loaded.settings?.helpAnalytics),

@@ -7,6 +7,7 @@ import { HelpIcon } from "./icons";
 
 export interface CategoryWithCount extends HelpCategoryRow {
   articleCount: number;
+  firstArticleSlug: string | null;
 }
 
 export interface PopularArticleEntry {
@@ -81,6 +82,7 @@ export function HelpCategoryGrid(props: {
             projectSlug: props.projectSlug,
             customUrl: props.customUrl,
             category: category.slug,
+            article: category.firstArticleSlug ?? undefined,
           })}
         />
       ))}

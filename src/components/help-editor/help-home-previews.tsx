@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { CategoryIcon } from "@/components/icon-picker";
+import { resolveCategoryTabId } from "@/lib/help-tabs";
 import {
   HELP_ICON_SVGS,
   isImageIcon,
@@ -21,6 +22,7 @@ import "./help-home-previews.css";
 
 interface CategoryRow {
   id: string;
+  tabId: string | null;
   name: string;
   description: string | null;
   icon: string | null;
@@ -254,10 +256,28 @@ export function HelpHomeBlockPreview(props: {
     enabled: !!projectId && props.kind === "categories",
   });
 
+  const tabsQuery = useQuery<{ id: string }[]>({
+    queryKey: ["help-tabs", projectId],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/help/tabs`);
+      if (!res.ok) throw new Error("Failed to load tabs");
+      return res.json();
+    },
+    enabled: !!projectId && props.kind === "categories",
+  });
+
+  // The live home belongs to the first tab, so its grid shows only that tab.
   const categories = useMemo(() => {
     const rows = categoriesQuery.data ?? [];
-    return [...rows].sort((a, b) => a.sortOrder - b.sortOrder);
-  }, [categoriesQuery.data]);
+    const tabs = tabsQuery.data ?? [];
+    const firstTabId = tabs[0]?.id ?? null;
+    return rows
+      .filter(
+        (row) =>
+          tabs.length === 0 || resolveCategoryTabId(row, tabs) === firstTabId,
+      )
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+  }, [categoriesQuery.data, tabsQuery.data]);
 
   if (props.kind === "search") return <SearchPreview />;
   if (props.kind === "categories") {

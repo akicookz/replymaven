@@ -3,9 +3,11 @@ import type { HelpCategoryRow, ProjectRow, WidgetConfigRow } from "../db/schema"
 import type { HelpArticleNav } from "../services/helpdesk-service";
 import type { HelpTopNavItem } from "../lib/help-top-nav";
 import { buildHelpUrl } from "./build-help-url";
+import type { HelpNav } from "./help-tabs";
 import { HelpIcon } from "./icons";
 import { isHelpIconName, isImageIcon } from "../../shared/help-icons";
 import { resolveHelpUploadUrl } from "./resolve-help-upload-url";
+import { HelpTabLinks } from "./tab-links";
 import { HelpTopNavLinks } from "./top-nav-links";
 
 export interface HelpSidebarProps {
@@ -17,11 +19,17 @@ export interface HelpSidebarProps {
   helpCustomUrl: string | null;
   widgetConfig: WidgetConfigRow | null;
   topNav: HelpTopNavItem[];
+  nav: HelpNav;
 }
 
 export function HelpSidebar(props: HelpSidebarProps) {
   return (
     <aside class="help-sidebar" id="rm-help-sidebar" aria-label="Help menu">
+      <HelpTabLinks
+        tabs={props.nav.tabs}
+        activeTabId={props.nav.activeTabId}
+        class="help-sidebar-tabs"
+      />
       <HelpTopNavLinks items={props.topNav} class="help-sidebar-topnav" />
       <nav class="help-sidebar-nav" aria-label="Help categories">
         {props.categories.map((category) => {
@@ -30,10 +38,12 @@ export function HelpSidebar(props: HelpSidebarProps) {
             category.slug === props.activeCategorySlug;
           const isCurrentCategory =
             isActiveCategory && props.activeArticleSlug === null;
+          // First article, not the category page; that page is for search engines.
           const categoryHref = buildHelpUrl({
             projectSlug: props.project.slug,
             customUrl: props.helpCustomUrl,
             category: category.slug,
+            article: articles[0]?.slug,
           });
           return (
             <details open={true} class="help-sidebar-group">

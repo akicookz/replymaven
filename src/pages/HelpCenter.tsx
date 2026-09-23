@@ -1,11 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { BookOpen, Home, Plus, Settings } from "lucide-react";
+import {
+  BookOpen,
+  ChevronRight,
+  Home,
+  PanelsTopLeft,
+  Plus,
+  Settings,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -22,13 +37,20 @@ import HelpCategoryList, {
 import HelpArticleList, {
   type HelpArticleItem,
 } from "@/components/help-article-list";
+import {
+  HelpFirstTabsDialog,
+  HelpTabsDialog,
+  type HelpTabItem,
+} from "@/components/help-tabs-dialog";
 import IconPicker, { CategoryIcon } from "@/components/icon-picker";
 import { Skeleton } from "@/components/ui/skeleton";
+import { resolveCategoryTabId } from "@/lib/help-tabs";
 import { cn } from "@/lib/utils";
 
 interface CategoryResponse {
   id: string;
   projectId: string;
+  tabId: string | null;
   name: string;
   slug: string;
   description: string | null;
@@ -56,6 +78,7 @@ interface ArticleResponse {
 }
 
 interface CategoryFormState {
+  tabId: string | null;
   name: string;
   slug: string;
   description: string;
@@ -63,6 +86,7 @@ interface CategoryFormState {
 }
 
 const emptyCategoryForm: CategoryFormState = {
+  tabId: null,
   name: "",
   slug: "",
   description: "",
@@ -95,6 +119,9 @@ function HelpCenter() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [firstTabsOpen, setFirstTabsOpen] = useState(false);
+  const [manageTabsOpen, setManageTabsOpen] = useState(false);
 
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(
     null,
@@ -117,10 +144,45 @@ function HelpCenter() {
     enabled: !!projectId,
   });
 
-  const categories = useMemo(
+  const tabsQuery = useQuery<HelpTabItem[]>({
+    queryKey: ["help-tabs", projectId],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/help/tabs`);
+      if (!res.ok) throw new Error("Failed to load tabs");
+      return res.json();
+    },
+    enabled: !!projectId,
+  });
+
+  const allCategories = useMemo(
     () => categoriesQuery.data ?? [],
     [categoriesQuery.data],
   );
+  const tabs = useMemo(() => tabsQuery.data ?? [], [tabsQuery.data]);
+  const firstTabId = tabs[0]?.id ?? null;
+  const requestedTabId = searchParams.get("tab");
+  const selectedTabId = tabs.some((t) => t.id === requestedTabId)
+    ? requestedTabId
+    : firstTabId;
+  const selectedTab = tabs.find((t) => t.id === selectedTabId) ?? null;
+
+  const categories = useMemo(() => {
+    if (tabs.length === 0) return allCategories;
+    return allCategories.filter(
+      (c) => resolveCategoryTabId(c, tabs) === selectedTabId,
+    );
+  }, [allCategories, tabs, selectedTabId]);
+
+  function selectTab(tabId: string) {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("tab", tabId);
+        return next;
+      },
+      { replace: true },
+    );
+  }
 
   useEffect(() => {
     if (!selectedCategoryId && categories.length > 0) {
@@ -166,6 +228,7 @@ function HelpCenter() {
   const createCategory = useMutation({
     mutationFn: async (input: CategoryFormState) => {
       const body: Record<string, unknown> = { name: input.name };
+      if (input.tabId) body.tabId = input.tabId;
       if (input.slug.trim()) body.slug = input.slug.trim();
       if (input.description.trim()) body.description = input.description.trim();
       if (input.icon !== null) body.icon = input.icon;
@@ -188,6 +251,10 @@ function HelpCenter() {
       queryClient.invalidateQueries({
         queryKey: ["help-categories", projectId],
       });
+      queryClient.invalidateQueries({ queryKey: ["help-tabs", projectId] });
+      if (created.tabId && created.tabId !== selectedTabId) {
+        selectTab(created.tabId);
+      }
       setSelectedCategoryId(created.id);
       setCategoryDialogOpen(false);
       setCategoryForm(emptyCategoryForm);
@@ -203,6 +270,7 @@ function HelpCenter() {
       patch: Partial<CategoryFormState>;
     }) => {
       const body: Record<string, unknown> = {};
+      if (input.patch.tabId) body.tabId = input.patch.tabId;
       if (input.patch.name !== undefined) body.name = input.patch.name;
       if (input.patch.slug !== undefined) body.slug = input.patch.slug.trim();
       if (input.patch.description !== undefined) {
@@ -229,10 +297,16 @@ function HelpCenter() {
       }
       return (await res.json()) as CategoryResponse;
     },
-    onSuccess: () => {
+    onSuccess: (updated) => {
       queryClient.invalidateQueries({
         queryKey: ["help-categories", projectId],
       });
+      queryClient.invalidateQueries({ queryKey: ["help-tabs", projectId] });
+      // Moved to another tab: follow it so the category shows in its new place.
+      if (updated.tabId && updated.tabId !== selectedTabId) {
+        selectTab(updated.tabId);
+        setSelectedCategoryId(updated.id);
+      }
       setCategoryDialogOpen(false);
       setEditingCategory(null);
       setCategoryForm(emptyCategoryForm);
@@ -257,6 +331,7 @@ function HelpCenter() {
       queryClient.invalidateQueries({
         queryKey: ["help-articles", projectId],
       });
+      queryClient.invalidateQueries({ queryKey: ["help-tabs", projectId] });
       toast.success("Category archived");
     },
     onError: (err: Error) => toast.error(err.message),
@@ -377,7 +452,7 @@ function HelpCenter() {
 
   function openCreateCategory() {
     setEditingCategory(null);
-    setCategoryForm(emptyCategoryForm);
+    setCategoryForm({ ...emptyCategoryForm, tabId: selectedTabId });
     setCategoryError(null);
     setCategoryDialogOpen(true);
   }
@@ -387,6 +462,7 @@ function HelpCenter() {
     if (!full) return;
     setEditingCategory(full);
     setCategoryForm({
+      tabId: resolveCategoryTabId(full, tabs),
       name: full.name,
       slug: full.slug,
       description: full.description ?? "",
@@ -466,6 +542,8 @@ function HelpCenter() {
   }));
 
   const selectedCategory = categories.find((c) => c.id === selectedCategoryId);
+  // Home belongs to the first tab on the public site.
+  const showHomeLink = selectedTabId === firstTabId;
 
   return (
     <div className="space-y-6">
@@ -489,6 +567,18 @@ function HelpCenter() {
               <span className="sr-only sm:hidden">Site settings</span>
             </Link>
           </Button>
+          {tabs.length === 0 && !tabsQuery.isLoading ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setFirstTabsOpen(true)}
+            >
+              <PanelsTopLeft className="w-4 h-4" />
+              <span className="hidden sm:inline">Add tabs</span>
+              <span className="sr-only sm:hidden">Add tabs</span>
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="outline"
@@ -512,19 +602,47 @@ function HelpCenter() {
         </div>
       </div>
 
+      {tabs.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Tabs value={selectedTabId ?? ""} onValueChange={selectTab}>
+            <TabsList
+              aria-label="Help center tabs"
+              className="h-auto max-w-full flex-wrap justify-start"
+            >
+              {tabs.map((tab) => (
+                <TabsTrigger key={tab.id} value={tab.id}>
+                  {tab.name}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setManageTabsOpen(true)}
+          >
+            Manage tabs
+            <ChevronRight />
+          </Button>
+        </div>
+      ) : null}
+
       {categoriesQuery.isLoading ? (
         <HelpCenterSkeleton />
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-6 items-start">
           {categories.length > 0 ? (
             <div className="flex gap-2 overflow-x-auto pb-1 lg:hidden">
-              <Link
-                to={`/app/projects/${projectId}/knowledgebase/help-center/home`}
-                className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-muted/50 px-2.5 py-1.5 text-sm font-medium text-foreground/70"
-              >
-                <Home className="h-4 w-4" />
-                Home
-              </Link>
+              {showHomeLink ? (
+                <Link
+                  to={`/app/projects/${projectId}/knowledgebase/help-center/home`}
+                  className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-muted/50 px-2.5 py-1.5 text-sm font-medium text-foreground/70"
+                >
+                  <Home className="h-4 w-4" />
+                  Home
+                </Link>
+              ) : null}
               {categoryItems.map((cat) => (
                 <button
                   key={cat.id}
@@ -547,17 +665,19 @@ function HelpCenter() {
           ) : null}
 
           <aside className="hidden space-y-3 lg:sticky lg:top-6 lg:block">
-            <Link
-              to={`/app/projects/${projectId}/knowledgebase/help-center/home`}
-              className="flex items-center gap-2.5 rounded-lg py-1.5 pr-1 transition-colors hover:bg-muted/40"
-            >
-              <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted text-muted-foreground">
-                <Home className="h-4 w-4" />
-              </span>
-              <span className="min-w-0 truncate text-sm font-medium text-foreground/70">
-                Home
-              </span>
-            </Link>
+            {showHomeLink ? (
+              <Link
+                to={`/app/projects/${projectId}/knowledgebase/help-center/home`}
+                className="flex items-center gap-2.5 rounded-lg py-1.5 pr-1 transition-colors hover:bg-muted/40"
+              >
+                <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted text-muted-foreground">
+                  <Home className="h-4 w-4" />
+                </span>
+                <span className="min-w-0 truncate text-sm font-medium text-foreground/70">
+                  Home
+                </span>
+              </Link>
+            ) : null}
             <h2 className="px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               Categories
             </h2>
@@ -588,7 +708,9 @@ function HelpCenter() {
                 </div>
                 <div>
                   <h2 className="text-lg font-bold text-foreground">
-                    No categories yet
+                    {selectedTab
+                      ? `No categories in ${selectedTab.name} yet`
+                      : "No categories yet"}
                   </h2>
                   <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
                     Categories group related articles. Create your first one to
@@ -648,6 +770,28 @@ function HelpCenter() {
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCategorySubmit} className="space-y-4">
+            {tabs.length > 0 ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="category-tab">Tab</Label>
+                <Select
+                  value={categoryForm.tabId ?? ""}
+                  onValueChange={(v) =>
+                    setCategoryForm((f) => ({ ...f, tabId: v }))
+                  }
+                >
+                  <SelectTrigger id="category-tab">
+                    <SelectValue placeholder="Pick a tab" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {tabs.map((tab) => (
+                      <SelectItem key={tab.id} value={tab.id}>
+                        {tab.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
             <div className="space-y-1.5">
               <Label htmlFor="category-name">Name</Label>
               <Input
@@ -741,6 +885,20 @@ function HelpCenter() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <HelpFirstTabsDialog
+        projectId={projectId ?? ""}
+        open={firstTabsOpen}
+        onOpenChange={setFirstTabsOpen}
+        onCreated={selectTab}
+      />
+      <HelpTabsDialog
+        projectId={projectId ?? ""}
+        open={manageTabsOpen}
+        onOpenChange={setManageTabsOpen}
+        tabs={tabs}
+        onCreated={selectTab}
+      />
     </div>
   );
 }

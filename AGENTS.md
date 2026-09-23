@@ -52,7 +52,7 @@ ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbo
 - **Tone of voice** -- configurable AI personality (professional, friendly, casual, formal, or custom prompt).
 - **Quick actions** -- configurable buttons shown on the widget home and above the chat input.
 - **Greetings** -- proactive cards (welcome plus news/changelog) that pop out above the launcher before any conversation exists. Each card carries an optional image or video, title, description, CTA, author, per-page targeting, a reveal delay, and an auto-hide duration.
-- **Help center** -- per-project categories and articles, published under `/docs` or a custom domain, mirrored into the RAG index.
+- **Help center** -- per-project tabs, categories, and articles, published under `/docs` or a custom domain, mirrored into the RAG index. The top bar carries the tabs, a search dialog (`⌘K` or `/`), top-nav links, and an Ask button that opens the widget chat. Tabs have no URL of their own; each page's tab comes from its category.
 - **Live agent handoff** -- when the bot cannot answer or the visitor requests a human, one escalation fans out to every connected Telegram/Slack channel and every accepted project member with access. Maven keeps helping while review is pending. A channel or member email joins the conversation when a human first replies there. After that, visitor messages go only to the joined external clients. Dashboard and MCP replies do not create push routes. Agents use `@BotName` commands (Telegram, Slack, dashboard, or MCP) to hand back to AI (with optional instructions), close conversations, instruct the bot to respond immediately, or start a Sidechat investigate turn. `ask_maven` starts that investigate turn from MCP. The inbox Assign menu includes Maven; picking it hands the thread back. Idle takeover after four quiet hours also assigns Maven. New bookings, conversations, and contact form submissions also notify enabled messengers when configured.
 - **Customer continuity** -- anonymous widget visitor IDs can be connected to project-scoped customer profiles. Signed server-issued tokens keep exact visitor history together across devices without trusting browser-supplied email.
 
@@ -730,8 +730,13 @@ greetings
 guidelines
   id, projectId, condition, instruction, enabled, sortOrder
 
+help_tabs
+  id, projectId, name, sortOrder (max 6 per project; top bar shows them once
+  two or more have published articles)
+
 help_categories
-  id, projectId, name, slug, description, icon, sortOrder, archivedAt
+  id, projectId, tabId (null only while the project has no tabs; read as the
+  first tab), name, slug, description, icon, sortOrder, archivedAt
 
 help_articles
   id, projectId, categoryId, title, slug, excerpt, ogImageUrl, content,
@@ -846,7 +851,7 @@ Grouped, not exhaustive. `worker/index.ts` and `worker/routes/*.ts` are the sour
 | GET/POST + PATCH/DELETE `/:greetingId` + PATCH `/reorder` | `/api/projects/:id/greetings` | Greeting cards CRUD and ordering (max 50 per project) |
 | GET/POST + PATCH/DELETE `/:gId` | `/api/projects/:id/guidelines` | Guidelines / SOPs |
 | GET/POST + PUT/DELETE `/:resourceId` | `/api/projects/:id/resources` | Resource management, plus `/reindex`, `/content`, `/pages`, `/split-with-ai`, `/generate-faq` |
-| GET/POST/PATCH/DELETE | `/api/projects/:id/help/categories` and `/help/articles` | Help center authoring, plus `/publish`, `/unpublish`, `/preview`, `/reorder` |
+| GET/POST/PATCH/DELETE | `/api/projects/:id/help/tabs`, `/help/categories`, and `/help/articles` | Help center authoring, plus `/publish`, `/unpublish`, `/preview`, `/reorder`. A tab deletes only when empty (`409 tab_not_empty`) |
 | GET/PUT | `/api/projects/:id/ticket-config` | Ticket form fields |
 | GET/POST + PATCH/DELETE `/:toolId` | `/api/projects/:id/tools` | Custom HTTP tools, plus `/test` and `/api/projects/:id/tool-executions` |
 | GET | `/api/projects/:id/conversations[/:convId]` | Inbox list and conversation detail |
@@ -867,6 +872,8 @@ Grouped, not exhaustive. `worker/index.ts` and `worker/routes/*.ts` are the sour
 | POST | `/api/upload`, `/api/help-images/upload` | Upload files to R2 |
 
 Scopes are `projects:read`, `conversations:reply`, `resources:write`, `helpdesk:write`, and `widget:write` (`worker/services/mcp-oauth-service.ts`). The consent screen (`worker/oauth-render/consent-page.tsx`) lists each as a switch the user can turn off, so a token can be granted a subset of what the client asked for. Authorize is refused when every switch is off. A request for a scope the client's stored registration predates is downgraded to the scopes it holds, not rejected, so adding a scope never breaks clients registered before it existed.
+
+Help tab tools live in `worker/mcp-helpdesk-tools.ts`: `list_help_tabs` (`projects:read`), plus `create_help_tab`, `update_help_tab`, and `delete_help_tab` (`helpdesk:write`). `create_help_category` and `update_help_category` take an optional `tabId`; without one a new category joins the first tab.
 
 Greeting tools live in `worker/mcp-widget-tools.ts`: `list_greetings` (`projects:read` or `widget:write`), plus `create_greeting`, `update_greeting`, `delete_greeting`, and `reorder_greetings` (`widget:write`). They cover text, CTA, and externally hosted images only — video and uploaded artwork need a stored `/api/uploads/...` path and there is no MCP upload tool for widget media.
 

@@ -26,8 +26,15 @@ export function renderSitemap(input: RenderSitemapInput): string {
   });
 
   const categoryBySlug = new Map(input.categories.map((c) => [c.id, c]));
+  const categoriesWithArticles = new Set(
+    input.articles
+      .filter((article) => article.status === "published")
+      .map((article) => article.categoryId),
+  );
 
+  // An empty category page is thin content; list it once it has an article.
   for (const category of input.categories) {
+    if (!categoriesWithArticles.has(category.id)) continue;
     urls.push({
       loc: buildHelpUrl({
         projectSlug: input.project.slug,

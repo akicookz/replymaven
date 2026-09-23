@@ -2,7 +2,9 @@
 import type { ProjectRow, WidgetConfigRow } from "../db/schema";
 import type { HelpTopNavItem } from "../lib/help-top-nav";
 import { buildHelpUrl } from "./build-help-url";
+import type { HelpNav } from "./help-tabs";
 import { resolveHelpUploadUrl } from "./resolve-help-upload-url";
+import { HelpTabLinks } from "./tab-links";
 import { HelpTopNavLinks } from "./top-nav-links";
 
 const MOON_SVG =
@@ -11,6 +13,8 @@ const SUN_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>';
 const MENU_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>';
+const SEARCH_SVG =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>';
 const CLOSE_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>';
 
@@ -19,6 +23,7 @@ export interface HelpTopBarProps {
   widgetConfig: WidgetConfigRow | null;
   helpCustomUrl: string | null;
   topNav: HelpTopNavItem[];
+  nav: HelpNav;
 }
 
 export function HelpTopBar(props: HelpTopBarProps) {
@@ -56,20 +61,46 @@ export function HelpTopBar(props: HelpTopBarProps) {
               src={avatarUrl}
               alt=""
               role="presentation"
-              loading="lazy"
-              decoding="async"
+              fetchpriority="high"
             />
           )}
           <span class="help-topbar-name">{props.project.name}</span>
         </a>
+        <HelpTabLinks
+          tabs={props.nav.tabs}
+          activeTabId={props.nav.activeTabId}
+          class="help-tabs"
+        />
         <div class="help-topbar-actions">
+          <button
+            type="button"
+            class="help-topbar-search"
+            data-help-search-open
+            aria-label="Search"
+            aria-haspopup="dialog"
+            aria-controls="rm-help-search"
+          >
+            <span
+              class="help-topbar-search-icon"
+              aria-hidden="true"
+              dangerouslySetInnerHTML={{ __html: SEARCH_SVG }}
+            />
+            <span class="help-topbar-search-label">Search…</span>
+            <kbd class="help-topbar-search-kbd" data-help-search-kbd>
+              ⌘K
+            </kbd>
+          </button>
           <HelpTopNavLinks items={props.topNav} class="help-topbar-nav" />
+          {/* Hidden by script if the widget fails to load on this page. */}
+          <button type="button" class="help-topbar-ask" data-help-ask>
+            {props.nav.botName ? `Ask ${props.nav.botName}` : "Contact us"}
+          </button>
           <button
             id="rm-theme-toggle"
             type="button"
             aria-label="Toggle dark mode"
             title="Toggle theme"
-            class="help-theme-toggle inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            class="help-theme-toggle inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <span
               class="rm-icon-moon inline-flex"

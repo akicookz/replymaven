@@ -1082,8 +1082,19 @@ export const updateGuidelineSchema = z.object({
   sortOrder: z.number().int().min(0).optional(),
 });
 
+// ─── Help Tabs ────────────────────────────────────────────────────────────────
+export const createHelpTabSchema = z.object({
+  name: z.string().trim().min(1, "Name is required").max(24),
+});
+
+export const updateHelpTabSchema = z.object({
+  name: z.string().trim().min(1, "Name is required").max(24).optional(),
+  sortOrder: z.number().int().min(0).optional(),
+});
+
 // ─── Help Categories ──────────────────────────────────────────────────────────
 export const createHelpCategorySchema = z.object({
+  tabId: z.string().min(1).optional(),
   name: z.string().min(1, "Name is required").max(100),
   slug: z
     .string()

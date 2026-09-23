@@ -6,11 +6,13 @@ import { Layout } from "./layout";
 import { buildHelpUrl } from "./build-help-url";
 import { HelpSidebar } from "./sidebar";
 import { HelpTopBar } from "./top-bar";
+import type { HelpNav } from "./help-tabs";
 import type { HelpThemeDefault } from "./help-theme-default";
 import type { HelpAnalyticsEmbed } from "../lib/help-analytics";
 
 interface RenderHelpIndexProps {
   project: ProjectRow;
+  nav: HelpNav;
   categories: HelpCategoryRow[];
   articlesByCategory: Map<string, HelpArticleNav[]>;
   widgetConfig: WidgetConfigRow | null;
@@ -55,6 +57,7 @@ export function renderHelpIndex(props: RenderHelpIndexProps) {
           widgetConfig={props.widgetConfig}
           helpCustomUrl={props.helpCustomUrl}
           topNav={props.topNav}
+          nav={props.nav}
         />
       }
       sidebar={
@@ -67,6 +70,7 @@ export function renderHelpIndex(props: RenderHelpIndexProps) {
           helpCustomUrl={props.helpCustomUrl}
           widgetConfig={props.widgetConfig}
           topNav={props.topNav}
+          nav={props.nav}
         />
       }
     >
