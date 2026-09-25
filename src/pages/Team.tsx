@@ -6,7 +6,6 @@ import {
   ChevronsUpDown,
   UserPlus,
   Loader2,
-  Mail,
   Shield,
   User,
   MoreHorizontal,
@@ -19,6 +18,8 @@ import {
   Layers,
   Folder,
   Settings2,
+  Plus,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,6 +43,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import {
+  Sheet,
+  SheetBody,
+  SheetCloseButton,
+  SheetContent,
+  SheetHeader,
+  SheetHeaderContent,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { useTeam, type TeamMember } from "@/hooks/use-team";
 import { useTeams } from "@/hooks/use-teams";
 import { useSubscription } from "@/hooks/use-subscription";
@@ -80,10 +91,12 @@ function ProjectAccessPicker({
   projects,
   value,
   onChange,
+  compact = false,
 }: {
   projects: ProjectLite[];
   value: ProjectAccessSelection;
   onChange: (next: ProjectAccessSelection) => void;
+  compact?: boolean;
 }) {
   const allProjectIds = projects.map((project) => project.id);
   const selected = new Set(
@@ -98,7 +111,7 @@ function ProjectAccessPicker({
   }
 
   return (
-    <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+    <div className={cn("grid max-h-64 gap-2 overflow-y-auto pr-1", compact ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3")}>
       {projects.length === 0 ? (
         <p className="rounded-xl bg-muted/40 px-3 py-4 text-sm text-muted-foreground">
           No projects yet.
@@ -110,20 +123,12 @@ function ProjectAccessPicker({
             <label
               key={project.id}
               className={cn(
-                "flex min-h-16 cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 transition-[background-color,box-shadow]",
+                "flex min-h-[76px] cursor-pointer items-start justify-between gap-2 rounded-xl p-3 transition-[background-color,box-shadow]",
                 checked
                   ? "bg-primary/10 shadow-[inset_0_0_0_1px_var(--primary)]"
                   : "bg-muted/40 shadow-[inset_0_0_0_1px_transparent] hover:bg-muted/60",
               )}
             >
-              <Checkbox
-                checked={checked}
-                onCheckedChange={(nextChecked) =>
-                  toggleProject(project.id, nextChecked === true)
-                }
-                aria-label={`Select ${project.name}`}
-                className="size-5 rounded-md"
-              />
               <span className="min-w-0">
                 <span className="block truncate text-sm font-medium text-foreground">
                   {project.name}
@@ -132,6 +137,14 @@ function ProjectAccessPicker({
                   {project.domain ?? "Customer support project"}
                 </span>
               </span>
+              <Checkbox
+                checked={checked}
+                onCheckedChange={(nextChecked) =>
+                  toggleProject(project.id, nextChecked === true)
+                }
+                aria-label={`Select ${project.name}`}
+                className="mt-0.5 size-4 shrink-0 rounded"
+              />
             </label>
           );
         })
@@ -145,32 +158,33 @@ function ProjectAccessPicker({
 function InviteForm({
   onClose,
   projects,
+  maxInvites,
 }: {
   onClose: () => void;
   projects: ProjectLite[];
+  maxInvites: number;
 }) {
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState<"admin" | "member">("member");
+  const [invites, setInvites] = useState<Array<{ id: string; email: string; role: "admin" | "member" }>>([
+    { id: crypto.randomUUID(), email: "", role: "member" },
+  ]);
   const [access, setAccess] = useState<ProjectAccessSelection>({
     accessAllProjects: true,
     projectIds: [],
   });
-  const [inviteData, setInviteData] = useState<{ id: string; emailSent: boolean; emailError?: string } | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [inviteData, setInviteData] = useState<Array<{ id: string; email: string; role: "admin" | "member"; emailSent: boolean; emailError?: string }> | null>(null);
+  const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
-  // Members can be scoped to specific projects; admins always get full access.
-  const scoped = role === "member" && !access.accessAllProjects;
+  const scoped = !access.accessAllProjects;
 
   const inviteMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch("/api/team/invite", {
+      const res = await fetch("/api/team/invite/bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email,
-          role,
-          accessAllProjects: role === "admin" ? true : access.accessAllProjects,
+          invites: invites.map(({ email, role }) => ({ email: email.trim(), role })),
+          accessAllProjects: access.accessAllProjects,
           projectIds: scoped ? access.projectIds : [],
         }),
       });
@@ -178,69 +192,38 @@ function InviteForm({
         const data = (await res.json()) as { error: string };
         throw new Error(data.error);
       }
-      return res.json();
+      return (await res.json()) as { invites: Array<{ id: string; email: string; role: "admin" | "member"; emailSent: boolean; emailError?: string }> };
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["team"] });
-      setInviteData(data);
+      queryClient.invalidateQueries({ queryKey: ["subscription"] });
+      setInviteData(data.invites);
     },
   });
-
-  const copyInviteLink = () => {
-    if (!inviteData) return;
-    const inviteUrl = `${window.location.origin}/app/team/accept/${inviteData.id}`;
-    navigator.clipboard.writeText(inviteUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   if (inviteData) {
     return (
       <div className="space-y-4">
-        <div className="rounded-xl bg-green-500/10 p-4">
-          <p className="text-sm font-medium text-green-600 mb-1">Invitation sent!</p>
-          <p className="text-sm text-muted-foreground">
-            {inviteData.emailSent
-              ? `We've sent an invitation email to ${email}.`
-              : `The invitation was created but the email couldn't be sent. Share the link below:`}
-          </p>
-          {(!inviteData.emailSent || inviteData.emailError) && (
-            <p className="text-xs text-yellow-600 mt-2">
-              {inviteData.emailError || "Email might have landed in spam. Share the invite link manually."}
-            </p>
-          )}
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-foreground">Invite Link</label>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={`${window.location.origin}/app/team/accept/${inviteData.id}`}
-              readOnly
-              className="flex-1 px-4 py-2.5 rounded-lg border border-input bg-muted/50 text-foreground text-sm font-mono"
-            />
-            <Button
-              variant="outline"
-              onClick={copyInviteLink}
-              className="shrink-0"
-            >
-              {copied ? (
-                <>
-                  <Check className="w-4 h-4 mr-2" />
-                  Copied!
-                </>
-              ) : (
-                <>
-                  <Link className="w-4 h-4 mr-2" />
-                  Copy
-                </>
-              )}
-            </Button>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            This link will remain valid for 7 days.
-          </p>
+        <div className="space-y-3">
+          {inviteData.map((invite) => (
+            <div key={invite.id} className="rounded-xl bg-muted/40 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-foreground">{invite.email}</p>
+                  <p className="text-xs text-muted-foreground">{invite.emailSent ? "Invitation email sent" : "Invite created. Email could not be sent."}</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/app/team/accept/${invite.id}`);
+                  setCopiedInviteId(invite.id);
+                  setTimeout(() => setCopiedInviteId(null), 2000);
+                }}>
+                  {copiedInviteId === invite.id ? <Check className="mr-1.5 size-4" /> : <Link className="mr-1.5 size-4" />}
+                  {copiedInviteId === invite.id ? "Copied" : "Copy link"}
+                </Button>
+              </div>
+              {(!invite.emailSent || invite.emailError) && <p className="mt-2 text-xs text-yellow-600">{invite.emailError || "Share the invite link manually."}</p>}
+            </div>
+          ))}
         </div>
 
         <Button onClick={onClose} className="w-full">
@@ -253,51 +236,30 @@ function InviteForm({
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <label className="text-sm font-medium text-foreground">
-          Email Address
-        </label>
-        <div className="relative">
-          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="teammate@company.com"
-            className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          />
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium text-foreground">Email addresses</p>
+          <Button type="button" variant="ghost" size="sm" disabled={invites.length >= maxInvites} onClick={() => setInvites((rows) => [...rows, { id: crypto.randomUUID(), email: "", role: "member" }])}>
+            <Plus className="mr-1.5 size-4" /> Add email
+          </Button>
+        </div>
+        <div className="space-y-2">
+          {invites.map((invite, index) => (
+            <div key={invite.id} className="flex items-center gap-2">
+              <Input type="email" value={invite.email} placeholder="teammate@company.com" aria-label={`Email address ${index + 1}`} onChange={(event) => setInvites((rows) => rows.map((row) => row.id === invite.id ? { ...row, email: event.target.value } : row))} />
+              <Select value={invite.role} onValueChange={(value) => setInvites((rows) => rows.map((row) => row.id === invite.id ? { ...row, role: value as "admin" | "member" } : row))}>
+                <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="admin">Admin</SelectItem><SelectItem value="member">Member</SelectItem></SelectContent>
+              </Select>
+              {invites.length > 1 && <Button type="button" variant="ghost" size="icon" aria-label={`Remove email ${index + 1}`} onClick={() => setInvites((rows) => rows.filter((row) => row.id !== invite.id))}><X className="size-4" /></Button>}
+            </div>
+          ))}
         </div>
       </div>
 
       <div className="space-y-2">
-        <label className="text-sm font-medium text-foreground">Role</label>
-        <Select value={role} onValueChange={(v) => setRole(v as "admin" | "member")}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="admin">
-              <div className="flex items-center gap-2">
-                <Shield className="w-4 h-4" />
-                Admin — Full access, can invite others
-              </div>
-            </SelectItem>
-            <SelectItem value="member">
-              <div className="flex items-center gap-2">
-                <User className="w-4 h-4" />
-                Member — Can manage projects
-              </div>
-            </SelectItem>
-          </SelectContent>
-        </Select>
+        <p className="text-sm font-medium text-foreground">Project access</p>
+        <ProjectAccessPicker projects={projects} value={access} onChange={setAccess} />
       </div>
-
-      {role === "member" && (
-        <ProjectAccessPicker
-          projects={projects}
-          value={access}
-          onChange={setAccess}
-        />
-      )}
 
       {inviteMutation.isError && (
         <p className="text-sm text-destructive">
@@ -312,7 +274,9 @@ function InviteForm({
         <Button
           onClick={() => inviteMutation.mutate()}
           disabled={
-            !email.trim() ||
+            invites.some((invite) => !invite.email.trim()) ||
+            invites.length > maxInvites ||
+            new Set(invites.map((invite) => invite.email.trim().toLowerCase())).size !== invites.length ||
             inviteMutation.isPending ||
             (scoped && access.projectIds.length === 0)
           }
@@ -343,6 +307,7 @@ function MemberRow({
 }) {
   const queryClient = useQueryClient();
   const [copied, setCopied] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
   const [accessOpen, setAccessOpen] = useState(false);
   const [accessDraft, setAccessDraft] = useState<ProjectAccessSelection>({
     accessAllProjects: member.accessAllProjects,
@@ -397,12 +362,11 @@ function MemberRow({
       accessAllProjects: member.accessAllProjects,
       projectIds: member.projectIds,
     });
-    setAccessOpen(true);
+    setActionsOpen(false);
+    window.setTimeout(() => setAccessOpen(true), 0);
   }
 
   const isPending = member.status === "pending";
-  const canScope = member.role === "member";
-
   const copyInviteLink = () => {
     const inviteUrl = `${window.location.origin}/app/team/accept/${member.id}`;
     navigator.clipboard.writeText(inviteUrl);
@@ -447,7 +411,7 @@ function MemberRow({
       </td>
       <td className="px-4 py-3">
         <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
-          {member.role === "admin" || member.accessAllProjects ? (
+          {member.accessAllProjects ? (
             <Layers className="w-3.5 h-3.5" />
           ) : (
             <Folder className="w-3.5 h-3.5" />
@@ -472,7 +436,7 @@ function MemberRow({
         )}
 
         {isOwnerView && (
-          <Popover>
+          <Popover open={actionsOpen} onOpenChange={setActionsOpen}>
             <PopoverTrigger asChild>
               <button className="p-1.5 rounded-md hover:bg-accent text-muted-foreground transition-colors">
                 <MoreHorizontal className="w-4 h-4" />
@@ -488,7 +452,6 @@ function MemberRow({
                     <Link className="w-4 h-4 shrink-0" />
                     Copy Invite Link
                   </button>
-                  <div className="h-px bg-muted my-1" />
                 </>
               )}
               {!isPending && (
@@ -505,8 +468,9 @@ function MemberRow({
                   {member.role === "admin" ? "Demote to Member" : "Promote to Admin"}
                 </button>
               )}
-              {canScope && (
+              {isOwnerView && (
                 <button
+                  type="button"
                   onClick={openAccessDialog}
                   className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
                 >
@@ -541,6 +505,7 @@ function MemberRow({
             projects={projects}
             value={accessDraft}
             onChange={setAccessDraft}
+            compact
           />
           {accessMutation.isError && (
             <p className="text-sm text-destructive">
@@ -701,7 +666,7 @@ function Team() {
             </p>
           </div>
         </div>
-        {(isOwner || subData?.role === "admin") && (
+        {isOwner && (
           <Button
             onClick={() => setShowInvite(true)}
             disabled={seatCurrent >= seatMax}
@@ -713,18 +678,19 @@ function Team() {
         )}
       </div>
 
-      {/* Invite Form */}
-      {showInvite && (
-        <div className="rounded-2xl bg-card p-6">
-          <h3 className="text-sm font-semibold text-foreground mb-4">
-            Invite a team member
-          </h3>
-          <InviteForm
-            onClose={() => setShowInvite(false)}
-            projects={projectList}
-          />
-        </div>
-      )}
+      <Sheet open={showInvite} onOpenChange={setShowInvite}>
+        <SheetContent className="sm:max-w-2xl">
+          <SheetHeader>
+            <SheetHeaderContent>
+              <SheetTitle>Invite team members</SheetTitle>
+            </SheetHeaderContent>
+            <SheetCloseButton />
+          </SheetHeader>
+          <SheetBody className="px-5 py-5">
+            {showInvite && <InviteForm onClose={() => setShowInvite(false)} projects={projectList} maxInvites={Math.max(0, seatMax - seatCurrent)} />}
+          </SheetBody>
+        </SheetContent>
+      </Sheet>
 
       {/* Members Table */}
       <div className="rounded-2xl bg-card overflow-x-auto">

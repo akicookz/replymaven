@@ -494,6 +494,7 @@ function Billing() {
   const limits = data?.limits;
   const usage = data?.usage;
   const seats = data?.seats;
+  const isOwner = data?.role === "owner";
 
   // No subscription
   if (!sub) {
@@ -504,7 +505,9 @@ function Billing() {
           <div>
             <h1 className="text-xl md:text-2xl font-bold text-foreground">Billing</h1>
             <p className="text-xs md:text-sm text-muted-foreground mt-1">
-              Manage your subscription and billing details.
+              {isOwner
+                ? "Manage your subscription and billing details."
+                : "Ask the account owner about billing."}
             </p>
           </div>
         </div>
@@ -514,12 +517,16 @@ function Billing() {
           <div className="space-y-1">
             <p className="font-medium text-foreground">No active subscription</p>
             <p className="text-sm text-muted-foreground">
-              Choose a plan to get started with ReplyMaven.
+              {isOwner
+                ? "Choose a plan to get started with ReplyMaven."
+                : "Ask the account owner to choose a plan for this team."}
             </p>
           </div>
-          <Button onClick={() => (window.location.href = "/app/onboarding?step=4")}>
-            Choose a Plan
-          </Button>
+          {isOwner && (
+            <Button onClick={() => (window.location.href = "/app/onboarding?step=4")}>
+              Choose a Plan
+            </Button>
+          )}
         </div>
       </div>
     );
@@ -535,23 +542,27 @@ function Billing() {
           <div>
             <h1 className="text-xl md:text-2xl font-bold text-foreground">Billing</h1>
             <p className="text-xs md:text-sm text-muted-foreground mt-1">
-              Manage your subscription and billing details.
+              {isOwner
+                ? "Manage your subscription and billing details."
+                : "View your plan and usage. Contact the account owner to change billing."}
             </p>
           </div>
         </div>
-        <Button
-          onClick={() => portalMutation.mutate()}
-          disabled={portalMutation.isPending}
-          variant="outline"
-          className="shrink-0"
-        >
-          {portalMutation.isPending ? (
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-          ) : (
-            <ExternalLink className="w-4 h-4 mr-2" />
-          )}
-          Manage Subscription
-        </Button>
+        {isOwner && (
+          <Button
+            onClick={() => portalMutation.mutate()}
+            disabled={portalMutation.isPending}
+            variant="outline"
+            className="shrink-0"
+          >
+            {portalMutation.isPending ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <ExternalLink className="w-4 h-4 mr-2" />
+            )}
+            Manage Subscription
+          </Button>
+        )}
       </div>
 
       {/* Trial Banner */}
@@ -579,19 +590,23 @@ function Billing() {
                 Payment failed
               </p>
               <p className="text-xs text-muted-foreground">
-                Please update your payment method to keep your subscription active.
+                {isOwner
+                  ? "Please update your payment method to keep your subscription active."
+                  : "The account owner must update the payment method to keep the subscription active."}
               </p>
             </div>
           </div>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => portalMutation.mutate()}
-            disabled={portalMutation.isPending}
-            className="w-full sm:w-auto shrink-0"
-          >
-            Update Payment
-          </Button>
+          {isOwner && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => portalMutation.mutate()}
+              disabled={portalMutation.isPending}
+              className="w-full sm:w-auto shrink-0"
+            >
+              Update Payment
+            </Button>
+          )}
         </div>
       )}
 
@@ -611,8 +626,9 @@ function Billing() {
         </div>
 
         <p className="text-xs text-muted-foreground">
-          Use Manage Subscription to change plan, update payment method, view
-          invoices, or cancel.
+          {isOwner
+            ? "Use Manage Subscription to change plan, update payment method, view invoices, or cancel."
+            : "Contact the account owner to change the plan, update payment details, view invoices, or cancel."}
         </p>
       </div>
 

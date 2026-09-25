@@ -8,13 +8,13 @@ interface ProjectAccessSummary {
 }
 
 export function canCreateProjects(role: TeamRole | undefined): boolean {
-  return role === "owner" || role === "admin";
+  return role === "owner";
 }
 
 export function formatProjectAccessLabel(
   access: ProjectAccessSummary,
 ): string {
-  if (access.role === "admin" || access.accessAllProjects) {
+  if (access.accessAllProjects) {
     return "All projects";
   }
 
