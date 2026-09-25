@@ -10,6 +10,7 @@
  * window.ReplyMaven.toggle()
  * window.ReplyMaven.sendMessage("Hello")
  * window.ReplyMaven.identify({ name: "John", email: "john@example.com" })
+ * window.ReplyMaven.track((event, properties) => posthog.capture(event, properties))
  */
 
 import { renderMarkdown } from "../shared/chat-markdown";
@@ -3074,6 +3075,18 @@ import {
     string,
     ReturnType<typeof setTimeout>
   >();
+  // Greeting state the server keeps for a visitor linked to a customer, so a
+  // dismissal on one device holds on the others.
+  let customerLinked = false;
+  let customerDismissedGreetingIds = new Set<string>();
+  const pendingCustomerActivity: Array<{
+    type: GreetingActivityType;
+    greetingId: string;
+  }> = [];
+  const seenGreetingIds = new Set<string>();
+  // Shown by open("greetings", { id }) on this page, past a stored dismissal.
+  const openedGreetingIds = new Set<string>();
+  let greetingRenderForced = false;
 
   const videoExpandedOverlay = document.createElement("div");
   videoExpandedOverlay.className = "rm-video-expanded";
@@ -6235,7 +6248,158 @@ import {
     }
   }
 
+  // ─── Host Analytics ─────────────────────────────────────────────────────────
+
+  type TrackHandler = (
+    event: string,
+    properties: Record<string, string>,
+  ) => void;
+
+  const MAX_PENDING_TRACK_EVENTS = 50;
+  let trackHandler: TrackHandler | null = null;
+  // A card can show before the host registers its handler (delay 0).
+  const pendingTrackEvents: Array<[string, Record<string, string>]> = [];
+
+  function sendTrackEvent(
+    event: string,
+    properties: Record<string, string>,
+  ): void {
+    if (!trackHandler) {
+      if (pendingTrackEvents.length < MAX_PENDING_TRACK_EVENTS) {
+        pendingTrackEvents.push([event, properties]);
+      }
+      return;
+    }
+    try {
+      trackHandler(event, properties);
+    } catch (error) {
+      console.warn("[ReplyMaven] track handler failed:", error);
+    }
+  }
+
+  function setTrackHandler(handler: unknown): void {
+    if (typeof handler !== "function") return;
+    trackHandler = handler as TrackHandler;
+    for (const [event, properties] of pendingTrackEvents.splice(0)) {
+      sendTrackEvent(event, properties);
+    }
+  }
+
+  // ─── Customer Activity ──────────────────────────────────────────────────────
+
+  type GreetingActivityType = "greeting_dismissed" | "greeting_cta_click";
+
+  const TRACK_EVENT_BY_ACTIVITY: Record<GreetingActivityType, string> = {
+    greeting_dismissed: "replymaven_greeting_dismissed",
+    greeting_cta_click: "replymaven_greeting_cta_click",
+  };
+
+  const MAX_PENDING_CUSTOMER_ACTIVITY = 20;
+
+  function postCustomerActivity(
+    type: GreetingActivityType,
+    greetingId: string,
+  ): void {
+    // Held until identify links the visitor; dropped with the page otherwise.
+    if (!customerLinked) {
+      if (pendingCustomerActivity.length < MAX_PENDING_CUSTOMER_ACTIVITY) {
+        pendingCustomerActivity.push({ type, greetingId });
+      }
+      return;
+    }
+    fetch(`${baseUrl}/api/widget/${projectSlug}/activity`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      keepalive: true,
+      body: JSON.stringify({ visitorId, type, metadata: { greetingId } }),
+    }).catch(() => {
+      // Activity is best effort; localStorage still holds the dismissal.
+    });
+  }
+
+  function recordGreetingActivity(
+    type: GreetingActivityType,
+    greeting: GreetingPublic,
+  ): void {
+    postCustomerActivity(type, greeting.id);
+    sendTrackEvent(TRACK_EVENT_BY_ACTIVITY[type], {
+      greeting_id: greeting.id,
+      greeting_title: greeting.title,
+    });
+  }
+
+  function markCustomerLinked(): void {
+    customerLinked = true;
+    for (const activity of pendingCustomerActivity.splice(0)) {
+      postCustomerActivity(activity.type, activity.greetingId);
+    }
+  }
+
+  async function loadCustomerActivity(
+    identitySession: WidgetIdentitySessionToken,
+  ): Promise<void> {
+    const requestVisitorId = visitorId;
+    try {
+      const res = await fetch(
+        `${baseUrl}/api/widget/${projectSlug}/activity?visitorId=${encodeURIComponent(requestVisitorId)}`,
+        { signal: identitySession.signal },
+      );
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        linked?: unknown;
+        dismissedGreetingIds?: unknown;
+      };
+      if (
+        !identitySessions.isCurrent(identitySession) ||
+        visitorId !== requestVisitorId
+      ) {
+        return;
+      }
+      customerDismissedGreetingIds = new Set(
+        Array.isArray(data.dismissedGreetingIds)
+          ? data.dismissedGreetingIds.filter(
+              (id): id is string => typeof id === "string",
+            )
+          : [],
+      );
+      if (data.linked === true) markCustomerLinked();
+    } catch {
+      // Without it the widget falls back to this device's localStorage.
+    }
+  }
+
+  /** Identify can link the visitor after the stack rendered. */
+  function hideCustomerDismissedGreetings(): void {
+    if (greetingRenderForced) return;
+    const cards = greetingStack.querySelectorAll<HTMLElement>(
+      ".rm-greeting-card:not(.dismissed)",
+    );
+    for (const card of cards) {
+      const id = card.dataset.greetingId;
+      if (id && isGreetingDismissed(id)) {
+        dismissGreetingCard(card, id, false);
+      }
+    }
+  }
+
+  function resetCustomerActivity(): void {
+    customerLinked = false;
+    customerDismissedGreetingIds = new Set();
+    pendingCustomerActivity.length = 0;
+    seenGreetingIds.clear();
+  }
+
   // ─── Greetings (welcome + news cards) ───────────────────────────────────────
+
+  function markGreetingSeen(greeting: GreetingPublic): void {
+    if (seenGreetingIds.has(greeting.id)) return;
+    seenGreetingIds.add(greeting.id);
+    // Host analytics only: the server hides cards on dismiss or CTA click.
+    sendTrackEvent("replymaven_greeting_seen", {
+      greeting_id: greeting.id,
+      greeting_title: greeting.title,
+    });
+  }
 
   function getDismissedGreetingIds(): string[] {
     try {
@@ -6251,6 +6415,7 @@ import {
   }
 
   function addDismissedGreetingId(id: string): void {
+    openedGreetingIds.delete(id);
     const set = new Set(getDismissedGreetingIds());
     set.add(id);
     try {
@@ -6263,20 +6428,12 @@ import {
     }
   }
 
-  function clearDismissedGreetingId(id: string): void {
-    const remaining = getDismissedGreetingIds().filter((v) => v !== id);
-    try {
-      localStorage.setItem(
-        getStorageKey("greetings_dismissed"),
-        JSON.stringify(remaining),
-      );
-    } catch {
-      // localStorage may be unavailable
-    }
-  }
-
   function isGreetingDismissed(id: string): boolean {
-    return getDismissedGreetingIds().includes(id);
+    if (openedGreetingIds.has(id)) return false;
+    return (
+      customerDismissedGreetingIds.has(id) ||
+      getDismissedGreetingIds().includes(id)
+    );
   }
 
   function clearGreetingTimers(): void {
@@ -6317,22 +6474,23 @@ import {
     );
   }
 
-  function revealGreetingNow(card: HTMLElement, id: string): void {
-    const delayTimer = greetingTimers.get(id);
+  function revealGreetingNow(card: HTMLElement, greeting: GreetingPublic): void {
+    const delayTimer = greetingTimers.get(greeting.id);
     if (delayTimer) {
       clearTimeout(delayTimer);
-      greetingTimers.delete(id);
+      greetingTimers.delete(greeting.id);
     }
-    const durationTimer = greetingDurationTimers.get(id);
+    const durationTimer = greetingDurationTimers.get(greeting.id);
     if (durationTimer) {
       clearTimeout(durationTimer);
-      greetingDurationTimers.delete(id);
+      greetingDurationTimers.delete(greeting.id);
     }
     card.classList.remove("dismissed");
     card.classList.add("visible");
+    markGreetingSeen(greeting);
   }
 
-  /** Shows a card. Clears its stored dismissal, so this undoes close(). */
+  /** Shows a card for this page. A stored dismissal still holds on reload. */
   function openGreetingById(id: string): boolean {
     const greeting = greetingsList.find((g) => g.id === id);
     if (!greeting || !greeting.enabled) return false;
@@ -6348,7 +6506,7 @@ import {
       hiddenByPageTargeting = false;
     }
 
-    clearDismissedGreetingId(id);
+    openedGreetingIds.add(id);
     let card = findGreetingCard(id);
     if (!card) {
       renderGreetings({ includeId: id });
@@ -6356,7 +6514,7 @@ import {
     }
     if (!card) return false;
 
-    revealGreetingNow(card, id);
+    revealGreetingNow(card, greeting);
     return true;
   }
 
@@ -6413,6 +6571,8 @@ import {
         dismissGreetingCard(card, id, true);
       } else {
         addDismissedGreetingId(id);
+        const greeting = greetingsList.find((g) => g.id === id);
+        if (greeting) recordGreetingActivity("greeting_dismissed", greeting);
       }
       return;
     }
@@ -6515,6 +6675,7 @@ import {
       cta.textContent = greeting.ctaText;
       cta.onclick = () => {
         addDismissedGreetingId(greeting.id);
+        recordGreetingActivity("greeting_cta_click", greeting);
       };
       text.appendChild(cta);
     }
@@ -6556,7 +6717,11 @@ import {
   ): void {
     if (expandedVideoOwner === card) closeExpandedVideo();
     card.querySelectorAll<HTMLVideoElement>("video").forEach((video) => video.pause());
-    if (persist) addDismissedGreetingId(id);
+    if (persist) {
+      addDismissedGreetingId(id);
+      const greeting = greetingsList.find((g) => g.id === id);
+      if (greeting) recordGreetingActivity("greeting_dismissed", greeting);
+    }
     card.classList.add("dismissed");
     const hasExpandedCard = Boolean(
       greetingStack.querySelector(".rm-greeting-card.expanded:not(.dismissed)"),
@@ -6587,6 +6752,7 @@ import {
     pauseGreetingVideos();
     greetingStack.classList.remove("expanded");
     const force = options?.force ?? false;
+    greetingRenderForced = force;
     clearGreetingTimers();
     greetingStack.innerHTML = "";
 
@@ -6622,6 +6788,7 @@ import {
       const showTimer = setTimeout(() => {
         greetingTimers.delete(greeting.id);
         card.classList.add("visible");
+        markGreetingSeen(greeting);
       }, delayMs);
       greetingTimers.set(greeting.id, showTimer);
 
@@ -6723,6 +6890,12 @@ import {
             `ReplyMaven customer identification was rejected (${response.status})`,
           );
         }
+        if (identitySessions.isCurrent(identitySession)) {
+          markCustomerLinked();
+          void loadCustomerActivity(identitySession).then(
+            hideCustomerDismissedGreetings,
+          );
+        }
       } catch (error) {
         if (identitySessions.isCurrent(identitySession)) {
           console.warn("[ReplyMaven] Customer identification failed");
@@ -6773,6 +6946,7 @@ import {
     localStorage.setItem("rm_visitor_id", plan.nextState.visitorId);
 
     visitorId = plan.nextState.visitorId;
+    resetCustomerActivity();
     conversationId = null;
     conversationStatus = null;
     visitorInfo = {};
@@ -7013,10 +7187,16 @@ import {
     requestNotifications: () => {
       requestNotificationPermission();
     },
+    track: setTrackHandler,
   };
 
   // ─── Initialize ─────────────────────────────────────────────────────────────
-  loadConfig().then(() => {
+  // The stack waits for customer activity too, so a card the customer
+  // dismissed on another device does not show here first.
+  Promise.all([
+    loadConfig(),
+    loadCustomerActivity(identitySessions.capture()),
+  ]).then(() => {
     // After config is loaded, try to restore an existing conversation
     restoreConversation();
   });

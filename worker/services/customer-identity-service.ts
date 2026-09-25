@@ -12,6 +12,7 @@ import type {
 import type { PublicConversationRecord } from "../../shared/maven-conversation";
 import type { PublicConversationStore } from "../conversations/public-conversation-store";
 import {
+  customerActivity,
   customers,
   customerVisitors,
   type CustomerRow,
@@ -747,6 +748,15 @@ export class CustomerIdentityService {
           and(
             eq(customerVisitors.projectId, projectId),
             eq(customerVisitors.customerId, sourceCustomerId),
+          ),
+        ),
+      this.db
+        .update(customerActivity)
+        .set({ customerId: targetCustomerId })
+        .where(
+          and(
+            eq(customerActivity.projectId, projectId),
+            eq(customerActivity.customerId, sourceCustomerId),
           ),
         ),
       this.db

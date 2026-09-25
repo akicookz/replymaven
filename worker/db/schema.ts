@@ -480,6 +480,41 @@ export const customerVisitors = sqliteTable(
 export type CustomerVisitorRow = typeof customerVisitors.$inferSelect;
 export type NewCustomerVisitorRow = typeof customerVisitors.$inferInsert;
 
+// ─── Customer Activity ───────────────────────────────────────────────────────
+
+export const CUSTOMER_ACTIVITY_TYPES = [
+  "greeting_dismissed",
+  "greeting_cta_click",
+] as const;
+
+export type CustomerActivityType = (typeof CUSTOMER_ACTIVITY_TYPES)[number];
+
+export const customerActivity = sqliteTable(
+  "customer_activity",
+  {
+    id: text("id").primaryKey(),
+    // No foreign key: rows go with their customer, and a project key would
+    // make every project delete scan this table.
+    projectId: text("project_id").notNull(),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    visitorId: text("visitor_id").notNull(),
+    type: text("type", { enum: CUSTOMER_ACTIVITY_TYPES }).notNull(),
+    metadata: text("metadata").notNull().default("{}"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("idx_customer_activity_customer_type").on(
+      table.customerId,
+      table.type,
+    ),
+  ],
+);
+
+export type CustomerActivityRow = typeof customerActivity.$inferSelect;
+export type NewCustomerActivityRow = typeof customerActivity.$inferInsert;
+
 // ─── Conversations ────────────────────────────────────────────────────────────
 
 export const conversations = sqliteTable(
@@ -1201,6 +1236,7 @@ export const schema = {
   crawledPages,
   customers,
   customerVisitors,
+  customerActivity,
   conversations,
   messages,
   ticketConfig,

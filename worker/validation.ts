@@ -6,6 +6,7 @@ import {
   getFaqSetTotalLength,
 } from "../shared/faq-limits";
 import { INDUSTRIES } from "../shared/industries";
+import { CUSTOMER_ACTIVITY_TYPES } from "./db/schema";
 import { isAllowedStoredUploadUrl } from "./lib/public-upload-url";
 import { isGreetingVideoUrl } from "./lib/greeting-media";
 import {
@@ -504,6 +505,16 @@ export const signedWidgetIdentifySchema = z
     visitorId: z.string().trim().min(1).max(100),
     conversationId: z.string().trim().min(1).max(100).optional(),
     token: z.string().trim().min(1).max(32_768),
+  })
+  .strict();
+
+export const customerActivitySchema = z
+  .object({
+    visitorId: z.string().trim().min(1).max(100),
+    type: z.enum(CUSTOMER_ACTIVITY_TYPES),
+    metadata: z
+      .object({ greetingId: z.string().trim().min(1).max(100) })
+      .strict(),
   })
   .strict();
 

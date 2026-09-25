@@ -46,7 +46,7 @@ ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbo
 
 ### Core Features
 
-- **Embeddable chat widget** -- standalone JS embed script (`<script>` tag) that users install on their pages. Supports programmatic invocation: `open`/`toggle`/`close` all take an optional screen (`home`, `chat`, `form`, `greetings`) plus `{ id }` for a greeting card, alongside `expand`, `shrink`, `sendMessage`, `identify`, `reset`, `setPageContext`, `setMetadata`, and `requestNotifications`. Talks native Agent chat over a WebSocket to the conversation's `MavenChatAgent` child. Automatically sends current page URL and title as context with each message.
+- **Embeddable chat widget** -- standalone JS embed script (`<script>` tag) that users install on their pages. Supports programmatic invocation: `open`/`toggle`/`close` all take an optional screen (`home`, `chat`, `form`, `greetings`) plus `{ id }` for a greeting card, alongside `expand`, `shrink`, `sendMessage`, `identify`, `reset`, `setPageContext`, `setMetadata`, `requestNotifications`, and `track`. Talks native Agent chat over a WebSocket to the conversation's `MavenChatAgent` child. Automatically sends current page URL and title as context with each message.
 - **Dashboard** -- React SPA where users configure their bot, manage resources, review conversations, and customize the widget's look and feel.
 - **Resource management** -- users add web pages, FAQs, and PDFs as knowledge sources. These are stored in R2 and indexed via Cloudflare AI Search for RAG retrieval.
 - **Tone of voice** -- configurable AI personality (professional, friendly, casual, formal, or custom prompt).
@@ -756,6 +756,10 @@ customers
 customer_visitors
   id, projectId, customerId, visitorId, linkedBy (dashboard|signed_widget)
 
+customer_activity
+  id, projectId (no FK), customerId, visitorId, type, metadata (JSON),
+  createdAt (milliseconds). One row per event, indexed on (customerId, type).
+
 ticket_config
   id, projectId, enabled, description, fields (JSON)
 
@@ -831,6 +835,8 @@ Grouped, not exhaustive. `worker/index.ts` and `worker/routes/*.ts` are the sour
 | POST | `/api/widget/:projectSlug/conversations/:id/heartbeat` | Visitor presence |
 | POST | `/api/widget/:projectSlug/conversations/:id/email` | Email the transcript |
 | POST | `/api/widget/:projectSlug/identify` | Verify an opaque signed customer token and attach exact visitor history |
+| POST | `/api/widget/:projectSlug/activity` | Log one greeting event for a visitor linked to a customer; anonymous visitors are not recorded |
+| GET | `/api/widget/:projectSlug/activity?visitorId=` | `{ linked, dismissedGreetingIds }` for the widget |
 | POST | `/api/widget/:projectSlug/tickets` (alias `/inquiries`) | Ticket form submission; posts a visitor message and escalates |
 | POST | `/api/widget/:projectSlug/upload` | Visitor attachment upload |
 | POST | `/api/telegram/webhook/:projectId` | Telegram bot webhook. Verified with the per-project `secret_token` Telegram echoes in `X-Telegram-Bot-Api-Secret-Token` (derived from `ENCRYPTION_KEY`, `worker/services/telegram-secrets.ts`). The first verified update from a project with no chat id binds that chat; there is no token-polling detect endpoint. |
@@ -897,7 +903,7 @@ The script creates an iframe or shadow DOM element containing the chat UI. It ex
 // open and toggle return false when the call was refused; close returns void.
 window.ReplyMaven.open()                            // auto-routes: chat if live, else home
 window.ReplyMaven.open("form")
-window.ReplyMaven.open("greetings", { id })         // show that card, clearing its dismissal
+window.ReplyMaven.open("greetings", { id })         // show that card now; a dismissal still holds
 window.ReplyMaven.toggle("chat")                    // show if hidden, hide if showing
 window.ReplyMaven.toggle("greetings", { id })       // same rule, per card
 window.ReplyMaven.close()                           // close the panel
@@ -913,7 +919,13 @@ window.ReplyMaven.reset()
 window.ReplyMaven.setPageContext({ page: "Pricing", plan: "Pro" })
 window.ReplyMaven.setMetadata({ internalId: "abc123" })
 window.ReplyMaven.requestNotifications()
+window.ReplyMaven.track((event, properties) => {     // send widget events to the host's analytics
+  gtag("event", event, properties);
+  posthog.capture(event, properties);
+})
 ```
+
+`track` takes one handler; calling it again replaces it. Events raised before a handler is set are held (up to 50) and sent when it is set. Events: `replymaven_greeting_seen` (once per card per page load), `replymaven_greeting_dismissed`, and `replymaven_greeting_cta_click`, each with `{ greeting_id, greeting_title }`. ReplyMaven keeps no analytics of its own; site owners read these in their GA4, PostHog, or other tool.
 
 ### Customer Continuity
 
@@ -928,6 +940,7 @@ window.ReplyMaven.requestNotifications()
 - For an already-connected visitor ID, at least one signed external ID or email must resolve to the same customer before profile enrichment is accepted. An entirely unmatched signed account conflicts rather than relabeling existing history.
 - Unsigned `identify({ name, email, phone, metadata })` only updates the current conversation snapshot. It never creates a customer or attaches earlier threads.
 - `reset()` rotates `rm_visitor_id` and clears conversation-scoped widget state. Call it before logout or account switching.
+- `customer_activity` is the per-customer event log (greetings today). Merge moves the source customer's rows to the target; deleting a customer cascades them.
 - External ID, email, and visitor-link conflicts fail without mutation. Customers are never auto-merged.
 - Customer mutations publish a project-scoped realtime event so customer lists and details refresh even when no conversation changed.
 
@@ -1034,9 +1047,10 @@ Proactive cards shown above the launcher before any conversation exists.
 - `imageUrl` holds either an image or a video. `worker/lib/greeting-media.ts` derives the type from the file extension (`.mp4`, `.webm`, `.ogv`), so adding video needed no column. Uploads cap at 10MB for images and 50MB for video.
 - A card with media renders rich (its own layout, video controls, expand). A card without renders compact, uses the author name as the title, and opens the chat on click.
 - `delaySeconds` controls the reveal, `durationSeconds` the auto-hide. Auto-hide does not persist; an explicit dismissal writes the id to `localStorage` under the `greetings_dismissed` key.
+- For a visitor linked to a customer, the widget also logs `greeting_dismissed` and `greeting_cta_click` to `customer_activity`. Seen goes to `track` only and is not stored. Either event hides the card for that customer on every device. The widget loads this state before the stack renders and again after a signed `identify`, then merges it with localStorage. Events from before `identify` on the same page are held and sent once it succeeds.
 - `allowedPages` targets the card to specific pages, matched client-side against the current URL.
 - An unseen-reply preview always outranks greetings. Both stacks occupy the same coordinates and a real support reply is the more urgent card.
-- `open("greetings")` re-renders ignoring dismissals. `open("greetings", { id })` shows one card now, skipping its delay, cancelling its auto-hide, and clearing its stored dismissal, so it is the exact inverse of `close("greetings", { id })`.
+- `open("greetings")` re-renders ignoring dismissals. `open("greetings", { id })` shows one card now, skipping its delay and cancelling its auto-hide. It does not clear a dismissal: the card stays for the rest of the page view, and a reload hides it again.
 - `toggle` means show/hide everywhere, including per card. Sizing is `expand`/`shrink`: with no argument they size the panel, with `{ id }` they size one greeting card. Only a rich card can be enlarged, and enlarging one collapses any other.
 - `close("greetings", { id })` dismisses one card and persists it, `close("greetings")` all of them. A hide through `toggle` is transient and is not written to storage.
 - `"greetings"` is the card stack above the launcher, not a panel screen yet. The name is already plural so it survives the move into the panel.

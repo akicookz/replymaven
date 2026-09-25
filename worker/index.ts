@@ -39,6 +39,7 @@ import {
 } from "./conversations/public-conversation-store";
 import { canAutoCloseConversationStatus } from "./conversations/conversation-staleness";
 import { CustomerIdentityService } from "./services/customer-identity-service";
+import { CustomerActivityService } from "./services/customer-activity-service";
 import { CustomerService } from "./services/customer-service";
 import { ResourceService, type FaqPair } from "./services/resource-service";
 import { triggerAutoRagSync } from "./services/autorag-sync";
@@ -282,6 +283,7 @@ import {
   movePairSchema,
   updateCrawledPageContentSchema,
   createConversationSchema,
+  customerActivitySchema,
   agentReplySchema,
   updateTelegramSchema,
   updateSlackSchema,
@@ -851,6 +853,89 @@ const app = new Hono<HonoAppContext>()
         broadcastCustomerChanges(c, project.id, customerIds);
       },
     });
+  })
+
+  // ─── Customer Activity ─────────────────────────────────────────────────────
+  // Only visitors linked to a customer are recorded. Anonymous visitors keep
+  // their greeting state in the widget's localStorage.
+  .post("/api/widget/:projectSlug/activity", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`activity:${ip}`, 60, 60_000)) {
+      return c.json({ error: "Rate limit exceeded" }, 429);
+    }
+
+    const db = drizzle(c.env.DB);
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(
+      c.req.param("projectSlug"),
+    );
+    if (!project) return c.json({ error: "Project not found" }, 404);
+
+    const body = await c.req.json().catch(() => null);
+    const parsed = validate(customerActivitySchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const identityService = new CustomerIdentityService(
+      db,
+      createPublicConversationStore({ db, env: c.env }),
+    );
+    const customer = await identityService.findCustomerByVisitorId(
+      project.id,
+      parsed.data.visitorId,
+    );
+    if (!customer) return c.json({ recorded: false });
+
+    const widgetService = new WidgetService(db);
+    const greeting = await widgetService.getGreetingById(
+      parsed.data.metadata.greetingId,
+      project.id,
+    );
+    if (!greeting) return c.json({ error: "Greeting not found" }, 404);
+
+    await new CustomerActivityService(db).record({
+      projectId: project.id,
+      customerId: customer.id,
+      visitorId: parsed.data.visitorId,
+      type: parsed.data.type,
+      metadata: { greetingId: greeting.id },
+    });
+    return c.json({ recorded: true });
+  })
+
+  .get("/api/widget/:projectSlug/activity", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`activity-read:${ip}`, 30, 60_000)) {
+      return c.json({ error: "Rate limit exceeded" }, 429);
+    }
+
+    const visitorId = c.req.query("visitorId")?.trim();
+    if (!visitorId || visitorId.length > 100) {
+      return c.json({ error: "visitorId is required" }, 400);
+    }
+
+    const db = drizzle(c.env.DB);
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(
+      c.req.param("projectSlug"),
+    );
+    if (!project) return c.json({ error: "Project not found" }, 404);
+
+    const identityService = new CustomerIdentityService(
+      db,
+      createPublicConversationStore({ db, env: c.env }),
+    );
+    const customer = await identityService.findCustomerByVisitorId(
+      project.id,
+      visitorId,
+    );
+    if (!customer) {
+      return c.json({ linked: false, dismissedGreetingIds: [] as string[] });
+    }
+
+    const dismissedGreetingIds = await new CustomerActivityService(
+      db,
+    ).listDismissedGreetingIds(project.id, customer.id);
+    return c.json({ linked: true, dismissedGreetingIds });
   })
 
   // ─── Create Conversation ────────────────────────────────────────────────────
