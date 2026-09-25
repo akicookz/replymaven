@@ -7,12 +7,8 @@ const MUTED_TEXT = "color: #98989d;";
 const ACCENT_COLOR = "#2563eb";
 const EMAIL_FONT = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif";
 
-function buildAccentStyles(): {
-  heading: string;
-  button: string;
-} {
+function buildAccentStyles(): { button: string } {
   return {
-    heading: `color: #f5f5f7; font-family: ${EMAIL_FONT}; font-size: 27px; font-weight: 400; letter-spacing: -0.55px; line-height: 1.18;`,
     button: `display: inline-block; box-sizing: border-box; min-height: 40px; line-height: 38px; background: ${ACCENT_COLOR}; color: #ffffff; padding: 0 18px; border: 1px solid rgba(255,255,255,0.35); border-radius: 10px; box-shadow: inset 0 6px 14px -6px rgba(255,255,255,0.3); text-decoration: none; font-family: ${EMAIL_FONT}; font-size: 14px; font-weight: 500;`,
   };
 }
@@ -136,9 +132,7 @@ function buildVisitorSubjectIdentifier(opts: {
 // ─── OTP Email Template ───────────────────────────────────────────────────────
 
 export function buildOtpEmailHtml(otp: string): string {
-  const styles = buildAccentStyles();
   return wrapEmail(`
-<p class="email-heading" style="${styles.heading} margin: 0 0 16px;">Your verification code</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">Enter this code to verify your email address. It expires in 10 minutes.</p>
 <p class="email-otp" style="font-size: 34px; font-weight: 500; letter-spacing: 6px; line-height: 1.2; margin: 0 0 26px; color: #ffffff; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;">${escapeHtml(otp)}</p>
 <p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 0;">If you didn't request this code, you can safely ignore this email.</p>
@@ -202,7 +196,6 @@ export class EmailService {
       to,
       subject: "Welcome to ReplyMaven",
       html: wrapEmail(`
-<p class="email-heading" style="${styles.heading} margin: 0 0 16px;">Welcome to ReplyMaven</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Hi ${escapeHtml(name)}, thanks for signing up. You can now create your first project and start building your AI support agent.</p>
 <a href="https://replymaven.com/app" class="email-button" style="${styles.button}">Go to Dashboard</a>
       `),
@@ -221,7 +214,6 @@ export class EmailService {
       to,
       subject: `${inviterName} invited you to join their ReplyMaven team`,
       html: wrapEmail(`
-<p class="email-heading" style="${styles.heading} margin: 0 0 16px;">You've been invited to ReplyMaven</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">${escapeHtml(inviterName)} (${escapeHtml(inviterEmail)}) has invited you to join their team as ${role === "admin" ? "an administrator" : "a member"}.</p>
 <a href="${acceptUrl}" class="email-button" style="${styles.button} margin-top: 8px;">Accept Invitation</a>
 <p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 24px 0 0;">This invitation will expire in 7 days. If you didn't expect this invitation, you can safely ignore this email.</p>
@@ -279,7 +271,6 @@ export class EmailService {
         to,
         subject: "You've used 80% of your monthly messages",
         html: wrapEmail(`
-<p class="email-heading" style="${styles.heading} margin: 0 0 16px;">Your message usage is at 80%</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">You've used <span style="color: #f5f5f7;">${used}</span> of <span style="color: #f5f5f7;">${max}</span> messages on your <span style="color: #f5f5f7;">${escapeHtml(plan)}</span> plan this billing period.</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">Once you reach your limit, your chatbot will stop responding to visitors until the next period. Consider upgrading if you expect to exceed your quota.</p>
@@ -303,7 +294,6 @@ export class EmailService {
         to,
         subject: "You've reached your message limit",
         html: wrapEmail(`
-<p class="email-heading" style="${styles.heading} margin: 0 0 16px;">You've reached your message limit</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">You've used all <span style="color: #f5f5f7;">${max}</span> messages on your <span style="color: #f5f5f7;">${escapeHtml(plan)}</span> plan. Your chatbot will not respond to new visitor messages until your next billing period.</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">Upgrade your plan to get more messages and keep your chatbot online.</p>
@@ -326,25 +316,22 @@ export class EmailService {
       const styles = buildAccentStyles();
       const reasonMessages: Record<
         SubscriptionInactiveReason,
-        { subject: string; heading: string; body: string }
+        { subject: string; body: string }
       > = {
         payment_failed: {
           subject: "Action Required: Your chatbot is paused",
-          heading: "Your chatbot is paused",
           body: `<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Your recent payment failed and your chatbot has been paused. Visitors will not be able to use it until the issue is resolved.</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">Update your payment method to restore service.</p>
 <a href="https://replymaven.com/app/account/billing" class="email-button" style="${styles.button}">Update payment</a>`,
         },
         canceled: {
           subject: "Your ReplyMaven subscription has been canceled",
-          heading: "Your subscription has been canceled",
           body: `<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Your subscription has been canceled and your chatbot is no longer active. Visitors will see an unavailable message.</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">If this was a mistake, you can resubscribe anytime.</p>
 <a href="https://replymaven.com/app/account/billing" class="email-button" style="${styles.button}">View billing</a>`,
         },
         other: {
           subject: "Your chatbot is currently unavailable",
-          heading: "Your chatbot is unavailable",
           body: `<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Your subscription is inactive and your chatbot is currently unavailable to visitors.</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">Check your billing settings to restore service.</p>
 <a href="https://replymaven.com/app/account/billing" class="email-button" style="${styles.button}">View billing</a>`,
@@ -357,7 +344,6 @@ export class EmailService {
         to,
         subject: msg.subject,
         html: wrapEmail(`
-<p class="email-heading" style="${styles.heading} margin: 0 0 16px;">${msg.heading}</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
 ${msg.body}
         `),
@@ -495,12 +481,10 @@ ${msg.body}
     name: string,
   ): Promise<void> {
     try {
-      const styles = buildAccentStyles();
       await this.send({
         to,
         subject: "Your chatbot is back online",
         html: wrapEmail(`
-<p class="email-heading" style="${styles.heading} margin: 0 0 16px;">Your chatbot is back online</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0;">Your subscription is active again and your chatbot is back online. Visitors can use it as normal.</p>
         `),
