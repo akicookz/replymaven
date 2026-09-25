@@ -2,127 +2,33 @@ import { Resend } from "resend";
 
 // ─── Email Design Tokens ──────────────────────────────────────────────────────
 
-const BODY_TEXT = "color: #374151;";
-const MUTED_TEXT = "color: #6b7280;";
-const CARD_STYLE =
-  "background: #f3f4f6; border-radius: 18px; padding: 20px 24px;";
+const BODY_TEXT = "color: #d1d5db;";
+const MUTED_TEXT = "color: #9ca3af;";
+const ACCENT_COLOR = "#2563eb";
 
-const DEFAULT_ACCENT = "rgb(42, 17, 0)";
-const DEFAULT_ACCENT_DARK = "#6b3710";
-const DEFAULT_ACCENT_DARK_LINK = "#f3c67b";
-
-interface AccentTheme {
-  light: string;
-  lightForeground: string;
-  dark: string;
-  darkBorder: string;
-  darkLink: string;
-}
-
-function isValidHex(value: string | null | undefined): value is string {
-  return typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value.trim());
-}
-
-function getReadableForeground(color: string): string {
-  const hex = color.trim().replace(/^#/, "");
-  if (!/^[0-9a-fA-F]{6}$/.test(hex)) return "#ffffff";
-  const r = parseInt(hex.slice(0, 2), 16);
-  const g = parseInt(hex.slice(2, 4), 16);
-  const b = parseInt(hex.slice(4, 6), 16);
-  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
-  return yiq >= 150 ? "#1a1a1a" : "#ffffff";
-}
-
-function resolveAccent(accentColor?: string | null): AccentTheme {
-  if (!isValidHex(accentColor)) {
-    return {
-      light: DEFAULT_ACCENT,
-      lightForeground: "#ffffff",
-      dark: DEFAULT_ACCENT_DARK,
-      darkBorder: "#8b4e18",
-      darkLink: DEFAULT_ACCENT_DARK_LINK,
-    };
-  }
-  const accent = accentColor.trim();
-  return {
-    light: accent,
-    lightForeground: getReadableForeground(accent),
-    dark: accent,
-    darkBorder: accent,
-    darkLink: accent,
-  };
-}
-
-function buildAccentStyles(accentColor?: string | null): {
+function buildAccentStyles(): {
   heading: string;
-  link: string;
   button: string;
 } {
-  const theme = resolveAccent(accentColor);
   return {
-    heading: `color: ${theme.light}; font-size: 18px; font-weight: 600;`,
-    link: `color: ${theme.light}; font-weight: 500; text-decoration: underline;`,
-    button: `display: inline-block; background: ${theme.light}; color: ${theme.lightForeground}; padding: 12px 24px; border: 1px solid ${theme.light}; border-radius: 999px; text-decoration: none; font-size: 14px; font-weight: 600;`,
+    heading: `color: #f9fafb; font-size: 20px; font-weight: 600;`,
+    button: `display: inline-block; background: ${ACCENT_COLOR}; color: #ffffff; padding: 12px 20px; border: 0; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600;`,
   };
 }
 
 // ─── Shared Email Layout ──────────────────────────────────────────────────────
 
-function wrapEmail(
-  body: string,
-  accentColor?: string | null,
-  options?: { brand?: boolean },
-): string {
-  const theme = resolveAccent(accentColor);
-  const brand = options?.brand !== false;
-  const brandFooter = brand
-    ? `<p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 40px 0 0;">&mdash; ReplyMaven Team</p>`
-    : "";
+function wrapEmail(body: string): string {
   return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark"><style>
-:root { color-scheme: light dark; supported-color-schemes: light dark; }
-@media (prefers-color-scheme: dark) {
-  body, .email-body { background: #0a0a0c !important; }
-  .email-shell { background: #0a0a0c !important; color: #f0f0f5 !important; }
-  .email-heading, .email-strong, .email-value { color: #f0f0f5 !important; }
-  .email-body-text { color: #c8c8d2 !important; }
-  .email-muted { color: #8a8a96 !important; }
-  .email-card { background: #16181d !important; }
-  .email-link, .email-otp { color: ${theme.darkLink} !important; }
-  .email-button { background: ${theme.dark} !important; border-color: ${theme.darkBorder} !important; color: ${theme.lightForeground} !important; }
-}
-body[data-ogsc],
-body[data-ogsb] { background: #0a0a0c !important; }
-[data-ogsc] .email-body,
-[data-ogsb] .email-body { background: #0a0a0c !important; }
-[data-ogsc] .email-shell,
-[data-ogsb] .email-shell { background: #0a0a0c !important; color: #f0f0f5 !important; }
-[data-ogsc] .email-heading,
-[data-ogsb] .email-heading,
-[data-ogsc] .email-strong,
-[data-ogsb] .email-strong,
-[data-ogsc] .email-value,
-[data-ogsb] .email-value { color: #f0f0f5 !important; }
-[data-ogsc] .email-body-text,
-[data-ogsb] .email-body-text { color: #c8c8d2 !important; }
-[data-ogsc] .email-muted,
-[data-ogsb] .email-muted { color: #8a8a96 !important; }
-[data-ogsc] .email-card,
-[data-ogsb] .email-card { background: #16181d !important; }
-[data-ogsc] .email-link,
-[data-ogsb] .email-link,
-[data-ogsc] .email-otp,
-[data-ogsb] .email-otp { color: ${theme.darkLink} !important; }
-[data-ogsc] .email-button,
-[data-ogsb] .email-button { background: ${theme.dark} !important; border-color: ${theme.darkBorder} !important; color: ${theme.lightForeground} !important; }
-</style></head>
-<body class="email-body" style="margin: 0; padding: 24px 16px; background: #ffffff;">
-<div class="email-shell" style="font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 560px; margin: 0 auto; padding: 0; background: #ffffff; color: #1f2937; font-size: 16px; line-height: 1.6;">
-<!--[if mso]><table role="presentation" width="560" align="center" cellpadding="0" cellspacing="0"><tr><td style="padding: 0; background: #ffffff;"><![endif]-->
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"></head>
+<body style="margin: 0; padding: 24px 16px; background: #0b0c0f; color: #f9fafb;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background: #0b0c0f; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #f9fafb; font-size: 16px; line-height: 1.6;"><tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 560px; background: #16171c; border-radius: 8px;"><tr><td style="padding: 28px 32px;">
+<p style="margin: 0 0 28px; color: #60a5fa; font-size: 15px; font-weight: 700;">ReplyMaven</p>
 ${body}
-${brandFooter}
-<!--[if mso]></td></tr></table><![endif]-->
-</div>
+<p class="email-muted" style="${MUTED_TEXT} font-size: 12px; margin: 28px 0 0;">ReplyMaven | Customer support for your website</p>
+</td></tr></table>
+</td></tr></table>
 </body></html>`;
 }
 
@@ -234,9 +140,7 @@ export function buildOtpEmailHtml(otp: string): string {
   return wrapEmail(`
 <p class="email-heading" style="${styles.heading} margin: 0 0 16px;">Your verification code</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">Enter this code to verify your email address. It expires in 10 minutes.</p>
-<div class="email-card" style="${CARD_STYLE} text-align: center; margin: 0 0 24px;">
-  <p class="email-otp" style="font-size: 32px; font-weight: 700; letter-spacing: 8px; margin: 0; color: #1f2937; font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;">${escapeHtml(otp)}</p>
-</div>
+<p class="email-otp" style="font-size: 32px; font-weight: 700; letter-spacing: 8px; margin: 0 0 24px; color: #f9fafb; font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;">${escapeHtml(otp)}</p>
 <p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 0;">If you didn't request this code, you can safely ignore this email.</p>
   `);
 }
@@ -257,16 +161,25 @@ export class EmailService {
     from?: string;
     to: string;
     subject: string;
-    html: string;
+    html?: string;
+    text?: string;
     replyTo?: string;
     headers?: Record<string, string>;
   }): Promise<void> {
+    let body: { html?: string; text: string } | { text: string };
+    if (email.text !== undefined) {
+      body = { text: email.text };
+    } else if (email.html !== undefined) {
+      body = { html: email.html, text: htmlToText(email.html) };
+    } else {
+      throw new Error("Email requires HTML or plain text content");
+    }
+
     const { error } = await this.resend.emails.send({
       from: email.from ?? PLATFORM_FROM,
       to: email.to,
       subject: email.subject,
-      html: email.html,
-      text: htmlToText(email.html),
+      ...body,
       ...(email.replyTo ? { replyTo: email.replyTo } : {}),
       ...(email.headers ? { headers: email.headers } : {}),
     });
@@ -336,8 +249,6 @@ export class EmailService {
         email: details.visitorEmail,
         id: details.visitorId,
       });
-      const styles = buildAccentStyles(details.accentColor);
-      const summaryHtml = escapeHtml(details.summary).replace(/\n/g, "<br/>");
       // Sent from the project address, not the platform one: replies to
       // `support@` are dropped as a reserved local part, so answering this
       // notification from an inbox would go nowhere.
@@ -346,17 +257,7 @@ export class EmailService {
         replyTo: `${details.projectSlug}@${EMAIL_DOMAIN}`,
         to: details.ownerEmail,
         subject: `Needs human review - ${visitor}`,
-        html: wrapEmail(
-          `
-<p class="email-heading" style="${styles.heading} margin: 0 0 20px;">Conversation needs your review</p>
-<div class="email-card" style="${CARD_STYLE} margin: 0 0 24px;">
-<p class="email-value" style="font-size: 15px; color: #1f2937; margin: 0;">${summaryHtml}</p>
-</div>
-<a href="${details.conversationUrl}" class="email-button" style="${styles.button}">Open conversation</a>
-<p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 24px 0 0;">Reply to this email to answer &mdash; your reply is added to the conversation, and sent to the visitor when we have their address.</p>
-        `,
-          details.accentColor,
-        ),
+        text: `Conversation needs your review\n\n${details.summary}\n\nOpen conversation: ${details.conversationUrl}\n\nReply to this email to answer. Your reply is added to the conversation and sent to the visitor when we have their address.`,
       });
     } catch (error) {
       console.error("[EmailService] Escalation notification email failed:", error);
@@ -378,8 +279,9 @@ export class EmailService {
         to,
         subject: "You've used 80% of your monthly messages",
         html: wrapEmail(`
-<p class="email-heading" style="${styles.heading} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
-<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">You've used <strong class="email-strong" style="color: #1f2937;">${used}</strong> of <strong class="email-strong" style="color: #1f2937;">${max}</strong> messages on your <strong class="email-strong" style="color: #1f2937;">${escapeHtml(plan)}</strong> plan this billing period.</p>
+<p class="email-heading" style="${styles.heading} margin: 0 0 16px;">Your message usage is at 80%</p>
+<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
+<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">You've used <strong class="email-strong" style="color: #f9fafb;">${used}</strong> of <strong class="email-strong" style="color: #f9fafb;">${max}</strong> messages on your <strong class="email-strong" style="color: #f9fafb;">${escapeHtml(plan)}</strong> plan this billing period.</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">Once you reach your limit, your chatbot will stop responding to visitors until the next period. Consider upgrading if you expect to exceed your quota.</p>
 <a href="https://replymaven.com/app/account/billing" class="email-button" style="${styles.button}">View Usage</a>
         `),
@@ -401,8 +303,9 @@ export class EmailService {
         to,
         subject: "You've reached your message limit",
         html: wrapEmail(`
-<p class="email-heading" style="${styles.heading} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
-<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">You've used all <strong class="email-strong" style="color: #1f2937;">${max}</strong> messages on your <strong class="email-strong" style="color: #1f2937;">${escapeHtml(plan)}</strong> plan. Your chatbot will not respond to new visitor messages until your next billing period.</p>
+<p class="email-heading" style="${styles.heading} margin: 0 0 16px;">You've reached your message limit</p>
+<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
+<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">You've used all <strong class="email-strong" style="color: #f9fafb;">${max}</strong> messages on your <strong class="email-strong" style="color: #f9fafb;">${escapeHtml(plan)}</strong> plan. Your chatbot will not respond to new visitor messages until your next billing period.</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">Upgrade your plan to get more messages and keep your chatbot online.</p>
 <a href="https://replymaven.com/app/account/billing" class="email-button" style="${styles.button}">Upgrade Plan</a>
         `),
@@ -423,22 +326,28 @@ export class EmailService {
       const styles = buildAccentStyles();
       const reasonMessages: Record<
         SubscriptionInactiveReason,
-        { subject: string; body: string }
+        { subject: string; heading: string; body: string }
       > = {
         payment_failed: {
           subject: "Action Required: Your chatbot is paused",
+          heading: "Your chatbot is paused",
           body: `<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Your recent payment failed and your chatbot has been paused. Visitors will not be able to use it until the issue is resolved.</p>
-<p class="email-body-text" style="${BODY_TEXT} margin: 0;">Please update your payment method in your <a href="https://replymaven.com/app/billing" class="email-link" style="${styles.link}">dashboard</a> to restore service.</p>`,
+<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">Update your payment method to restore service.</p>
+<a href="https://replymaven.com/app/account/billing" class="email-button" style="${styles.button}">Update payment</a>`,
         },
         canceled: {
           subject: "Your ReplyMaven subscription has been canceled",
+          heading: "Your subscription has been canceled",
           body: `<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Your subscription has been canceled and your chatbot is no longer active. Visitors will see an unavailable message.</p>
-<p class="email-body-text" style="${BODY_TEXT} margin: 0;">If this was a mistake, you can resubscribe anytime from your <a href="https://replymaven.com/app/billing" class="email-link" style="${styles.link}">dashboard</a>.</p>`,
+<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">If this was a mistake, you can resubscribe anytime.</p>
+<a href="https://replymaven.com/app/account/billing" class="email-button" style="${styles.button}">View billing</a>`,
         },
         other: {
           subject: "Your chatbot is currently unavailable",
+          heading: "Your chatbot is unavailable",
           body: `<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Your subscription is inactive and your chatbot is currently unavailable to visitors.</p>
-<p class="email-body-text" style="${BODY_TEXT} margin: 0;">Please check your <a href="https://replymaven.com/app/billing" class="email-link" style="${styles.link}">billing settings</a> to restore service.</p>`,
+<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">Check your billing settings to restore service.</p>
+<a href="https://replymaven.com/app/account/billing" class="email-button" style="${styles.button}">View billing</a>`,
         },
       };
 
@@ -448,7 +357,8 @@ export class EmailService {
         to,
         subject: msg.subject,
         html: wrapEmail(`
-<p class="email-heading" style="${styles.heading} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
+<p class="email-heading" style="${styles.heading} margin: 0 0 16px;">${msg.heading}</p>
+<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
 ${msg.body}
         `),
       });
@@ -486,7 +396,6 @@ ${msg.body}
       messageId,
       messageContent,
       imageUrls = [],
-      accentColor,
       inReplyToMessageId,
       inReplyToRfcId,
       referencesRfcIds = [],
@@ -502,23 +411,9 @@ ${msg.body}
       (messageContent === "Sent an image" || messageContent === "Sent images");
     const bodyText = isPlaceholderOnly ? "" : messageContent;
 
-    const textLines = bodyText
-      ? escapeHtml(bodyText)
-          .split("\n")
-          .map((line) =>
-            line.trim() === ""
-              ? "<br/>"
-              : `<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 12px;">${line}</p>`,
-          )
-          .join("")
-      : "";
-    const imagesHtml = imageUrls
-      .map((url) => {
-        const abs = url.startsWith("/") ? `${APP_ORIGIN}${url}` : url;
-        return `<img src="${escapeHtml(abs)}" alt="Attachment" style="max-width: 100%; margin: 8px 0 0;" />`;
-      })
-      .join("");
-    const lines = textLines + imagesHtml;
+    const imageLinks = imageUrls.map((url) =>
+      url.startsWith("/") ? `${APP_ORIGIN}${url}` : url
+    );
 
     const headers: Record<string, string> = {
       "X-Conversation-Id": conversationId,
@@ -550,14 +445,11 @@ ${msg.body}
       to,
       subject: replySubject(subject),
       headers,
-      html: wrapEmail(
-        `
-${lines}
-<p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 32px 0 0;">ReplyMaven ref: ${escapeHtml(conversationId)}</p>
-      `,
-        accentColor,
-        { brand: false },
-      ),
+      text: [
+        bodyText,
+        ...imageLinks.map((url) => `Image: ${url}`),
+        `ReplyMaven ref: ${conversationId}`,
+      ].filter(Boolean).join("\n\n"),
     });
   }
 
@@ -581,15 +473,7 @@ ${lines}
       visitorDisplayName,
       messageContent,
       dashboardUrl,
-      accentColor,
     } = details;
-
-    const lines = escapeHtml(messageContent)
-      .split("\n")
-      .map((line) => (line.trim() === "" ? "<br/>" : `<p style="margin: 0 0 4px;">${line}</p>`))
-      .join("");
-
-    const styles = buildAccentStyles(accentColor);
 
     await this.send({
       from: `${projectName} <${projectSlug}@${EMAIL_DOMAIN}>`,
@@ -603,17 +487,7 @@ ${lines}
         "Auto-Submitted": "auto-generated",
         "Precedence": "bulk",
       },
-      html: wrapEmail(
-        `
-<p class="email-heading" style="${styles.heading} margin: 0 0 20px;">${escapeHtml(visitorDisplayName)} replied</p>
-<div class="email-card" style="${CARD_STYLE} margin: 0 0 24px;">
-  <div style="font-size: 15px; ${BODY_TEXT} line-height: 1.6;">${lines}</div>
-</div>
-<a href="${dashboardUrl}" class="email-button" style="${styles.button}">View Conversation</a>
-<p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 24px 0 0;">Reply to this email to respond &mdash; your reply will be sent to ${escapeHtml(visitorDisplayName)} and added to the conversation.</p>
-      `,
-        accentColor,
-      ),
+      text: `${visitorDisplayName} replied\n\n${messageContent}\n\nView conversation: ${dashboardUrl}\n\nReply to this email to respond. Your reply will be sent to ${visitorDisplayName} and added to the conversation.\n\nReplyMaven ref: ${conversationId}`,
     });
   }
 
@@ -627,7 +501,8 @@ ${lines}
         to,
         subject: "Your chatbot is back online",
         html: wrapEmail(`
-<p class="email-heading" style="${styles.heading} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
+<p class="email-heading" style="${styles.heading} margin: 0 0 16px;">Your chatbot is back online</p>
+<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0;">Your subscription is active again and your chatbot is back online. Visitors can use it as normal.</p>
         `),
       });
