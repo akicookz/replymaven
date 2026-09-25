@@ -298,6 +298,7 @@ import {
   testToolSchema,
   createCheckoutSchema,
   inviteTeamMemberSchema,
+  bulkInviteTeamMembersSchema,
   updateTeamMemberRoleSchema,
   switchTeamSchema,
   updateProfileSchema,
@@ -612,8 +613,8 @@ async function fetchWebsiteMarkdownWithBrowserApi(
 }
 
 /**
- * Enforces per-project access for team members scoped to specific projects.
- * Owners and admins (and members with account-wide access) pass through; a
+ * Enforces project scope for scoped team members.
+ * Account owners and memberships with account-wide access pass through; a
  * scoped member hitting a project they weren't granted gets a 404, matching
  * the "not found" response used elsewhere for cross-account access. Mounted on
  * `/api/projects/:id` and `/api/projects/:id/*`; the per-route handlers still
@@ -629,11 +630,10 @@ const projectAccessMiddleware: MiddlewareHandler<HonoAppContext> = async (
   const projectId = c.req.param("id");
   if (!projectId) return next();
 
-  // Owners, admins, and members with account-wide access pass through.
-  const role = c.get("activeRole");
-  if (role !== "member" || c.get("activeAccessAllProjects")) return next();
+  // Owners and memberships with account-wide access pass through.
+  if (c.get("activeAccessAllProjects")) return next();
 
-  // Scoped member: allow only their granted projects (resolved from cache).
+  // Scoped team member: allow only granted projects (resolved from cache).
   const allowed = c.get("activeProjectIds");
   if (allowed && allowed.includes(projectId)) return next();
   return c.json({ error: "Not found" }, 404);
@@ -649,7 +649,9 @@ async function canAccessCustomerProject(
   const project = await new ProjectService(c.get("db")).getProjectById(
     projectId,
   );
-  return project?.userId === effectiveUserId;
+  if (!project || project.userId !== effectiveUserId) return false;
+  if (c.get("activeAccessAllProjects")) return true;
+  return (c.get("activeProjectIds") ?? []).includes(projectId);
 }
 
 function broadcastCustomerChanges(
@@ -2523,7 +2525,6 @@ const app = new Hono<HonoAppContext>()
           hasAccess = Boolean(
             membership &&
             (
-              membership.role === "admin" ||
               membership.accessAllProjects ||
               await teamService.memberHasProjectAccess(
                 membership.id,
@@ -3240,9 +3241,9 @@ const app = new Hono<HonoAppContext>()
   .post("/api/onboarding", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
-    if (c.get("activeRole") === "member") {
+    if (c.get("activeRole") !== "owner") {
       return c.json(
-        { error: "Only owners and admins can create projects" },
+        { error: "Only the account owner can create projects" },
         403,
       );
     }
@@ -3313,7 +3314,7 @@ const app = new Hono<HonoAppContext>()
     const project = await projectService.getProjectById(
       c.req.param("projectId"),
     );
-    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+    if (!project || !(await canAccessCustomerProject(c, project.id))) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -3433,7 +3434,7 @@ const app = new Hono<HonoAppContext>()
     const project = await projectService.getProjectById(
       c.req.param("projectId"),
     );
-    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+    if (!project || !(await canAccessCustomerProject(c, project.id))) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -3464,7 +3465,7 @@ const app = new Hono<HonoAppContext>()
     const project = await projectService.getProjectById(
       c.req.param("projectId"),
     );
-    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+    if (!project || !(await canAccessCustomerProject(c, project.id))) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -3485,7 +3486,7 @@ const app = new Hono<HonoAppContext>()
     const project = await projectService.getProjectById(
       c.req.param("projectId"),
     );
-    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+    if (!project || !(await canAccessCustomerProject(c, project.id))) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -3512,7 +3513,7 @@ const app = new Hono<HonoAppContext>()
     const project = await projectService.getProjectById(
       c.req.param("projectId"),
     );
-    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+    if (!project || !(await canAccessCustomerProject(c, project.id))) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -3529,6 +3530,9 @@ const app = new Hono<HonoAppContext>()
   .post("/api/billing/checkout", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
+    if (c.get("activeRole") !== "owner") {
+      return c.json({ error: "Only the account owner can change billing" }, 403);
+    }
 
     const body = await c.req.json();
     const parsed = validate(createCheckoutSchema, body);
@@ -3558,6 +3562,9 @@ const app = new Hono<HonoAppContext>()
   .post("/api/billing/portal", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
+    if (c.get("activeRole") !== "owner") {
+      return c.json({ error: "Only the account owner can change billing" }, 403);
+    }
 
     const subscription = c.get("subscription");
     if (!subscription) {
@@ -4007,7 +4014,7 @@ const app = new Hono<HonoAppContext>()
     // Everyone can see an accurate project count, but only owners and admins
     // receive the project ids needed to manage another member's access.
     const activeRole = c.get("activeRole");
-    const isPrivileged = activeRole === "owner" || activeRole === "admin";
+    const isPrivileged = activeRole === "owner";
     const projectMap = await teamService.getMemberProjectMap(effectiveUserId);
     const membersWithProjects = addProjectAccessToMembers(
       members,
@@ -4022,12 +4029,12 @@ const app = new Hono<HonoAppContext>()
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-    // Only owner and admin of the active team can invite
+    // Only the team owner can manage invitations.
     const db = c.get("db");
     const teamService = new TeamService(db);
-    if (c.get("activeRole") === "member") {
+    if (c.get("activeRole") !== "owner") {
       return c.json(
-        { error: "Only owners and admins can invite members" },
+        { error: "Only the account owner can invite members" },
         403,
       );
     }
@@ -4055,16 +4062,20 @@ const app = new Hono<HonoAppContext>()
       );
     }
 
-    // Resolve project-access scope. Admins always get account-wide access;
-    // members may be limited to a set of projects owned by this account.
-    const accessAllProjects =
-      parsed.data.role === "admin" ? true : parsed.data.accessAllProjects ?? true;
+    // The selected project scope applies to both roles.
+    const accessAllProjects = parsed.data.accessAllProjects ?? true;
     const scopedProjectIds = accessAllProjects
       ? []
       : await teamService.filterOwnedProjectIds(
           effectiveUserId,
           parsed.data.projectIds ?? [],
         );
+    if (
+      !accessAllProjects &&
+      scopedProjectIds.length !== new Set(parsed.data.projectIds ?? []).size
+    ) {
+      return c.json({ error: "One or more projects are not available" }, 400);
+    }
 
     try {
       const member = await teamService.inviteMember(
@@ -4109,6 +4120,69 @@ const app = new Hono<HonoAppContext>()
     }
   })
 
+  .post("/api/team/invite/bulk", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    if (c.get("activeRole") !== "owner") {
+      return c.json({ error: "Only the account owner can invite members" }, 403);
+    }
+
+    const parsed = validate(bulkInviteTeamMembersSchema, await c.req.json());
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+    const db = c.get("db");
+    const teamService = new TeamService(db);
+    const ownerId = c.get("effectiveUserId") ?? user.id;
+    const subscription = c.get("subscription");
+    if (!subscription) return c.json({ error: "No active subscription" }, 403);
+    const limits = BillingService.getPlanLimits(subscription.plan as Plan);
+    const accessAllProjects = parsed.data.accessAllProjects ?? true;
+    const requestedProjectIds = accessAllProjects ? [] : parsed.data.projectIds ?? [];
+    const projectIds = await teamService.filterOwnedProjectIds(
+      ownerId,
+      requestedProjectIds,
+    );
+    if (projectIds.length !== new Set(requestedProjectIds).size) {
+      return c.json({ error: "One or more projects are not available" }, 400);
+    }
+
+    try {
+      const members = await teamService.inviteMembers(
+        ownerId,
+        parsed.data.invites,
+        accessAllProjects,
+        projectIds,
+        limits.maxSeats,
+      );
+      const emailService = new EmailService(c.env.RESEND_API_KEY);
+      const results = await Promise.all(members.map(async (member) => {
+        try {
+          await emailService.sendTeamInviteEmail(
+            member.email,
+            user.name ?? "A team member",
+            user.email,
+            member.role,
+            `https://replymaven.com/app/team/accept/${member.id}`,
+          );
+          return { id: member.id, email: member.email, role: member.role, emailSent: true };
+        } catch (error) {
+          console.error("Failed to send team invite email:", error);
+          return {
+            id: member.id,
+            email: member.email,
+            role: member.role,
+            emailSent: false,
+            emailError: error instanceof Error ? error.message : "Failed to send invitation email",
+          };
+        }
+      }));
+      return c.json({ invites: results });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to invite members";
+      const status = message.startsWith("Seat limit reached") ? 403 : 400;
+      return c.json({ error: message, ...(status === 403 ? { code: "seat_limit_reached" } : {}) }, status);
+    }
+  })
+
   // ─── Accept Team Invite ─────────────────────────────────────────────────────
   .post("/api/team/accept/:inviteId", async (c) => {
     const user = c.get("user");
@@ -4135,7 +4209,7 @@ const app = new Hono<HonoAppContext>()
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-    // Only the owner of the active team can change roles
+    // Only the owner of the active team can change roles or project access.
     const db = c.get("db");
     const teamService = new TeamService(db);
     if (c.get("activeRole") !== "owner") {
@@ -4147,34 +4221,39 @@ const app = new Hono<HonoAppContext>()
     const parsed = validate(updateTeamMemberRoleSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
+    const accessAllProjects = parsed.data.accessAllProjects;
+    const requestedProjectIds = accessAllProjects === true
+      ? []
+      : parsed.data.projectIds ?? [];
+    let scopedProjectIds: string[] = [];
+    if (accessAllProjects === false || parsed.data.projectIds !== undefined) {
+      scopedProjectIds = await teamService.filterOwnedProjectIds(
+        effectiveUserId,
+        requestedProjectIds,
+      );
+    }
+    if (
+      accessAllProjects !== undefined ||
+      parsed.data.projectIds !== undefined
+    ) {
+      if (scopedProjectIds.length !== new Set(requestedProjectIds).size) {
+        return c.json({ error: "One or more projects are not available" }, 400);
+      }
+    }
+
     try {
       const memberId = c.req.param("memberId");
+      let nextAccessAllProjects = accessAllProjects;
+      if (nextAccessAllProjects === undefined && parsed.data.projectIds !== undefined) {
+        nextAccessAllProjects = false;
+      }
       const member = await teamService.updateMemberRole(
         effectiveUserId,
         memberId,
         parsed.data.role,
+        nextAccessAllProjects,
+        scopedProjectIds,
       );
-
-      // Update project-access scope when provided (admins stay account-wide).
-      if (
-        parsed.data.role !== "admin" &&
-        (parsed.data.accessAllProjects !== undefined ||
-          parsed.data.projectIds !== undefined)
-      ) {
-        const accessAllProjects = parsed.data.accessAllProjects ?? false;
-        const scopedProjectIds = accessAllProjects
-          ? []
-          : await teamService.filterOwnedProjectIds(
-              effectiveUserId,
-              parsed.data.projectIds ?? [],
-            );
-        await teamService.setMemberProjectAccess(
-          effectiveUserId,
-          memberId,
-          accessAllProjects,
-          scopedProjectIds,
-        );
-      }
 
       const updated = await teamService.getMemberById(memberId);
       // Role/access changed — drop the member's cached team context.
@@ -4194,12 +4273,12 @@ const app = new Hono<HonoAppContext>()
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-    // Owner and admin of the active team can remove members
+    // Only the owner can change team membership.
     const db = c.get("db");
     const teamService = new TeamService(db);
-    if (c.get("activeRole") === "member") {
+    if (c.get("activeRole") !== "owner") {
       return c.json(
-        { error: "Only owners and admins can remove members" },
+        { error: "Only the account owner can remove members" },
         403,
       );
     }
@@ -4305,7 +4384,7 @@ const app = new Hono<HonoAppContext>()
     // Scoped team members may only read stats for a specific project they can
     // access — never the account-wide aggregate (which would span projects they
     // weren't granted).
-    if (c.get("activeRole") === "member" && !c.get("activeAccessAllProjects")) {
+    if (!c.get("activeAccessAllProjects")) {
       const allowed = c.get("activeProjectIds") ?? [];
       if (!projectId || !allowed.includes(projectId)) {
         return c.json({ error: "Not found" }, 404);
@@ -4493,7 +4572,7 @@ const app = new Hono<HonoAppContext>()
     const allProjects = await service.getProjectsByUserId(effectiveUserId);
 
     // A team member scoped to specific projects only sees those.
-    if (c.get("activeRole") === "member" && !c.get("activeAccessAllProjects")) {
+    if (!c.get("activeAccessAllProjects")) {
       const allowed = new Set(c.get("activeProjectIds") ?? []);
       return c.json(allProjects.filter((p) => allowed.has(p.id)));
     }
@@ -4516,6 +4595,9 @@ const app = new Hono<HonoAppContext>()
   .post("/api/projects", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
+    if (c.get("activeRole") !== "owner") {
+      return c.json({ error: "Only the account owner can create projects" }, 403);
+    }
 
     // Check project limit
     const effectiveUserId = c.get("effectiveUserId") ?? user.id;
@@ -4572,6 +4654,9 @@ const app = new Hono<HonoAppContext>()
   .delete("/api/projects/:id", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
+    if (c.get("activeRole") !== "owner") {
+      return c.json({ error: "Only the account owner can delete projects" }, 403);
+    }
 
     const effectiveUserId = c.get("effectiveUserId") ?? user.id;
     const db = c.get("db");

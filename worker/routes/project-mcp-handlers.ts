@@ -98,12 +98,10 @@ function errorResponse(
 
 async function authorizeProject(
   options: AuthorizedProjectOptions,
-  mutation: boolean,
 ): Promise<Response | null> {
   const { actor } = options;
   if (!actor) return errorResponse("unauthorized", 401);
   if (
-    actor.role === "member" &&
     !actor.accessAllProjects &&
     !actor.projectIds?.includes(options.projectId)
   ) {
@@ -112,9 +110,6 @@ async function authorizeProject(
   const project = await options.projectService.getProjectById(options.projectId);
   if (!project || project.userId !== actor.effectiveUserId) {
     return errorResponse("not_found", 404);
-  }
-  if (mutation && actor.role === "member") {
-    return errorResponse("forbidden", 403);
   }
   return null;
 }
@@ -187,14 +182,14 @@ async function parseJson(request: Request): Promise<unknown | null> {
 export async function handleGetProjectMcp(
   options: ProjectMcpOptions,
 ): Promise<Response> {
-  const denied = await authorizeProject(options, false);
+  const denied = await authorizeProject(options);
   if (denied) return denied;
 
   try {
     const parent = await options.getParent();
     const connections = await parent.listMcpConnections();
     return Response.json({
-      canManage: options.actor?.role !== "member",
+      canManage: true,
       presets: listMcpPresets(),
       connections: connections.map(safeConnection),
     });
@@ -206,7 +201,7 @@ export async function handleGetProjectMcp(
 export async function handleConnectProjectMcp(
   options: ConnectProjectMcpOptions,
 ): Promise<Response> {
-  const denied = await authorizeProject(options, true);
+  const denied = await authorizeProject(options);
   if (denied) return denied;
 
   const parsed = createProjectMcpConnectionSchema.safeParse(
@@ -263,7 +258,7 @@ export async function handleConnectProjectMcp(
 export async function handleRefreshProjectMcp(
   options: ConnectionProjectMcpOptions,
 ): Promise<Response> {
-  const denied = await authorizeProject(options, true);
+  const denied = await authorizeProject(options);
   if (denied) return denied;
   if (!validConnectionId(options.connectionId)) {
     return errorResponse("invalid_connection", 400);
@@ -283,7 +278,7 @@ export async function handleRefreshProjectMcp(
 export async function handleReconnectProjectMcp(
   options: ConnectionProjectMcpOptions,
 ): Promise<Response> {
-  const denied = await authorizeProject(options, true);
+  const denied = await authorizeProject(options);
   if (denied) return denied;
   if (!validConnectionId(options.connectionId)) {
     return errorResponse("invalid_connection", 400);
@@ -306,7 +301,7 @@ export async function handleReconnectProjectMcp(
 export async function handleUpdateProjectMcpPolicy(
   options: UpdateProjectMcpPolicyOptions,
 ): Promise<Response> {
-  const denied = await authorizeProject(options, true);
+  const denied = await authorizeProject(options);
   if (denied) return denied;
   if (!validConnectionId(options.connectionId)) {
     return errorResponse("invalid_connection", 400);
@@ -333,7 +328,7 @@ export async function handleUpdateProjectMcpPolicy(
 export async function handleDisconnectProjectMcp(
   options: ConnectionProjectMcpOptions,
 ): Promise<Response> {
-  const denied = await authorizeProject(options, true);
+  const denied = await authorizeProject(options);
   if (denied) return denied;
   if (!validConnectionId(options.connectionId)) {
     return errorResponse("invalid_connection", 400);
@@ -353,8 +348,11 @@ export async function handleDisconnectProjectMcp(
 export async function handleGrantProjectToolAlwaysAllow(
   options: GrantProjectToolAlwaysAllowOptions,
 ): Promise<Response> {
-  const denied = await authorizeProject(options, true);
+  const denied = await authorizeProject(options);
   if (denied) return denied;
+  if (options.actor?.role === "member") {
+    return errorResponse("forbidden", 403);
+  }
   if (
     !options.conversationId || options.conversationId.length > 200 ||
     !options.approvalId || options.approvalId.length > 200
@@ -385,8 +383,11 @@ export async function handleGrantProjectToolAlwaysAllow(
 export async function handleRevokeProjectToolAlwaysAllow(
   options: RevokeProjectToolAlwaysAllowOptions,
 ): Promise<Response> {
-  const denied = await authorizeProject(options, true);
+  const denied = await authorizeProject(options);
   if (denied) return denied;
+  if (options.actor?.role === "member") {
+    return errorResponse("forbidden", 403);
+  }
   const parsed = revokeSidechatAlwaysAllowSchema.safeParse(
     await parseJson(options.request),
   );

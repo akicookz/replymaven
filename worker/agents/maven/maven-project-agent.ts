@@ -2812,7 +2812,6 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     );
     if (!membership) return false;
     return (
-      membership.role === "admin" ||
       membership.accessAllProjects ||
       await teamService.memberHasProjectAccess(membership.id, this.name)
     );

@@ -7,6 +7,8 @@ export interface ConversationRuntimeAdminActor {
   userId: string;
   effectiveUserId: string;
   role: "owner" | "admin" | "member";
+  accessAllProjects: boolean;
+  projectIds: string[] | null;
 }
 
 interface ConversationRuntimeProjectService {
@@ -49,6 +51,12 @@ async function authorize(
       { error: "Only owners and admins can manage conversation runtime" },
       { status: 403 },
     );
+  }
+  if (
+    !options.actor.accessAllProjects &&
+    !options.actor.projectIds?.includes(options.projectId)
+  ) {
+    return Response.json({ error: "Not found" }, { status: 404 });
   }
   const project = await options.projectService.getProjectById(
     options.projectId,
@@ -118,4 +126,3 @@ export async function handleConversationRuntimeVerify(
     await options.runtimeService.verifyProject(options.projectId, batch),
   );
 }
-

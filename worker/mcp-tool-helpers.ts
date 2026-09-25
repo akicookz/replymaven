@@ -58,7 +58,7 @@ export async function getAccessibleProject(
     throw new Error("Project not found");
   }
 
-  if (context.activeRole === "member" && !context.activeAccessAllProjects) {
+  if (!context.activeAccessAllProjects) {
     const allowed = context.activeProjectIds ?? [];
     if (!allowed.includes(project.id)) {
       throw new Error("Project not found");

@@ -209,7 +209,7 @@ export class TeamService {
 
   // ─── Project Access ─────────────────────────────────────────────────────────
 
-  /** Project ids a scoped member has been granted access to. */
+  /** Project ids a scoped team member has been granted access to. */
   async getMemberProjectIds(teamMemberId: string): Promise<string[]> {
     const rows = await this.db
       .select({ projectId: teamMemberProjects.projectId })
@@ -218,7 +218,7 @@ export class TeamService {
     return rows.map((r) => r.projectId);
   }
 
-  /** Whether a scoped member has explicit access to a single project. */
+  /** Whether a scoped team member has explicit access to one project. */
   async memberHasProjectAccess(
     teamMemberId: string,
     projectId: string,
@@ -318,7 +318,7 @@ export class TeamService {
   /**
    * Update a member's project-access scope. `projectIds` must already be
    * filtered to projects owned by `ownerId`. When `accessAllProjects` is true
-   * (or the member is an admin) the per-project rows are cleared. The flag and
+   * the per-project rows are cleared. The flag and
    * the join rows are committed atomically so they can't drift apart.
    */
   async setMemberProjectAccess(
@@ -332,7 +332,7 @@ export class TeamService {
       throw new Error("Member not found");
     }
 
-    const allAccess = accessAllProjects || member.role === "admin";
+    const allAccess = accessAllProjects;
 
     await this.runBatch([
       this.db
@@ -352,8 +352,9 @@ export class TeamService {
     accessAllProjects = true,
     projectIds: string[] = [],
   ): Promise<TeamMemberRow> {
+    const normalizedEmail = email.trim().toLowerCase();
     // Check if already invited/accepted
-    const existing = await this.getInviteByEmail(ownerId, email);
+    const existing = await this.getInviteByEmail(ownerId, normalizedEmail);
     if (existing && existing.status !== "revoked") {
       throw new Error("This email has already been invited");
     }
@@ -364,12 +365,11 @@ export class TeamService {
       .from(users)
       .where(eq(users.id, ownerId))
       .limit(1);
-    if (ownerRows[0]?.email === email) {
+    if (ownerRows[0]?.email.toLowerCase() === normalizedEmail) {
       throw new Error("You cannot invite yourself");
     }
 
-    // Admins always have account-wide access.
-    const allAccess = accessAllProjects || role === "admin";
+    const allAccess = accessAllProjects;
     const scopedProjectIds = allAccess ? [] : projectIds;
 
     const id = existing?.status === "revoked" ? existing.id : crypto.randomUUID();
@@ -386,12 +386,13 @@ export class TeamService {
               userId: null,
               acceptedAt: null,
               accessAllProjects: allAccess,
+              email: normalizedEmail,
             })
             .where(eq(teamMembers.id, existing.id))
         : this.db.insert(teamMembers).values({
             id,
             ownerId,
-            email,
+            email: normalizedEmail,
             role,
             status: "pending",
             accessAllProjects: allAccess,
@@ -403,6 +404,88 @@ export class TeamService {
     ]);
 
     return (await this.getMemberById(id))!;
+  }
+
+  /** Create a group of invitations and project grants in one D1 batch. */
+  async inviteMembers(
+    ownerId: string,
+    inputs: Array<{ email: string; role: "admin" | "member" }>,
+    accessAllProjects: boolean,
+    projectIds: string[],
+    maxSeats: number,
+  ): Promise<TeamMemberRow[]> {
+    const normalized = inputs.map((input) => ({
+      email: input.email.trim().toLowerCase(),
+      role: input.role,
+    }));
+    const uniqueEmails = new Set(normalized.map((input) => input.email));
+    if (uniqueEmails.size !== normalized.length) {
+      throw new Error("Each email can only appear once");
+    }
+
+    const ownerRows = await this.db
+      .select({ email: users.email })
+      .from(users)
+      .where(eq(users.id, ownerId))
+      .limit(1);
+    if (
+      ownerRows[0] &&
+      normalized.some((input) => input.email === ownerRows[0].email.toLowerCase())
+    ) {
+      throw new Error("You cannot invite yourself");
+    }
+
+    const existingRows = await Promise.all(
+      normalized.map((input) => this.getInviteByEmail(ownerId, input.email)),
+    );
+    if (existingRows.some((row) => row && row.status !== "revoked")) {
+      throw new Error("An email has already been invited");
+    }
+
+    const seatCount = await this.getSeatCount(ownerId);
+    if (seatCount + normalized.length > maxSeats) {
+      throw new Error("Seat limit reached. Upgrade your plan for more seats.");
+    }
+
+    const ids = normalized.map((_, index) =>
+      existingRows[index]?.status === "revoked"
+        ? existingRows[index]!.id
+        : crypto.randomUUID(),
+    );
+    const statements: unknown[] = [];
+    for (const [index, input] of normalized.entries()) {
+      const existing = existingRows[index];
+      const id = ids[index];
+      const memberStatement = existing
+        ? this.db
+            .update(teamMembers)
+            .set({
+              role: input.role,
+              status: "pending",
+              userId: null,
+              acceptedAt: null,
+              accessAllProjects,
+              email: input.email,
+            })
+            .where(eq(teamMembers.id, existing.id))
+        : this.db.insert(teamMembers).values({
+            id,
+            ownerId,
+            email: input.email,
+            role: input.role,
+            status: "pending",
+            accessAllProjects,
+          });
+      statements.push(
+        memberStatement,
+        ...this.memberProjectStatements(
+          id,
+          accessAllProjects ? [] : projectIds,
+        ),
+      );
+    }
+    await this.runBatch(statements);
+    return Promise.all(ids.map(async (id) => (await this.getMemberById(id))!));
   }
 
   async acceptInvite(inviteId: string, userId: string, userEmail: string): Promise<void> {
@@ -446,29 +529,30 @@ export class TeamService {
     ownerId: string,
     memberId: string,
     role: "admin" | "member",
+    accessAllProjects?: boolean,
+    projectIds: string[] = [],
   ): Promise<TeamMemberRow> {
     const member = await this.getMemberById(memberId);
     if (!member || member.ownerId !== ownerId) {
       throw new Error("Member not found");
     }
 
-    // Promoting to admin grants account-wide access and clears any scoping.
-    // Demoting admin -> member only changes the role: the member keeps whatever
-    // access they had (admins are accessAllProjects, so a demoted admin stays
-    // all-projects until the owner explicitly scopes them via the access UI).
-    if (role === "admin") {
-      await this.runBatch([
-        this.db
-          .update(teamMembers)
-          .set({ role, accessAllProjects: true })
-          .where(eq(teamMembers.id, memberId)),
-        ...this.memberProjectStatements(memberId, []),
-      ]);
-    } else {
+    if (accessAllProjects === undefined) {
       await this.db
         .update(teamMembers)
         .set({ role })
         .where(eq(teamMembers.id, memberId));
+    } else {
+      await this.runBatch([
+        this.db
+          .update(teamMembers)
+          .set({ role, accessAllProjects })
+          .where(eq(teamMembers.id, memberId)),
+        ...this.memberProjectStatements(
+          memberId,
+          accessAllProjects ? [] : projectIds,
+        ),
+      ]);
     }
 
     return (await this.getMemberById(memberId))!;

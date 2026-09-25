@@ -106,7 +106,6 @@ async function authorizeProject(
   const { actor } = options;
   if (!actor) return errorResponse("unauthorized", 401);
   if (
-    actor.role === "member" &&
     !actor.accessAllProjects &&
     !actor.projectIds?.includes(options.projectId)
   ) {

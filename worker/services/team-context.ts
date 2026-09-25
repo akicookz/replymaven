@@ -4,7 +4,7 @@ import { ProjectService } from "./project-service";
 
 /**
  * The resolved "active team" context for a request: which team the user is
- * acting in, their role there, and (for scoped members) which projects they may
+ * acting in, their role there, and (for scoped memberships) which projects they may
  * access. Computed from the DB and cached in KV for 15 minutes; invalidated
  * eagerly whenever the user's standing in a team changes (accept / kick / role /
  * access / switch) so changes take effect well within the TTL.
@@ -14,9 +14,9 @@ export interface TeamContext {
   effectiveUserId: string;
   /** The user's role in the active team. */
   activeRole: "owner" | "admin" | "member";
-  /** True for owners/admins and members with account-wide access. */
+  /** True when the active membership has account-wide project access. */
   accessAllProjects: boolean;
-  /** Granted project ids for a scoped member; null when accessAllProjects. */
+  /** Granted project ids for any scoped membership; null when accessAllProjects. */
   projectIds: string[] | null;
 }
 
@@ -37,7 +37,7 @@ async function membershipContext(
   ownerId: string,
   membership: { id: string; role: "admin" | "member"; accessAllProjects: boolean },
 ): Promise<TeamContext> {
-  if (membership.role === "admin" || membership.accessAllProjects) {
+  if (membership.accessAllProjects) {
     return {
       effectiveUserId: ownerId,
       activeRole: membership.role,
@@ -48,7 +48,7 @@ async function membershipContext(
   const projectIds = await teamService.getMemberProjectIds(membership.id);
   return {
     effectiveUserId: ownerId,
-    activeRole: "member",
+    activeRole: membership.role,
     accessAllProjects: false,
     projectIds,
   };

@@ -156,7 +156,6 @@ export async function handleCreateDashboardPublicAgentSession(
   const actor = options.actor;
   if (!actor) return errorResponse("unauthorized", 401);
   if (
-    actor.role === "member" &&
     !actor.accessAllProjects &&
     !actor.projectIds?.includes(options.projectId)
   ) return errorResponse("not_found", 404);

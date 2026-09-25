@@ -940,9 +940,19 @@ export const verifyEmailChangeSchema = z.object({
 export const inviteTeamMemberSchema = z.object({
   email: z.string().email("Must be a valid email address"),
   role: z.enum(["admin", "member"]),
-  // Project-access scope (members only; ignored for admins). Omitted = all projects.
+  // Project-access scope applies to both roles. Omitted = all projects.
   accessAllProjects: z.boolean().optional(),
   projectIds: z.array(z.string()).max(500).optional(),
+});
+
+export const bulkInviteTeamMembersSchema = z.object({
+  invites: z.array(z.object({
+    email: z.string().email("Must be a valid email address"),
+    role: z.enum(["admin", "member"]),
+  })).min(1).max(100),
+  // Omitted scope keeps compatibility with older callers and means all projects.
+  accessAllProjects: z.boolean().optional(),
+  projectIds: z.array(z.string().min(1)).max(500).optional(),
 });
 
 export const updateTeamMemberRoleSchema = z.object({

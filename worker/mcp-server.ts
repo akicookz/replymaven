@@ -874,7 +874,7 @@ async function getVisibleProjects(
     context.effectiveUserId,
   );
 
-  if (context.activeRole !== "member" || context.activeAccessAllProjects) {
+  if (context.activeAccessAllProjects) {
     return projects;
   }
 

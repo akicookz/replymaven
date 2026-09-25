@@ -815,10 +815,9 @@ export const teamMembers = sqliteTable(
     status: text("status", { enum: ["pending", "accepted", "revoked"] })
       .notNull()
       .default("pending"),
-    // When true the member can access every project under the owner. When false
-    // access is limited to the projects listed in team_member_projects. Admins
-    // always have full access regardless of this flag. Defaults true so existing
-    // members keep the account-wide access they had before per-project scoping.
+    // When true the team member can access every project under the owner. When
+    // false access is limited to team_member_projects. Defaults true so existing
+    // memberships keep the account-wide access they had before project scoping.
     accessAllProjects: integer("access_all_projects", { mode: "boolean" })
       .notNull()
       .default(true),

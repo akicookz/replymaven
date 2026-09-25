@@ -91,10 +91,10 @@ export async function getAssignableUsers(
       ),
     );
 
-  // Members scoped to specific projects are only assignable on the projects
+  // Team members scoped to specific projects are only assignable on projects
   // they were granted.
   const scopedMemberIds = memberRows
-    .filter((m) => m.role !== "admin" && !m.accessAllProjects)
+    .filter((m) => !m.accessAllProjects)
     .map((m) => m.id);
   let grantedScopedIds = new Set<string>();
   if (scopedMemberIds.length > 0) {
@@ -111,7 +111,7 @@ export async function getAssignableUsers(
   }
   const accessibleMembers = memberRows.filter(
     (m) =>
-      m.role === "admin" || m.accessAllProjects || grantedScopedIds.has(m.id),
+      m.accessAllProjects || grantedScopedIds.has(m.id),
   );
 
   const memberUserIds = accessibleMembers

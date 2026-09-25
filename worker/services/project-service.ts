@@ -63,7 +63,6 @@ export function selectProjectEscalationRecipientEmails(input: {
   add(input.ownerEmail);
   for (const member of input.members) {
     const hasAccess =
-      member.role === "admin" ||
       member.accessAllProjects ||
       (input.projectMap[member.id] ?? []).includes(input.projectId);
     if (!hasAccess || !member.userId) continue;
