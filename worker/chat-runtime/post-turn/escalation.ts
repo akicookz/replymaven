@@ -14,6 +14,7 @@ interface EscalationEmailSender {
     ownerEmail: string;
     projectName: string;
     projectSlug: string;
+    conversationId: string;
     visitorName?: string | null;
     visitorEmail?: string | null;
     visitorId?: string | null;
@@ -333,6 +334,7 @@ export async function createEscalation(params: {
                     projectName:
                       params.settings?.companyName ?? params.project.name,
                     projectSlug: params.project.slug,
+                    conversationId: params.conversation.id,
                     visitorName: params.conversation.visitorName,
                     visitorEmail: params.conversation.visitorEmail,
                     visitorId: params.conversation.visitorId,

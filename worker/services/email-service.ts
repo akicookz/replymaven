@@ -235,6 +235,7 @@ export class EmailService {
     ownerEmail: string;
     projectName: string;
     projectSlug: string;
+    conversationId: string;
     visitorName?: string | null;
     visitorEmail?: string | null;
     visitorId?: string | null;
@@ -253,7 +254,7 @@ export class EmailService {
       // notification from an inbox would go nowhere.
       await this.send({
         from: `${details.projectName} <${details.projectSlug}@${EMAIL_DOMAIN}>`,
-        replyTo: `${details.projectSlug}@${EMAIL_DOMAIN}`,
+        replyTo: `${details.projectSlug}+c${details.conversationId}@${EMAIL_DOMAIN}`,
         to: details.ownerEmail,
         subject: `Needs human review - ${visitor}`,
         text: `Conversation needs your review\n\n${details.summary}\n\nOpen conversation: ${details.conversationUrl}\n\nReply to this email to answer. Your reply is added to the conversation and sent to the visitor when we have their address.`,
@@ -447,7 +448,6 @@ ${msg.body}
       text: [
         bodyText,
         ...imageLinks.map((url) => `Image: ${url}`),
-        `ReplyMaven ref: ${conversationId}`,
       ].filter(Boolean).join("\n\n"),
     });
   }
@@ -476,7 +476,7 @@ ${msg.body}
 
     await this.send({
       from: `${projectName} <${projectSlug}@${EMAIL_DOMAIN}>`,
-      replyTo: `${projectSlug}@${EMAIL_DOMAIN}`,
+      replyTo: `${projectSlug}+c${conversationId}@${EMAIL_DOMAIN}`,
       to,
       subject: `Re: ${visitorDisplayName} replied - ${projectName}`,
       headers: {
@@ -486,7 +486,7 @@ ${msg.body}
         "Auto-Submitted": "auto-generated",
         "Precedence": "bulk",
       },
-      text: `${visitorDisplayName} replied\n\n${messageContent}\n\nView conversation: ${dashboardUrl}\n\nReply to this email to respond. Your reply will be sent to ${visitorDisplayName} and added to the conversation.\n\nReplyMaven ref: ${conversationId}`,
+      text: `${visitorDisplayName} replied\n\n${messageContent}\n\nView conversation: ${dashboardUrl}\n\nReply to this email to respond. Your reply will be sent to ${visitorDisplayName} and added to the conversation.`,
     });
   }
 
