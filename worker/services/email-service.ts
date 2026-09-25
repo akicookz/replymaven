@@ -2,17 +2,18 @@ import { Resend } from "resend";
 
 // ─── Email Design Tokens ──────────────────────────────────────────────────────
 
-const BODY_TEXT = "color: #d1d5db;";
-const MUTED_TEXT = "color: #9ca3af;";
+const BODY_TEXT = "color: #c7c7cc;";
+const MUTED_TEXT = "color: #98989d;";
 const ACCENT_COLOR = "#2563eb";
+const EMAIL_FONT = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif";
 
 function buildAccentStyles(): {
   heading: string;
   button: string;
 } {
   return {
-    heading: `color: #f9fafb; font-size: 20px; font-weight: 600;`,
-    button: `display: inline-block; background: ${ACCENT_COLOR}; color: #ffffff; padding: 12px 20px; border: 0; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600;`,
+    heading: `color: #f5f5f7; font-family: ${EMAIL_FONT}; font-size: 27px; font-weight: 400; letter-spacing: -0.55px; line-height: 1.18;`,
+    button: `display: inline-block; box-sizing: border-box; min-height: 40px; line-height: 38px; background: ${ACCENT_COLOR}; color: #ffffff; padding: 0 18px; border: 1px solid rgba(255,255,255,0.35); border-radius: 10px; box-shadow: inset 0 6px 14px -6px rgba(255,255,255,0.3); text-decoration: none; font-family: ${EMAIL_FONT}; font-size: 14px; font-weight: 500;`,
   };
 }
 
@@ -21,12 +22,11 @@ function buildAccentStyles(): {
 function wrapEmail(body: string): string {
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"></head>
-<body style="margin: 0; padding: 24px 16px; background: #0b0c0f; color: #f9fafb;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background: #0b0c0f; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #f9fafb; font-size: 16px; line-height: 1.6;"><tr><td align="center">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 560px; background: #16171c; border-radius: 8px;"><tr><td style="padding: 28px 32px;">
-<p style="margin: 0 0 28px; color: #60a5fa; font-size: 15px; font-weight: 700;">ReplyMaven</p>
+<body style="margin: 0; padding: 40px 16px; background: #0b0c0f; color: #f5f5f7;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background: #0b0c0f; font-family: ${EMAIL_FONT}; color: #f5f5f7; font-size: 15px; line-height: 1.65;"><tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 560px; background: #16171c; border-radius: 15px;"><tr><td style="padding: 36px 40px 40px;">
+<img src="https://replymaven.com/email-logo-mark.png" width="16" height="18" alt="ReplyMaven" style="display: block; width: 16px; height: 18px; margin: 0 0 24px; border: 0;">
 ${body}
-<p class="email-muted" style="${MUTED_TEXT} font-size: 12px; margin: 28px 0 0;">ReplyMaven | Customer support for your website</p>
 </td></tr></table>
 </td></tr></table>
 </body></html>`;
@@ -140,7 +140,7 @@ export function buildOtpEmailHtml(otp: string): string {
   return wrapEmail(`
 <p class="email-heading" style="${styles.heading} margin: 0 0 16px;">Your verification code</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">Enter this code to verify your email address. It expires in 10 minutes.</p>
-<p class="email-otp" style="font-size: 32px; font-weight: 700; letter-spacing: 8px; margin: 0 0 24px; color: #f9fafb; font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;">${escapeHtml(otp)}</p>
+<p class="email-otp" style="font-size: 34px; font-weight: 500; letter-spacing: 6px; line-height: 1.2; margin: 0 0 26px; color: #ffffff; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;">${escapeHtml(otp)}</p>
 <p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 0;">If you didn't request this code, you can safely ignore this email.</p>
   `);
 }
@@ -223,8 +223,7 @@ export class EmailService {
       html: wrapEmail(`
 <p class="email-heading" style="${styles.heading} margin: 0 0 16px;">You've been invited to ReplyMaven</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">${escapeHtml(inviterName)} (${escapeHtml(inviterEmail)}) has invited you to join their team as ${role === "admin" ? "an administrator" : "a member"}.</p>
-<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">Click below to accept the invitation and get started:</p>
-<a href="${acceptUrl}" class="email-button" style="${styles.button}">Accept Invitation</a>
+<a href="${acceptUrl}" class="email-button" style="${styles.button} margin-top: 8px;">Accept Invitation</a>
 <p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 24px 0 0;">This invitation will expire in 7 days. If you didn't expect this invitation, you can safely ignore this email.</p>
       `),
     });
@@ -281,7 +280,7 @@ export class EmailService {
         html: wrapEmail(`
 <p class="email-heading" style="${styles.heading} margin: 0 0 16px;">Your message usage is at 80%</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
-<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">You've used <strong class="email-strong" style="color: #f9fafb;">${used}</strong> of <strong class="email-strong" style="color: #f9fafb;">${max}</strong> messages on your <strong class="email-strong" style="color: #f9fafb;">${escapeHtml(plan)}</strong> plan this billing period.</p>
+<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">You've used <span style="color: #f5f5f7;">${used}</span> of <span style="color: #f5f5f7;">${max}</span> messages on your <span style="color: #f5f5f7;">${escapeHtml(plan)}</span> plan this billing period.</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">Once you reach your limit, your chatbot will stop responding to visitors until the next period. Consider upgrading if you expect to exceed your quota.</p>
 <a href="https://replymaven.com/app/account/billing" class="email-button" style="${styles.button}">View Usage</a>
         `),
@@ -305,7 +304,7 @@ export class EmailService {
         html: wrapEmail(`
 <p class="email-heading" style="${styles.heading} margin: 0 0 16px;">You've reached your message limit</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
-<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">You've used all <strong class="email-strong" style="color: #f9fafb;">${max}</strong> messages on your <strong class="email-strong" style="color: #f9fafb;">${escapeHtml(plan)}</strong> plan. Your chatbot will not respond to new visitor messages until your next billing period.</p>
+<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">You've used all <span style="color: #f5f5f7;">${max}</span> messages on your <span style="color: #f5f5f7;">${escapeHtml(plan)}</span> plan. Your chatbot will not respond to new visitor messages until your next billing period.</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">Upgrade your plan to get more messages and keep your chatbot online.</p>
 <a href="https://replymaven.com/app/account/billing" class="email-button" style="${styles.button}">Upgrade Plan</a>
         `),
