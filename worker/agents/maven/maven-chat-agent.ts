@@ -1454,7 +1454,6 @@ export class MavenChatAgent extends AIChatAgent<
                     "Visitor",
                   dashboardUrl:
                     `${this.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${currentState.id}`,
-                  accentColor: null,
                 }
               : undefined,
           });

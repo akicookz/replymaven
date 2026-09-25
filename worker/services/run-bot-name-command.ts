@@ -13,7 +13,6 @@ import { emailLastAgentReply } from "./email-last-reply";
 import { EmailService } from "./email-service";
 import { recordMavenAssignment } from "./maven-assignment";
 import { ProjectService } from "./project-service";
-import { WidgetService } from "./widget-service";
 import {
   startSidechatTurn,
   type BotNameCommandOrigin,
@@ -215,11 +214,7 @@ function createBotNameCommandDeps(
       });
     },
     async emailLastReply() {
-      const [project, widgetCfg] = await Promise.all([
-        new ProjectService(input.db).getProjectById(projectId),
-        new WidgetService(input.db).getWidgetConfig(projectId),
-      ]);
-      const base = input.env.BETTER_AUTH_URL || "https://replymaven.com";
+      const project = await new ProjectService(input.db).getProjectById(projectId);
       return emailLastAgentReply({
         chatService,
         emailService: new EmailService(input.env.RESEND_API_KEY),
@@ -228,9 +223,6 @@ function createBotNameCommandDeps(
         projectName: input.projectName,
         conversationId: conversation.id,
         visitorEmail: conversation.visitorEmail,
-        actorName: input.actorName,
-        dashboardUrl: `${base}/app/projects/${projectId}/conversations/${conversation.id}`,
-        accentColor: widgetCfg?.primaryColor ?? null,
       });
     },
   };

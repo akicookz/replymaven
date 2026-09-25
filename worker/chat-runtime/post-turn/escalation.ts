@@ -20,7 +20,6 @@ interface EscalationEmailSender {
     visitorId?: string | null;
     summary: string;
     conversationUrl: string;
-    accentColor?: string | null;
   }): Promise<void>;
 }
 
@@ -340,7 +339,6 @@ export async function createEscalation(params: {
                     visitorId: params.conversation.visitorId,
                     summary,
                     conversationUrl,
-                    accentColor: null,
                   },
                 ).then(() => null)]
               : [];

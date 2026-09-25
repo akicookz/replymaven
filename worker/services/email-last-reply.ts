@@ -32,9 +32,6 @@ export async function emailLastAgentReply(input: {
   projectName: string;
   conversationId: string;
   visitorEmail: string | null;
-  actorName: string | null;
-  dashboardUrl: string;
-  accentColor: string | null;
 }): Promise<EmailLastReplyResult> {
   const visitorEmail = input.visitorEmail?.trim() ?? "";
   if (!visitorEmail) return { ok: false, reason: "no_visitor_email" };
@@ -60,12 +57,8 @@ export async function emailLastAgentReply(input: {
       projectName: input.projectName,
       conversationId: input.conversationId,
       messageId: message.id,
-      agentName: message.senderName ?? input.actorName ?? "Support",
-      agentAvatar: message.senderAvatar ?? null,
       messageContent: message.content,
       imageUrls: message.imageUrls,
-      dashboardUrl: input.dashboardUrl,
-      accentColor: input.accentColor,
     });
     await input.chatService.markEmailed({
       projectId: input.projectId,

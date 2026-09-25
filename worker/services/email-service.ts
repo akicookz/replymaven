@@ -15,7 +15,9 @@ function buildAccentStyles(): { button: string } {
 
 // ─── Shared Email Layout ──────────────────────────────────────────────────────
 
-function wrapEmail(body: string): string {
+// `reason` tells the recipient why the mail reached them. Every platform email
+// carries one; a stated reason lowers the chance of a spam verdict.
+function wrapEmail(body: string, reason: string): string {
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"></head>
 <body style="margin: 0; padding: 40px 16px; background: #0b0c0f; color: #f5f5f7;">
@@ -23,9 +25,17 @@ function wrapEmail(body: string): string {
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 560px; background: #16171c; border-radius: 15px;"><tr><td style="padding: 36px 40px 40px;">
 <img src="https://replymaven.com/email-logo-mark.png" width="16" height="18" alt="ReplyMaven" style="display: block; width: 16px; height: 18px; margin: 0 0 24px; border: 0;">
 ${body}
+<p style="${MUTED_TEXT} font-size: 14px; margin: 32px 0 0;">&mdash; ReplyMaven team</p>
+</td></tr></table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 560px;"><tr><td style="padding: 20px 40px 0;">
+<p style="${MUTED_TEXT} font-size: 12px; line-height: 1.5; margin: 0;">${reason}</p>
 </td></tr></table>
 </td></tr></table>
 </body></html>`;
+}
+
+function accountReason(to: string): string {
+  return `You received this email because you have a ReplyMaven account at ${escapeHtml(to)}.`;
 }
 
 function replySubject(subject: string | null | undefined): string {
@@ -132,11 +142,14 @@ function buildVisitorSubjectIdentifier(opts: {
 // ─── OTP Email Template ───────────────────────────────────────────────────────
 
 export function buildOtpEmailHtml(otp: string): string {
-  return wrapEmail(`
-<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">Enter this code to verify your email address. It expires in 10 minutes.</p>
-<p class="email-otp" style="font-size: 34px; font-weight: 500; letter-spacing: 6px; line-height: 1.2; margin: 0 0 26px; color: #ffffff; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;">${escapeHtml(otp)}</p>
-<p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 0;">If you didn't request this code, you can safely ignore this email.</p>
-  `);
+  return wrapEmail(
+    `
+<p style="${BODY_TEXT} margin: 0 0 24px;">Enter this code to verify your email address. It expires in 10 minutes.</p>
+<p style="font-size: 34px; font-weight: 500; letter-spacing: 6px; line-height: 1.2; margin: 0 0 26px; color: #ffffff; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;">${escapeHtml(otp)}</p>
+<p style="${MUTED_TEXT} font-size: 13px; margin: 0;">If you didn't request this code, you can safely ignore this email.</p>
+  `,
+    "You received this email because this address was entered on replymaven.com.",
+  );
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -190,18 +203,6 @@ export class EmailService {
     });
   }
 
-  async sendWelcomeEmail(to: string, name: string): Promise<void> {
-    const styles = buildAccentStyles();
-    await this.send({
-      to,
-      subject: "Welcome to ReplyMaven",
-      html: wrapEmail(`
-<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Hi ${escapeHtml(name)}, thanks for signing up. You can now create your first project and start building your AI support agent.</p>
-<a href="https://replymaven.com/app" class="email-button" style="${styles.button}">Go to Dashboard</a>
-      `),
-    });
-  }
-
   async sendTeamInviteEmail(
     to: string,
     inviterName: string,
@@ -214,10 +215,12 @@ export class EmailService {
       to,
       subject: `${inviterName} invited you to join their ReplyMaven team`,
       html: wrapEmail(`
-<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">${escapeHtml(inviterName)} (${escapeHtml(inviterEmail)}) has invited you to join their team as ${role === "admin" ? "an administrator" : "a member"}.</p>
-<a href="${acceptUrl}" class="email-button" style="${styles.button} margin-top: 8px;">Accept Invitation</a>
-<p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 24px 0 0;">This invitation will expire in 7 days. If you didn't expect this invitation, you can safely ignore this email.</p>
-      `),
+<p style="${BODY_TEXT} margin: 0 0 16px;">${escapeHtml(inviterName)} (${escapeHtml(inviterEmail)}) has invited you to join their team as ${role === "admin" ? "an administrator" : "a member"}.</p>
+<a href="${acceptUrl}" style="${styles.button} margin-top: 8px;">Accept Invitation</a>
+<p style="${MUTED_TEXT} font-size: 13px; margin: 24px 0 0;">This invitation will expire in 7 days. If you didn't expect this invitation, you can safely ignore this email.</p>
+      `,
+        `You received this email because ${escapeHtml(inviterName)} invited ${escapeHtml(to)} to join a ReplyMaven team.`,
+      ),
     });
   }
 
@@ -233,7 +236,6 @@ export class EmailService {
     visitorId?: string | null;
     summary: string;
     conversationUrl: string;
-    accentColor?: string | null;
   }): Promise<void> {
     try {
       const visitor = buildVisitorSubjectIdentifier({
@@ -271,11 +273,13 @@ export class EmailService {
         to,
         subject: "You've used 80% of your monthly messages",
         html: wrapEmail(`
-<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
-<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">You've used <span style="color: #f5f5f7;">${used}</span> of <span style="color: #f5f5f7;">${max}</span> messages on your <span style="color: #f5f5f7;">${escapeHtml(plan)}</span> plan this billing period.</p>
-<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">Once you reach your limit, your chatbot will stop responding to visitors until the next period. Consider upgrading if you expect to exceed your quota.</p>
-<a href="https://replymaven.com/app/account/billing" class="email-button" style="${styles.button}">View Usage</a>
-        `),
+<p style="${BODY_TEXT} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
+<p style="${BODY_TEXT} margin: 0 0 16px;">You've used <span style="color: #f5f5f7;">${used}</span> of <span style="color: #f5f5f7;">${max}</span> messages on your <span style="color: #f5f5f7;">${escapeHtml(plan)}</span> plan this billing period.</p>
+<p style="${BODY_TEXT} margin: 0 0 24px;">Once you reach your limit, your chatbot will stop responding to visitors until the next period. Consider upgrading if you expect to exceed your quota.</p>
+<a href="https://replymaven.com/app/account/billing" style="${styles.button}">View Usage</a>
+        `,
+          accountReason(to),
+        ),
       });
     } catch (error) {
       console.error("[EmailService] Usage warning email failed:", error);
@@ -294,11 +298,13 @@ export class EmailService {
         to,
         subject: "You've reached your message limit",
         html: wrapEmail(`
-<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
-<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">You've used all <span style="color: #f5f5f7;">${max}</span> messages on your <span style="color: #f5f5f7;">${escapeHtml(plan)}</span> plan. Your chatbot will not respond to new visitor messages until your next billing period.</p>
-<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">Upgrade your plan to get more messages and keep your chatbot online.</p>
-<a href="https://replymaven.com/app/account/billing" class="email-button" style="${styles.button}">Upgrade Plan</a>
-        `),
+<p style="${BODY_TEXT} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
+<p style="${BODY_TEXT} margin: 0 0 16px;">You've used all <span style="color: #f5f5f7;">${max}</span> messages on your <span style="color: #f5f5f7;">${escapeHtml(plan)}</span> plan. Your chatbot will not respond to new visitor messages until your next billing period.</p>
+<p style="${BODY_TEXT} margin: 0 0 24px;">Upgrade your plan to get more messages and keep your chatbot online.</p>
+<a href="https://replymaven.com/app/account/billing" style="${styles.button}">Upgrade Plan</a>
+        `,
+          accountReason(to),
+        ),
       });
     } catch (error) {
       console.error("[EmailService] Usage limit reached email failed:", error);
@@ -320,21 +326,21 @@ export class EmailService {
       > = {
         payment_failed: {
           subject: "Action Required: Your chatbot is paused",
-          body: `<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Your recent payment failed and your chatbot has been paused. Visitors will not be able to use it until the issue is resolved.</p>
-<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">Update your payment method to restore service.</p>
-<a href="https://replymaven.com/app/account/billing" class="email-button" style="${styles.button}">Update payment</a>`,
+          body: `<p style="${BODY_TEXT} margin: 0 0 16px;">Your recent payment failed and your chatbot has been paused. Visitors will not be able to use it until the issue is resolved.</p>
+<p style="${BODY_TEXT} margin: 0 0 24px;">Update your payment method to restore service.</p>
+<a href="https://replymaven.com/app/account/billing" style="${styles.button}">Update payment</a>`,
         },
         canceled: {
           subject: "Your ReplyMaven subscription has been canceled",
-          body: `<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Your subscription has been canceled and your chatbot is no longer active. Visitors will see an unavailable message.</p>
-<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">If this was a mistake, you can resubscribe anytime.</p>
-<a href="https://replymaven.com/app/account/billing" class="email-button" style="${styles.button}">View billing</a>`,
+          body: `<p style="${BODY_TEXT} margin: 0 0 16px;">Your subscription has been canceled and your chatbot is no longer active. Visitors will see an unavailable message.</p>
+<p style="${BODY_TEXT} margin: 0 0 24px;">If this was a mistake, you can resubscribe anytime.</p>
+<a href="https://replymaven.com/app/account/billing" style="${styles.button}">View billing</a>`,
         },
         other: {
           subject: "Your chatbot is currently unavailable",
-          body: `<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Your subscription is inactive and your chatbot is currently unavailable to visitors.</p>
-<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">Check your billing settings to restore service.</p>
-<a href="https://replymaven.com/app/account/billing" class="email-button" style="${styles.button}">View billing</a>`,
+          body: `<p style="${BODY_TEXT} margin: 0 0 16px;">Your subscription is inactive and your chatbot is currently unavailable to visitors.</p>
+<p style="${BODY_TEXT} margin: 0 0 24px;">Check your billing settings to restore service.</p>
+<a href="https://replymaven.com/app/account/billing" style="${styles.button}">View billing</a>`,
         },
       };
 
@@ -344,9 +350,11 @@ export class EmailService {
         to,
         subject: msg.subject,
         html: wrapEmail(`
-<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
+<p style="${BODY_TEXT} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
 ${msg.body}
-        `),
+        `,
+          accountReason(to),
+        ),
       });
     } catch (error) {
       console.error(
@@ -362,12 +370,8 @@ ${msg.body}
     projectName: string;
     conversationId: string;
     messageId: string;
-    agentName: string;
-    agentAvatar: string | null;
     messageContent: string;
     imageUrls?: string[];
-    dashboardUrl: string;
-    accentColor?: string | null;
     inReplyToMessageId?: string | null;
     inReplyToRfcId?: string | null;
     referencesRfcIds?: string[];
@@ -447,7 +451,6 @@ ${msg.body}
     visitorDisplayName: string;
     messageContent: string;
     dashboardUrl: string;
-    accentColor?: string | null;
   }): Promise<void> {
     const {
       to,
@@ -485,9 +488,11 @@ ${msg.body}
         to,
         subject: "Your chatbot is back online",
         html: wrapEmail(`
-<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
-<p class="email-body-text" style="${BODY_TEXT} margin: 0;">Your subscription is active again and your chatbot is back online. Visitors can use it as normal.</p>
-        `),
+<p style="${BODY_TEXT} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
+<p style="${BODY_TEXT} margin: 0;">Your subscription is active again and your chatbot is back online. Visitors can use it as normal.</p>
+        `,
+          accountReason(to),
+        ),
       });
     } catch (error) {
       console.error(

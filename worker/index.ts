@@ -2555,8 +2555,6 @@ const app = new Hono<HonoAppContext>()
       await chatService.reopen(project.id, inboundConversation.id);
     }
 
-    const widgetService = new WidgetService(db);
-    const widgetCfgForReply = await widgetService.getWidgetConfig(project.id);
 
     if (isVisitor) {
       // ─── Visitor reply branch ─────────────────────────────────────────
@@ -2713,7 +2711,6 @@ const app = new Hono<HonoAppContext>()
                   messageContent: cleanedText,
                   dashboardUrl:
                     `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${inboundConversation.id}`,
-                  accentColor: widgetCfgForReply?.primaryColor ?? null,
                 }
               : undefined,
           });
@@ -2764,12 +2761,7 @@ const app = new Hono<HonoAppContext>()
             projectName: project.name,
             conversationId: inboundConversation.id,
             messageId: botMessage.id,
-            agentName: settings?.botName?.trim() || "Maven",
-            agentAvatar: null,
             messageContent: botMessage.content,
-            dashboardUrl:
-              `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${inboundConversation.id}`,
-            accentColor: widgetCfgForReply?.primaryColor ?? null,
             inReplyToRfcId: rfcMessageId,
             referencesRfcIds,
             subject: channelMeta.subject ?? subject,
@@ -2815,7 +2807,6 @@ const app = new Hono<HonoAppContext>()
       if (inboundConversation.visitorEmail && c.env.RESEND_API_KEY) {
         const emailService = new EmailService(c.env.RESEND_API_KEY);
         const visitorEmail = inboundConversation.visitorEmail;
-        const dashboardUrl = `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${inboundConversation.id}`;
         c.executionCtx.waitUntil(
           runWithConversationExternalAction(
               chatService,
@@ -2827,11 +2818,7 @@ const app = new Hono<HonoAppContext>()
                 projectName: project.name,
                 conversationId: inboundConversation.id,
                 messageId: agentMessage.id,
-                agentName: agentUser.name,
-                agentAvatar: agentUser.avatar,
                 messageContent: cleanedText,
-                dashboardUrl,
-                accentColor: widgetCfgForReply?.primaryColor ?? null,
                 inReplyToRfcId: rfcMessageId,
                 subject: readConversationChannelMetadata(inboundConversation.metadata).subject ??
                   subject,
@@ -7618,9 +7605,6 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Rate limit exceeded" }, 429);
     }
 
-    const widgetService = new WidgetService(db);
-    const widgetCfg = await widgetService.getWidgetConfig(project.id);
-
     const emailService = new EmailService(c.env.RESEND_API_KEY);
     try {
       const delivery = await runWithConversationExternalAction(
@@ -7634,12 +7618,8 @@ const app = new Hono<HonoAppContext>()
             projectName: project.name,
             conversationId: conversation.id,
             messageId: message.id,
-            agentName: message.senderName ?? user.name ?? "Support",
-            agentAvatar: message.senderAvatar ?? null,
             messageContent: message.content,
             imageUrls: message.imageUrls,
-            dashboardUrl: `https://replymaven.com/app/projects/${project.id}/conversations/${conversation.id}`,
-            accentColor: widgetCfg?.primaryColor ?? null,
           });
           await chatService.markEmailed({
             projectId: project.id,

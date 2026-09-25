@@ -28,7 +28,6 @@ export async function forwardVisitorToJoinedHumans(input: {
     projectName: string;
     messageId: string;
     dashboardUrl: string;
-    accentColor: string | null;
     messageContent?: string;
     visitorDisplayName?: string;
   };
@@ -107,7 +106,6 @@ export async function forwardVisitorToJoinedHumans(input: {
               visitorDisplayName,
               messageContent: email.messageContent ?? input.content,
               dashboardUrl: email.dashboardUrl,
-              accentColor: email.accentColor,
             });
           })().catch((error: unknown) => {
             logError("joined_human_route.email_forward_failed", error, {
