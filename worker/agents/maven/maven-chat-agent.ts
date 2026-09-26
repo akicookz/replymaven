@@ -187,6 +187,8 @@ import {
   ASSIGN_CONVERSATION_TOOL_NAME,
   CLOSE_CONVERSATION_TOOL_NAME,
   BLOCK_CUSTOMER_TOOL_NAME,
+  SET_CUSTOMER_CONTACT_TOOL_NAME,
+  type SidechatContactResult,
   type SidechatDecideResult,
   type SidechatReplyResult,
 } from "../sidechat/action-tools";
@@ -277,6 +279,9 @@ interface SidechatTurnParent extends SidechatStatusUpdater {
   closeConversationFromSidechat(
     input: SidechatGatewayContext,
   ): Promise<{ ok: true } | { error: string }>;
+  setCustomerContactFromSidechat(
+    input: SidechatGatewayContext & { name: string | null; email: string | null },
+  ): Promise<SidechatContactResult>;
   blockCustomerFromSidechat(
     input: SidechatGatewayContext & { reason: string },
   ): Promise<{ ok: true } | { error: string }>;
@@ -433,6 +438,11 @@ async function executeSidechatTurn(input: {
           }),
         closeConversation: () =>
           input.parent.closeConversationFromSidechat(gatewayContext),
+        setCustomerContact: (contact) =>
+          input.parent.setCustomerContactFromSidechat({
+            ...gatewayContext,
+            ...contact,
+          }),
         blockCustomer: (reason) =>
           input.parent.blockCustomerFromSidechat({ ...gatewayContext, reason }),
         decidePendingAction: pendingApproval
@@ -1038,6 +1048,7 @@ const SIDECHAT_ACTION_TOOL_PRESENTATIONS: Array<
   CLOSE_CONVERSATION_TOOL_NAME,
   BLOCK_CUSTOMER_TOOL_NAME,
   DECIDE_PENDING_ACTION_TOOL_NAME,
+  SET_CUSTOMER_CONTACT_TOOL_NAME,
 ].map((name) => [
   name,
   {
@@ -1049,6 +1060,7 @@ const SIDECHAT_ACTION_TOOL_PRESENTATIONS: Array<
         [CLOSE_CONVERSATION_TOOL_NAME]: "Close",
         [BLOCK_CUSTOMER_TOOL_NAME]: "Block",
         [DECIDE_PENDING_ACTION_TOOL_NAME]: "Decide",
+        [SET_CUSTOMER_CONTACT_TOOL_NAME]: "Customer",
       }[name] ?? name,
       source: { kind: "http" as const, name: "Conversation", icon: null },
     },

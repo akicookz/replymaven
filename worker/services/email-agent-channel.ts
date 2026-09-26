@@ -1,4 +1,5 @@
 import type { PublicConversationStore } from "../conversations/public-conversation-store";
+import { readConversationChannelMetadata } from "../../shared/maven-conversation";
 import { logWarn } from "../observability";
 import type {
   AgentChannelAdapter,
@@ -162,7 +163,11 @@ export function buildEmailChannelEnablement(input: {
         input.project.id,
         conversationId,
       );
-      return conversation?.channelThreads?.email ?? null;
+      const stored = conversation?.channelThreads?.email;
+      if (stored) return stored;
+      // A forwarded thread already has a subject before Maven ever writes.
+      const subject = readConversationChannelMetadata(conversation?.metadata).subject;
+      return subject ? { subject, byUser: {} } : null;
     },
     async writeThread(fields) {
       await input.chatService.updateEmailThread(

@@ -18,8 +18,16 @@ export type SidechatDecideResult =
   | { ok: true; willRun: boolean }
   | { error: "unknown_author" | "nothing_pending" };
 
+export type SidechatContactResult =
+  | { ok: true }
+  | { error: "already_set" | "nothing_given" | "conversation_unavailable" };
+
 export interface SidechatActionDeps {
   replyToConversation(text: string, toolCallId: string): Promise<SidechatReplyResult>;
+  setCustomerContact(input: {
+    name: string | null;
+    email: string | null;
+  }): Promise<SidechatContactResult>;
   assignConversation(
     assigneeId: string,
     instructions: string | null,
@@ -36,6 +44,7 @@ export const ASSIGN_CONVERSATION_TOOL_NAME = "assign_conversation";
 export const CLOSE_CONVERSATION_TOOL_NAME = "close_conversation";
 export const BLOCK_CUSTOMER_TOOL_NAME = "block_customer";
 export const DECIDE_PENDING_ACTION_TOOL_NAME = "decide_pending_action";
+export const SET_CUSTOMER_CONTACT_TOOL_NAME = "set_customer_contact";
 
 export const SIDECHAT_ACTION_TOOL_NAMES: ReadonlySet<string> = new Set([
   REPLY_TO_CONVERSATION_TOOL_NAME,
@@ -43,6 +52,7 @@ export const SIDECHAT_ACTION_TOOL_NAMES: ReadonlySet<string> = new Set([
   CLOSE_CONVERSATION_TOOL_NAME,
   BLOCK_CUSTOMER_TOOL_NAME,
   DECIDE_PENDING_ACTION_TOOL_NAME,
+  SET_CUSTOMER_CONTACT_TOOL_NAME,
 ]);
 
 export function buildSidechatActionTools(deps: SidechatActionDeps): ToolSet {
@@ -73,6 +83,17 @@ export function buildSidechatActionTools(deps: SidechatActionDeps): ToolSet {
       inputSchema: z.object({}),
       async execute() {
         return deps.closeConversation();
+      },
+    }),
+    [SET_CUSTOMER_CONTACT_TOOL_NAME]: tool({
+      description:
+        "Record who the customer is when the conversation has no customer email yet, for example from the From line of a forwarded email. Refused once an email is set.",
+      inputSchema: z.object({
+        name: z.string().trim().min(1).max(100).nullable().optional(),
+        email: z.string().trim().email().max(320).nullable().optional(),
+      }),
+      async execute({ name, email }) {
+        return deps.setCustomerContact({ name: name ?? null, email: email ?? null });
       },
     }),
     [BLOCK_CUSTOMER_TOOL_NAME]: tool({

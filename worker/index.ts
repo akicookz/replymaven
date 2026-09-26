@@ -2393,7 +2393,34 @@ const app = new Hono<HonoAppContext>()
     if (decision.kind === "drop") {
       return c.json({ ok: true });
     }
-    if (decision.kind === "create") {
+    // A teammate forwarding a customer's mail starts a conversation with no
+    // customer yet; the mail (quoted part included) becomes their first
+    // message to Maven, who reads the customer off the forwarded headers.
+    const forwardingTeammate = decision.kind === "create"
+      ? await new ChannelIdentityService(db).resolveByEmail({
+        projectId: project.id,
+        ownerId: project.userId,
+        email: senderEmail,
+      })
+      : null;
+    if (decision.kind === "create" && forwardingTeammate) {
+      if (!checkRateLimit(`inbound-create:${project.id}:${senderEmail}`, 8, 60 * 60 * 1000)) {
+        return c.json({ ok: true });
+      }
+      conversation = await chatService.create({
+        projectId: project.id,
+        customerId: null,
+        visitorId: await emailVisitorId(project.id, `forward:${emailId}`),
+        visitorName: null,
+        visitorEmail: null,
+        metadata: {
+          channel: "email",
+          subject: subject?.replace(/^\s*(?:(?:re|fwd?|fw)\s*:\s*)+/i, "").trim() || undefined,
+          inboundAddress,
+          forwardedBy: forwardingTeammate.userId,
+        },
+      });
+    } else if (decision.kind === "create") {
       const visitorId = await emailVisitorId(project.id, senderEmail);
       const banned = await new VisitorBanService(db).isVisitorBanned(
         project.id,
@@ -2776,7 +2803,8 @@ const app = new Hono<HonoAppContext>()
         adapter: createEmailAgentChannel(emailEnablement),
         inbound: buildEmailInbound({
           emailId,
-          text: cleanedText,
+          // The quoted part is the point of a forward; keep it there.
+          text: forwardingTeammate ? emailText.slice(0, 20_000) : cleanedText,
           rfcMessageId,
           conversationId: inboundConversation.id,
           author: {

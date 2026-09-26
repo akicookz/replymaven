@@ -105,9 +105,11 @@ import {
 import { MAVEN_ASSIGNEE_ID } from "../../../shared/maven-assignee";
 import { buildConversationDeepLink } from "../../lib/deep-links";
 import type {
+  SidechatContactResult,
   SidechatDecideResult,
   SidechatReplyResult,
 } from "../sidechat/action-tools";
+import { CustomerIdentityService } from "../../services/customer-identity-service";
 import type { SidechatMessageOrigin } from "../../../shared/sidechat-agent";
 import {
   buildSidechatHttpToolDescriptor,
@@ -1598,6 +1600,44 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
         : undefined,
     });
     return "error" in result ? { error: result.error } : { ok: true };
+  }
+
+  // Only while the conversation has no customer email: a forwarded mail names
+  // the customer in its quoted headers and Maven records that here.
+  async setCustomerContactFromSidechat(
+    input: SidechatGatewayContext & { name: string | null; email: string | null },
+  ): Promise<SidechatContactResult> {
+    const scope = await this.sidechatActionScope(input);
+    if (!scope.ok) return { error: "conversation_unavailable" };
+    if (!input.name && !input.email) return { error: "nothing_given" };
+    if (scope.summary.visitorEmail?.trim()) return { error: "already_set" };
+    const store = this.publicStore();
+    const email = input.email?.trim().toLowerCase() || undefined;
+    const name = input.name?.trim() || undefined;
+    await store.updateConversation(input.conversationId, this.name, {
+      ...(name ? { visitorName: name } : {}),
+      ...(email ? { visitorEmail: email } : {}),
+    });
+    if (email) {
+      const identityService = new CustomerIdentityService(scope.db, store);
+      let customerId: string | null = null;
+      const resolution = await identityService.resolveCustomer(this.name, { email });
+      if (resolution.kind === "resolved") {
+        customerId = resolution.customerId;
+      } else if (resolution.kind === "none") {
+        const created = await identityService.createCustomer(this.name, {
+          email,
+          name: name ?? null,
+          customFields: {},
+        });
+        if (created.kind === "created") customerId = created.customer.id;
+        if (created.kind === "existing_customer") customerId = created.customerId;
+      }
+      if (customerId) {
+        await identityService.linkConversation(this.name, input.conversationId, customerId);
+      }
+    }
+    return { ok: true };
   }
 
   async closeConversationFromSidechat(

@@ -763,7 +763,8 @@ deploy.
   bans on any post-migration conversation failed (dashboard too). Migration `0075` drops it.
 - Migration `0076` adds `channel_identities`. Both must run on prod before deploy.
 - Not verified locally: real Telegram delivery (stored token answers 401 from local dev),
-  Slack `users.info` lookup, inbound teammate email (Resend webhook targets production),
-  forward-with-no-conversation (3.6 not built: forwards from a teammate still hit the `create`
-  branch and make the teammate the customer).
+  Slack `users.info` lookup, inbound teammate email including forwards (Resend webhook
+  targets production). 3.6 is built: a teammate's mail with no conversation creates a
+  customer-less one, the raw mail is the Sidechat turn, and `set_customer_contact` records
+  the customer (verified from the dashboard Sidechat).
 - Dashboard shows the system trigger line as a "You" message in the Sidechat. Cosmetic.
