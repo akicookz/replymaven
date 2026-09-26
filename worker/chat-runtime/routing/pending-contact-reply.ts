@@ -9,7 +9,8 @@ const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
 const SHORT_NAME_PATTERN = /^[\p{L}][\p{L}'’-]*(?:\s+[\p{L}][\p{L}'’-]*){0,2}$/u;
 const EXPLICIT_NAME_PREFIX =
   /^\s*(?:my name is|name(?:\s+is)?)\s*[:,-]?\s*/i;
-const BARE_NAME_PATTERN = /^\p{Lu}[\p{L}'’-]*$/u;
+// One to three capitalised words: "Jane", "Jane Test", "Ana María López".
+const BARE_NAME_PATTERN = /^\p{Lu}[\p{L}'’-]*(?:\s+\p{Lu}[\p{L}'’-]*){0,2}$/u;
 const CONTACT_REFUSAL_PATTERNS = [
   /\b(?:i(?:'d| would)|we(?:'d| would))?\s*(?:rather|prefer)\s+not\s+(?:to\s+)?(?:share|provide|give)\s+(?:(?:my|our|any)\s+)?(?:contact(?:\s+(?:details?|information))?|details?|information|email(?:\s+address)?|name|that)\b/i,
   /\b(?:i|we)\s+(?:do not|don't|won't|will not)\s+(?:want\s+to\s+)?(?:share|provide|give)\s+(?:(?:my|our|any)\s+)?(?:contact(?:\s+(?:details?|information))?|details?|information|email(?:\s+address)?|name|that)\b/i,
