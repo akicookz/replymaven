@@ -85,11 +85,7 @@ export function HelpAnalyticsEditor(props: HelpAnalyticsEditorProps) {
 
   return (
     <div className="space-y-4">
-      {props.value.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          Add PostHog, Google Analytics, Meta Pixel, or a custom script URL.
-        </p>
-      ) : (
+      {props.value.length > 0 && (
         <ul className="space-y-3">
           {props.value.map((embed, index) => (
             <AnalyticsEmbedRow
