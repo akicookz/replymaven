@@ -6,6 +6,10 @@ import type {
   PublicConversationRecord,
   PublicMessageRecord,
 } from "../../../shared/maven-conversation";
+import {
+  fallbackAiParticipationForStatus,
+  parseChatState,
+} from "../../chat-runtime/types";
 
 interface SidechatCustomerRow {
   id: string;
@@ -25,6 +29,7 @@ type SidechatConversationRow = Pick<
   | "status"
   | "archivedAt"
   | "assigneeId"
+  | "chatState"
 >;
 
 export interface SidechatTurnContextInput {
@@ -177,6 +182,11 @@ export async function buildSidechatContext(
     botName: options.turn.botName,
     author: options.turn.author,
     assignee,
+    humanOwned: parseChatState(JSON.stringify(conversation.chatState), {
+      fallbackAiParticipation: fallbackAiParticipationForStatus(
+        conversation.status,
+      ),
+    }).aiParticipation === "human_only",
     teammates: options.turn.teammates,
     links: options.turn.links,
     emailSubject: options.turn.emailSubject,

@@ -28,7 +28,7 @@ export interface EmailChannelEnablement {
   writeThread(input: {
     conversationId: string;
     userId: string;
-    rfcMessageId: string;
+    rfcMessageId: string | null;
     subject: string;
   }): Promise<void>;
 }
@@ -100,15 +100,14 @@ export function createEmailAgentChannel(
             inReplyTo,
           });
           const rfcId = await input.service.resolveRfcMessageId(sent.id);
-          if (rfcId) {
-            lastRfcId = rfcId;
-            await input.writeThread({
-              conversationId: fields.conversationId,
-              userId: recipient.userId,
-              rfcMessageId: rfcId,
-              subject,
-            });
-          }
+          if (rfcId) lastRfcId = rfcId;
+          // The subject is saved even without the id so later mails keep it.
+          await input.writeThread({
+            conversationId: fields.conversationId,
+            userId: recipient.userId,
+            rfcMessageId: rfcId,
+            subject,
+          });
         } catch (error) {
           logWarn("email_channel.post_failed", {
             conversationId: fields.conversationId,

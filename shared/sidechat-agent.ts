@@ -250,6 +250,9 @@ export interface SidechatCustomerContext {
   // The verified teammate writing this turn; "me" in their message means them.
   author: { id: string; name: string } | null;
   assignee: { id: string; name: string } | null;
+  // A teammate owns the conversation: their plain channel replies go to the
+  // customer, so only @BotName messages reach Maven.
+  humanOwned: boolean;
   teammates: Array<{ id: string; name: string }>;
   links: { conversation: string; tools: string };
   emailSubject: string | null;

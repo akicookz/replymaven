@@ -3458,7 +3458,9 @@ export class MavenChatAgent extends AIChatAgent<
       const current = state.channelThreads.email;
       const email = {
         subject: current?.subject ?? update.subject,
-        byUser: { ...(current?.byUser ?? {}), [update.userId]: update.rfcMessageId },
+        byUser: update.rfcMessageId
+          ? { ...(current?.byUser ?? {}), [update.userId]: update.rfcMessageId }
+          : { ...(current?.byUser ?? {}) },
       };
       const saved = this.saveNextPublicState(state, {
         channelThreads: { ...state.channelThreads, email },

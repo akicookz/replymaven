@@ -233,7 +233,8 @@ export interface PublicEmailUpdateInput {
 
 export interface PublicEmailThreadUpdate {
   userId: string;
-  rfcMessageId: string;
+  // Null when the sent mail's id is not known yet; the subject still saves.
+  rfcMessageId: string | null;
   subject: string;
 }
 

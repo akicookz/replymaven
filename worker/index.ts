@@ -2813,6 +2813,27 @@ const app = new Hono<HonoAppContext>()
         botName: (await projectService.getSettings(project.id))?.botName,
       });
       if (!emailEnablement) return c.json({ ok: true });
+      // No saved thread subject (the first send could not record one): keep
+      // the subject the teammate is replying under so Maven's answer threads.
+      const replySubject = subject
+        ?.replace(/^\s*(?:(?:re|fwd?|fw)\s*:\s*)+/i, "")
+        .trim();
+      if (
+        !forwardingTeammate &&
+        replySubject &&
+        !inboundConversation.channelThreads?.email
+      ) {
+        await emailEnablement.writeThread({
+          conversationId: inboundConversation.id,
+          userId: agentUser.id,
+          rfcMessageId,
+          subject: replySubject,
+        }).catch((error: unknown) => {
+          logError("inbound_email.thread_subject_failed", error, {
+            conversationId: inboundConversation.id,
+          });
+        });
+      }
       await ingestTeammateMessage({
         adapter: createEmailAgentChannel(emailEnablement),
         inbound: buildEmailInbound({
