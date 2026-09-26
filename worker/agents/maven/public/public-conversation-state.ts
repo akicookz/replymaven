@@ -29,6 +29,7 @@ interface PublicConversationStateRow {
   close_reason: string | null;
   telegram_thread_id: string | null;
   slack_thread_id: string | null;
+  email_thread_json: string | null;
   metadata_json: string;
   chat_state_json: string;
   last_activity_at: number;
@@ -63,9 +64,26 @@ function parseJsonRecord(value: string): Record<string, unknown> {
   }
 }
 
+function parseEmailThread(
+  value: string | null,
+): PublicConversationRecord["channelThreads"]["email"] | undefined {
+  if (!value) return undefined;
+  const parsed = parseJsonRecord(value);
+  if (typeof parsed.subject !== "string" || !parsed.subject) return undefined;
+  const byUser: Record<string, string> = {};
+  const rawByUser = parsed.byUser;
+  if (rawByUser && typeof rawByUser === "object" && !Array.isArray(rawByUser)) {
+    for (const [userId, rfcId] of Object.entries(rawByUser)) {
+      if (typeof rfcId === "string") byUser[userId] = rfcId;
+    }
+  }
+  return { subject: parsed.subject, byUser };
+}
+
 function mapStateRow(
   row: PublicConversationStateRow,
 ): StoredPublicConversationState {
+  const emailThread = parseEmailThread(row.email_thread_json);
   return {
     id: row.conversation_id,
     projectId: row.project_id,
@@ -79,6 +97,7 @@ function mapStateRow(
     channelThreads: {
       ...publicChannelThreads(row.telegram_thread_id),
       ...(row.slack_thread_id ? { slack: row.slack_thread_id } : {}),
+      ...(emailThread ? { email: emailThread } : {}),
     },
     metadata: parseJsonRecord(row.metadata_json),
     chatState: parseJsonRecord(row.chat_state_json),
@@ -116,6 +135,7 @@ function stateBindings(state: StoredPublicConversationState): SqlBinding[] {
     state.closeReason,
     state.telegramThreadId,
     state.channelThreads.slack ?? null,
+    state.channelThreads.email ? JSON.stringify(state.channelThreads.email) : null,
     JSON.stringify(state.metadata),
     JSON.stringify(state.chatState),
     state.lastActivityAt,
@@ -170,8 +190,8 @@ export class PublicConversationStateStore {
       `INSERT OR IGNORE INTO public_conversation_state (
          singleton, conversation_id, project_id, customer_id, visitor_id,
          visitor_name, visitor_email, status, close_reason,
-         telegram_thread_id, slack_thread_id, metadata_json, chat_state_json,
-         last_activity_at, visitor_last_seen_at, visitor_presence,
+         telegram_thread_id, slack_thread_id, email_thread_json, metadata_json,
+         chat_state_json, last_activity_at, visitor_last_seen_at, visitor_presence,
          visitor_last_online_at, snoozed_until, archived_at, purge_started_at,
          external_action_started_at, external_action_lease_id, priority,
          assignee_id, created_at, updated_at, ownership_revision, revision,
@@ -179,7 +199,7 @@ export class PublicConversationStateStore {
          auto_close_schedule_id
        ) VALUES (
          1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
        ) RETURNING conversation_id`,
       stateBindings(state),
     );
@@ -197,7 +217,8 @@ export class PublicConversationStateStore {
       `UPDATE public_conversation_state SET
          conversation_id = ?, project_id = ?, customer_id = ?, visitor_id = ?,
          visitor_name = ?, visitor_email = ?, status = ?, close_reason = ?,
-         telegram_thread_id = ?, slack_thread_id = ?, metadata_json = ?, chat_state_json = ?,
+         telegram_thread_id = ?, slack_thread_id = ?, email_thread_json = ?,
+         metadata_json = ?, chat_state_json = ?,
          last_activity_at = ?, visitor_last_seen_at = ?, visitor_presence = ?,
          visitor_last_online_at = ?, snoozed_until = ?, archived_at = ?,
          purge_started_at = ?, external_action_started_at = ?,
@@ -225,6 +246,7 @@ export class PublicConversationStateStore {
       close_reason TEXT,
       telegram_thread_id TEXT,
       slack_thread_id TEXT,
+      email_thread_json TEXT,
       metadata_json TEXT NOT NULL DEFAULT '{}',
       chat_state_json TEXT NOT NULL DEFAULT '{}',
       last_activity_at INTEGER NOT NULL,
@@ -247,13 +269,15 @@ export class PublicConversationStateStore {
       retention_schedule_id TEXT,
       auto_close_schedule_id TEXT
     )`, []);
-    try {
-      this.sql.execute(
-        "ALTER TABLE public_conversation_state ADD COLUMN slack_thread_id TEXT",
-        [],
-      );
-    } catch {
-      // Existing and freshly-created state tables already have the column.
+    for (const column of ["slack_thread_id", "email_thread_json"]) {
+      try {
+        this.sql.execute(
+          `ALTER TABLE public_conversation_state ADD COLUMN ${column} TEXT`,
+          [],
+        );
+      } catch {
+        // Existing and freshly-created state tables already have the column.
+      }
     }
   }
 }
