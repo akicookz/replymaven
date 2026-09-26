@@ -1,3 +1,4 @@
+import { type ReactNode } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,6 +37,7 @@ interface HelpAnalyticsEditorProps {
   value: HelpAnalyticsEmbed[];
   onChange: (next: HelpAnalyticsEmbed[]) => void;
   disabled?: boolean;
+  action?: ReactNode;
 }
 
 function isHelpAnalyticsProvider(
@@ -100,27 +102,32 @@ export function HelpAnalyticsEditor(props: HelpAnalyticsEditorProps) {
           ))}
         </ul>
       )}
-      {available.length > 0 ? (
-        <Select
-          key={available.join(",")}
-          onValueChange={(value) => {
-            if (isHelpAnalyticsProvider(value)) addItem(value);
-          }}
-          disabled={props.disabled}
-        >
-          <SelectTrigger className="w-auto min-w-48">
-            <Plus className="h-4 w-4" />
-            <SelectValue placeholder="Add analytics" />
-          </SelectTrigger>
-          <SelectContent>
-            {available.map((provider) => (
-              <SelectItem key={provider} value={provider}>
-                {PROVIDER_LABELS[provider]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      ) : null}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          {available.length > 0 ? (
+            <Select
+              key={available.join(",")}
+              onValueChange={(value) => {
+                if (isHelpAnalyticsProvider(value)) addItem(value);
+              }}
+              disabled={props.disabled}
+            >
+              <SelectTrigger className="w-auto min-w-48">
+                <Plus className="h-4 w-4" />
+                <SelectValue placeholder="Add analytics" />
+              </SelectTrigger>
+              <SelectContent>
+                {available.map((provider) => (
+                  <SelectItem key={provider} value={provider}>
+                    {PROVIDER_LABELS[provider]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null}
+        </div>
+        <div className="ml-auto">{props.action}</div>
+      </div>
     </div>
   );
 }

@@ -328,56 +328,60 @@ function HelpCenterSettings() {
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <Button
-            onClick={() => saveSettings.mutate()}
-            disabled={!dirty || saveSettings.isPending}
-          >
-            {saveSettings.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Save className="h-4 w-4" />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              variant="outline"
+              onClick={() => testProxy.mutate()}
+              disabled={!customUrl.trim() || testProxy.isPending}
+            >
+              {testProxy.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ExternalLink className="h-4 w-4" />
+              )}
+              Test connection
+            </Button>
+            {project?.slug && (
+              <Sheet>
+                <SheetTrigger asChild>
+                  <Button variant="ghost" size="sm">
+                    <BookOpen className="h-4 w-4" />
+                    Reverse proxy setup
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="right" className="sm:max-w-xl">
+                  <SheetHeader>
+                    <SheetHeaderContent>
+                      <SheetTitle>Reverse proxy setup</SheetTitle>
+                      <SheetDescription>
+                        Rewrite <code>/docs</code> with a 200, not a 301.
+                      </SheetDescription>
+                    </SheetHeaderContent>
+                    <SheetHeaderActions>
+                      <SheetCloseButton label="Close reverse proxy setup" />
+                    </SheetHeaderActions>
+                  </SheetHeader>
+                  <SheetBody className="px-6 py-6">
+                    <ProxySetupBody projectSlug={project.slug} />
+                  </SheetBody>
+                </SheetContent>
+              </Sheet>
             )}
-            Save
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => testProxy.mutate()}
-            disabled={!customUrl.trim() || testProxy.isPending}
-          >
-            {testProxy.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <ExternalLink className="h-4 w-4" />
-            )}
-            Test connection
-          </Button>
-          {project?.slug && (
-            <Sheet>
-              <SheetTrigger asChild>
-                <Button variant="ghost" size="sm" className="ml-auto">
-                  <BookOpen className="h-4 w-4" />
-                  Reverse proxy setup
-                </Button>
-              </SheetTrigger>
-              <SheetContent side="right" className="sm:max-w-xl">
-                <SheetHeader>
-                  <SheetHeaderContent>
-                    <SheetTitle>Reverse proxy setup</SheetTitle>
-                    <SheetDescription>
-                      Rewrite <code>/docs</code> with a 200, not a 301.
-                    </SheetDescription>
-                  </SheetHeaderContent>
-                  <SheetHeaderActions>
-                    <SheetCloseButton label="Close reverse proxy setup" />
-                  </SheetHeaderActions>
-                </SheetHeader>
-                <SheetBody className="px-6 py-6">
-                  <ProxySetupBody projectSlug={project.slug} />
-                </SheetBody>
-              </SheetContent>
-            </Sheet>
-          )}
+          </div>
+          <div className="ml-auto">
+            <Button
+              onClick={() => saveSettings.mutate()}
+              disabled={!dirty || saveSettings.isPending}
+            >
+              {saveSettings.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )}
+              Save
+            </Button>
+          </div>
         </div>
 
         {testResult && (
@@ -434,11 +438,26 @@ function HelpCenterSettings() {
             setTopNavError(null);
           }}
           disabled={isLoading || saveSettings.isPending}
+          message={
+            topNavError ? (
+              <p className="text-xs text-destructive">{topNavError}</p>
+            ) : null
+          }
+          action={
+            <Button
+              onClick={() => saveSettings.mutate()}
+              disabled={!dirty || saveSettings.isPending}
+            >
+              {saveSettings.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )}
+              Save
+            </Button>
+          }
         />
 
-        {topNavError && (
-          <p className="text-xs text-destructive">{topNavError}</p>
-        )}
       </div>
 
       <div className="glass-card rounded-lg p-6 space-y-5">
@@ -525,17 +544,19 @@ function HelpCenterSettings() {
           </p>
         )}
 
-        <Button
-          onClick={() => saveSettings.mutate()}
-          disabled={!dirty || saveSettings.isPending}
-        >
-          {saveSettings.isPending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Save className="h-4 w-4" />
-          )}
-          Save
-        </Button>
+        <div className="flex justify-end">
+          <Button
+            onClick={() => saveSettings.mutate()}
+            disabled={!dirty || saveSettings.isPending}
+          >
+            {saveSettings.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="h-4 w-4" />
+            )}
+            Save
+          </Button>
+        </div>
       </div>
 
       <div className="glass-card rounded-lg p-6 space-y-5">
@@ -549,6 +570,12 @@ function HelpCenterSettings() {
           </p>
         </div>
 
+        {!canCustomCss && (
+          <p className="text-xs text-muted-foreground">
+            Analytics embeds are available on the Business plan.
+          </p>
+        )}
+
         <HelpAnalyticsEditor
           value={analytics}
           onChange={setAnalytics}
@@ -557,25 +584,21 @@ function HelpCenterSettings() {
             saveSettings.isPending ||
             (!canCustomCss && analytics.length === 0)
           }
+          action={
+            <Button
+              onClick={() => saveSettings.mutate()}
+              disabled={!dirty || saveSettings.isPending}
+            >
+              {saveSettings.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )}
+              Save
+            </Button>
+          }
         />
 
-        {!canCustomCss && (
-          <p className="text-xs text-muted-foreground">
-            Analytics embeds are available on the Business plan.
-          </p>
-        )}
-
-        <Button
-          onClick={() => saveSettings.mutate()}
-          disabled={!dirty || saveSettings.isPending}
-        >
-          {saveSettings.isPending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Save className="h-4 w-4" />
-          )}
-          Save
-        </Button>
       </div>
 
     </div>

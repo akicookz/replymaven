@@ -1,4 +1,4 @@
-import { type ChangeEvent } from "react";
+import { type ChangeEvent, type ReactNode } from "react";
 import { ChevronDown, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +22,8 @@ interface HelpTopNavEditorProps {
   value: HelpTopNavItem[];
   onChange: (next: HelpTopNavItem[]) => void;
   disabled?: boolean;
+  message?: ReactNode;
+  action?: ReactNode;
 }
 
 const MAX_ITEMS = 3;
@@ -89,16 +91,20 @@ function HelpTopNavEditor(props: HelpTopNavEditorProps) {
           ))}
         </ul>
       )}
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={addItem}
-        disabled={props.disabled || props.value.length >= MAX_ITEMS}
-      >
-        <Plus className="h-4 w-4" />
-        Add link
-      </Button>
+      {props.message}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={addItem}
+          disabled={props.disabled || props.value.length >= MAX_ITEMS}
+        >
+          <Plus className="h-4 w-4" />
+          Add link
+        </Button>
+        <div className="ml-auto">{props.action}</div>
+      </div>
     </div>
   );
 }
