@@ -1,15 +1,10 @@
 import { z } from "zod";
 import { type PublicConversationStore } from "../../../conversations/public-conversation-store";
 import { type ProjectService } from "../../../services/project-service";
-import { type TelegramService } from "../../../services/telegram-service";
-import { type SlackService } from "../../../services/slack-service";
-import { listEnabledAgentChannels } from "../../../services/enabled-agent-channels";
-import {
-  buildEmailChannelEnablement,
-  type EmailChannelEnablement,
-} from "../../../services/email-agent-channel";
 import { logError, logInfo, logWarn } from "../../../observability";
 import { createEscalation } from "../../post-turn/escalation";
+import { startSidechatTurn } from "../../../services/start-sidechat-turn";
+import type { AppEnv } from "../../../types";
 import {
   fallbackAiParticipationForStatus,
   parseChatState,
@@ -17,9 +12,7 @@ import {
   type MavenTurnContext,
 } from "../../types";
 
-const REQUEST_TEAM_HELP_MAX_SUMMARY_CHARS = 700;
 export interface RequestTeamHelpInput {
-  summary: string;
   customerName?: string;
   customerEmail?: string;
 }
@@ -37,19 +30,17 @@ export type RequestTeamHelpResult =
     }
   | { status: "unavailable"; retryable: true };
 
+// Maven writes the note to the team itself (system-origin Sidechat turn), so
+// the tool takes no summary. It does take what the customer already said
+// about themselves; the runtime only asks for what is still missing.
 const requestTeamHelpInputSchema = z
   .object({
-    summary: z
-      .string()
-      .trim()
-      .min(1)
-      .max(REQUEST_TEAM_HELP_MAX_SUMMARY_CHARS),
-    // What the customer already said about themselves. The model reads it
-    // from the conversation; the runtime only asks for what is still missing.
     customerName: z.string().trim().min(1).max(100).optional(),
     customerEmail: z.string().trim().email().max(320).optional(),
   })
   .strict();
+
+export const TEAM_HELP_TRIGGER = "Team help requested.";
 
 function createCapability(projectId: string): MavenToolDefinition["capability"] {
   return {
@@ -185,61 +176,58 @@ function getAcceptedTeamRequest(
   }
 }
 
-function enabledChannels(
-  telegramService: TelegramService | undefined,
-  slackService: SlackService | undefined,
-  settings: {
-    telegramBotToken?: string | null;
-    telegramChatId?: string | null;
-    slackBotToken?: string | null;
-    slackChannelId?: string | null;
-    botName?: string | null;
-  } | null,
-  email: EmailChannelEnablement | null = null,
-) {
-  return listEnabledAgentChannels({
-    email,
-    telegram: telegramService
-      ? {
-          storedBotToken: settings?.telegramBotToken,
-          chatId: settings?.telegramChatId,
-          botName: settings?.botName,
-          service: telegramService,
-        }
-      : null,
-    slack: slackService
-      ? {
-          storedBotToken: settings?.slackBotToken,
-          channelId: settings?.slackChannelId,
-          botName: settings?.botName,
-          service: slackService,
-        }
-      : null,
-  });
-}
-
 interface TeamRequestOperationDependencies {
   context: MavenTurnContext;
   chatService: PublicConversationStore;
   projectService: ProjectService;
-  telegramService?: TelegramService;
-  slackService?: SlackService;
   env: {
     BETTER_AUTH_URL: string;
     RESEND_API_KEY?: string;
+    MAVEN_PROJECT_AGENT: AppEnv["MAVEN_PROJECT_AGENT"];
   };
   executionCtx: ExecutionContext;
+}
+
+// Nobody typed this turn: Maven reads the thread and writes the note to the
+// team. Its text is mirrored to every channel when the turn completes. The
+// message id doubles as the dedupe key so a repair pass cannot start a
+// second note.
+async function startTeamNoteTurn(
+  dependencies: TeamRequestOperationDependencies,
+  project: { id: string; userId: string },
+  summaryMessageId: string | null,
+): Promise<void> {
+  try {
+    const started = await startSidechatTurn({
+      projectId: project.id,
+      env: dependencies.env,
+      conversationId: dependencies.context.conversationId,
+      text: TEAM_HELP_TRIGGER,
+      origin: "system",
+      actorUserId: project.userId,
+      authorUserId: "",
+      channelMessageId: `system:team-note:${summaryMessageId ?? dependencies.context.conversationId}`,
+    });
+    logInfo("team_request.note_turn", {
+      projectId: project.id,
+      conversationId: dependencies.context.conversationId,
+      accepted: started.accepted,
+      reason: started.accepted ? null : started.reason,
+    });
+  } catch (error) {
+    logError("team_request.note_turn_failed", error, {
+      projectId: project.id,
+      conversationId: dependencies.context.conversationId,
+    });
+  }
 }
 
 export async function repairAcceptedTeamRequest(
   dependencies: TeamRequestOperationDependencies,
 ): Promise<void> {
   try {
-    const [project, settings, conversation] = await Promise.all([
+    const [project, conversation] = await Promise.all([
       dependencies.projectService.getProjectById(
-        dependencies.context.projectId,
-      ),
-      dependencies.projectService.getSettings(
         dependencies.context.projectId,
       ),
       dependencies.chatService.getOperational(
@@ -259,60 +247,16 @@ export async function repairAcceptedTeamRequest(
     const acceptedRequest = getAcceptedTeamRequest(conversation.metadata);
     if (!acceptedRequest?.needsRepair) return;
 
-    await createEscalation({
+    const escalation = await createEscalation({
       chatService: dependencies.chatService,
-      projectService: dependencies.projectService,
-      agentChannels: enabledChannels(
-        dependencies.telegramService,
-        dependencies.slackService,
-        settings,
-        buildEmailChannelEnablement({
-          env: dependencies.env,
-          projectService: dependencies.projectService,
-          chatService: dependencies.chatService,
-          project,
-          botName: settings?.botName,
-        }),
-      ),
       project,
       conversation,
       summary: acceptedRequest.summary,
       acceptedTeamRequestToken: acceptedRequest.acceptanceToken,
-      settings,
-      env: dependencies.env,
-      executionCtx: dependencies.executionCtx,
-      claimExternalNotificationAttempt() {
-        return dependencies.chatService.claimTeamRequestNotification(
-          dependencies.context.projectId,
-          dependencies.context.conversationId,
-          acceptedRequest.acceptanceToken,
-        );
-      },
-      async releaseExternalNotificationAttempt() {
-        await dependencies.chatService.releaseTeamRequestNotification(
-          dependencies.context.projectId,
-          dependencies.context.conversationId,
-          acceptedRequest.acceptanceToken,
-        );
-      },
-      persistTelegramThreadId(threadId) {
-        return dependencies.chatService.persistTeamRequestTelegramThreadId(
-          dependencies.context.projectId,
-          dependencies.context.conversationId,
-          acceptedRequest.acceptanceToken,
-          threadId,
-        );
-      },
-      persistChannelThread(channel, threadId) {
-        if (channel === "email") return Promise.resolve(false);
-        return dependencies.chatService.updateChannelThread(
-          dependencies.context.projectId,
-          dependencies.context.conversationId,
-          channel,
-          threadId,
-        ).then(() => true);
-      },
     });
+    if (escalation.accepted && escalation.created) {
+      await startTeamNoteTurn(dependencies, project, escalation.summaryMessageId);
+    }
   } catch (error) {
     logError("team_request.repair_failed", error, {
       projectId: dependencies.context.projectId,
@@ -325,11 +269,10 @@ export function createRequestTeamHelpTool(dependencies: {
   context: MavenTurnContext;
   chatService: PublicConversationStore;
   projectService: ProjectService;
-  telegramService?: TelegramService;
-  slackService?: SlackService;
   env: {
     BETTER_AUTH_URL: string;
     RESEND_API_KEY?: string;
+    MAVEN_PROJECT_AGENT: AppEnv["MAVEN_PROJECT_AGENT"];
   };
   executionCtx: ExecutionContext;
   onTeamRequested(): void;
@@ -471,7 +414,7 @@ export function createRequestTeamHelpTool(dependencies: {
         await dependencies.chatService.claimTeamRequest({
           projectId: dependencies.context.projectId,
           conversationId: dependencies.context.conversationId,
-          summary: parsedInput.data.summary,
+          summary: "",
         });
       if (claim.status === "contact_required") {
         const latestConversation =
@@ -561,73 +504,27 @@ export function createRequestTeamHelpTool(dependencies: {
         const acceptedRequest = getAcceptedTeamRequest(
           claimedConversation.metadata,
         );
-        const acceptedSummary =
-          acceptedRequest?.summary ?? parsedInput.data.summary;
-        await createEscalation({
+        const escalation = await createEscalation({
           chatService: dependencies.chatService,
-          projectService: dependencies.projectService,
-          agentChannels: enabledChannels(
-            dependencies.telegramService,
-            dependencies.slackService,
-            settings,
-            buildEmailChannelEnablement({
-              env: dependencies.env,
-              projectService: dependencies.projectService,
-              chatService: dependencies.chatService,
-              project,
-              botName: settings?.botName,
-            }),
-          ),
           project,
           conversation: {
             id: claimedConversation.id,
             visitorId: claimedConversation.visitorId,
             visitorName: claimedConversation.visitorName,
             visitorEmail: claimedConversation.visitorEmail,
-            telegramThreadId: claimedConversation.telegramThreadId,
-            channelThreads: claimedConversation.channelThreads,
             status: claimedConversation.status,
             metadata: claimedConversation.metadata,
           },
-          summary: acceptedSummary,
+          summary: acceptedRequest?.summary ?? "",
           acceptedTeamRequestToken: acceptedRequest?.acceptanceToken,
-          settings,
-          env: dependencies.env,
-          executionCtx: dependencies.executionCtx,
-          claimExternalNotificationAttempt() {
-            return dependencies.chatService.claimTeamRequestNotification(
-              dependencies.context.projectId,
-              dependencies.context.conversationId,
-              acceptedRequest?.acceptanceToken ?? "",
-            );
-          },
-          async releaseExternalNotificationAttempt() {
-            if (!acceptedRequest) return;
-            await dependencies.chatService.releaseTeamRequestNotification(
-              dependencies.context.projectId,
-              dependencies.context.conversationId,
-              acceptedRequest.acceptanceToken,
-            );
-          },
-          persistTelegramThreadId(threadId) {
-            if (!acceptedRequest) return Promise.resolve(false);
-            return dependencies.chatService.persistTeamRequestTelegramThreadId(
-              dependencies.context.projectId,
-              dependencies.context.conversationId,
-              acceptedRequest.acceptanceToken,
-              threadId,
-            );
-          },
-          persistChannelThread(channel, threadId) {
-            if (channel === "email") return Promise.resolve(false);
-            return dependencies.chatService.updateChannelThread(
-              dependencies.context.projectId,
-              dependencies.context.conversationId,
-              channel,
-              threadId,
-            ).then(() => true);
-          },
         });
+        if (escalation.accepted && escalation.created) {
+          await startTeamNoteTurn(
+            dependencies,
+            project,
+            escalation.summaryMessageId,
+          );
+        }
         return createRequestedResult(
           agentLabel,
           avgResponseTime,

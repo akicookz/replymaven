@@ -58,6 +58,8 @@ import {
 import { AiService } from "./services/ai-service";
 import { executeChannelBotNameCommand } from "./services/run-bot-name-command";
 import { ingestTeammateMessage } from "./services/ingest-teammate-message";
+import { startSidechatTurn } from "./services/start-sidechat-turn";
+import { TEAM_HELP_TRIGGER } from "./chat-runtime/tools/internal/request-team-help";
 import {
   buildEmailChannelEnablement,
   buildEmailInbound,
@@ -1442,82 +1444,38 @@ const app = new Hono<HonoAppContext>()
       )) ??
       conversation;
 
-    const telegramService =
-      settings?.telegramBotToken && settings.telegramChatId
-        ? new TelegramService(db, c.env.ENCRYPTION_KEY)
-        : undefined;
-    const slackService =
-      settings?.slackBotToken && settings.slackChannelId
-        ? new SlackService(db, c.env.ENCRYPTION_KEY)
-        : undefined;
     const escalation = await createEscalation({
       chatService,
-      projectService,
-      agentChannels: listEnabledAgentChannels({
-        email: buildEmailChannelEnablement({
-          env: c.env,
-          projectService,
-          chatService,
-          project: { id: project.id, slug: project.slug, name: project.name },
-          botName: settings?.botName,
-        }),
-        telegram: telegramService
-          ? {
-              storedBotToken: settings?.telegramBotToken,
-              chatId: settings?.telegramChatId,
-              botName: settings?.botName,
-              service: telegramService,
-            }
-          : null,
-        slack: slackService
-          ? {
-              storedBotToken: settings?.slackBotToken,
-              channelId: settings?.slackChannelId,
-              botName: settings?.botName,
-              service: slackService,
-            }
-          : null,
-      }),
       project: { id: project.id, name: project.name, slug: project.slug },
       conversation: {
         id: conversation.id,
         visitorId: conversation.visitorId,
         visitorName: conversation.visitorName,
         visitorEmail: conversation.visitorEmail,
-        telegramThreadId: conversation.telegramThreadId,
-        channelThreads: conversation.channelThreads,
         status: conversation.status,
         metadata: conversation.metadata,
       },
       summary: formMessage,
-      settings,
-      env: {
-        BETTER_AUTH_URL: c.env.BETTER_AUTH_URL,
-        RESEND_API_KEY: c.env.RESEND_API_KEY,
-      },
-      executionCtx: c.executionCtx,
-      persistTelegramThreadId(threadId) {
-        return chatService.updateTelegramThreadId(
-          project.id,
-          conversation.id,
-          threadId,
-        ).then(() => true);
-      },
-      persistChannelThread(channel, threadId) {
-        if (channel === "email") return Promise.resolve(false);
-        return chatService.updateChannelThread(
-          project.id,
-          conversation.id,
-          channel,
-          threadId,
-        ).then(() => true);
-      },
     });
-    if (escalation.telegramThreadId) {
-      await chatService.updateTelegramThreadId(
-        project.id,
-        conversation.id,
-        escalation.telegramThreadId,
+    if (escalation.accepted && escalation.created) {
+      // Maven writes the note to the team; its text reaches every channel.
+      c.executionCtx.waitUntil(
+        startSidechatTurn({
+          projectId: project.id,
+          env: c.env,
+          conversationId: conversation.id,
+          text: TEAM_HELP_TRIGGER,
+          origin: "system",
+          actorUserId: project.userId,
+          authorUserId: "",
+          channelMessageId:
+            `system:team-note:${escalation.summaryMessageId ?? conversation.id}`,
+        }).then(() => undefined).catch((error: unknown) => {
+          logError("team_request.note_turn_failed", error, {
+            projectId: project.id,
+            conversationId: conversation.id,
+          });
+        }),
       );
     }
 

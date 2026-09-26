@@ -1,11 +1,5 @@
 import { type PublicConversationStore } from "../../conversations/public-conversation-store";
-import { type ProjectService } from "../../services/project-service";
-import {
-  readChannelThreadId,
-  type AgentChannelAdapter,
-} from "../../services/agent-channel";
-import { logError, logInfo } from "../../observability";
-import { buildConversationDeepLink } from "../../lib/deep-links";
+import { logInfo } from "../../observability";
 import type { PublicChannelThreads } from "../../../shared/maven-conversation";
 
 export function parseTelegramThreadId(
@@ -19,35 +13,13 @@ export function parseTelegramThreadId(
   return parsed;
 }
 
-async function runWithExternalActionLease<T>(
-  store: PublicConversationStore,
-  projectId: string,
-  conversationId: string,
-  action: () => Promise<T>,
-): Promise<{ executed: boolean; value?: T }> {
-  const lease = await store.acquireExternalAction({
-    projectId,
-    conversationId,
-  });
-  if (!lease) return { executed: false };
-  try {
-    return { executed: true, value: await action() };
-  } finally {
-    await store.releaseExternalAction(lease);
-  }
-}
-
-// Escalates a conversation for human review. No ticket row is written — the
-// detailed summary (built by the caller) is posted once into the thread as a
-// dashboard-only `review_summary` system message, broadcast live, and the
-// conversation metadata is stamped with `escalatedAt` + `reviewSummaryMessageId`
-// while preserving any existing keys (country/city/source, etc.). Telegram and
-// email pings carry the summary plus a conversation deep-link. Notification
-// failures are logged and swallowed so escalation never blocks the turn.
+// Escalates a conversation for human review: state only. The dashboard-only
+// `review_summary` pill is written once and the metadata is stamped with
+// `escalatedAt` + `reviewSummaryMessageId`. Telling the team is Maven's job:
+// the caller starts a system-origin Sidechat turn and the note it writes is
+// mirrored to every channel (see MavenProjectAgent.mirrorSidechatReply).
 export async function createEscalation(params: {
   chatService: PublicConversationStore;
-  projectService: ProjectService;
-  agentChannels?: AgentChannelAdapter[];
   project: { id: string; name: string; slug: string };
   conversation: {
     id: string;
@@ -60,29 +32,10 @@ export async function createEscalation(params: {
     metadata: Record<string, unknown> | string | null;
   };
   summary: string;
-  settings: {
-    companyName?: string | null;
-    telegramBotToken?: string | null;
-    telegramChatId?: string | null;
-  } | null;
-  env: {
-    BETTER_AUTH_URL: string;
-    RESEND_API_KEY?: string;
-  };
-  executionCtx: ExecutionContext;
   acceptedTeamRequestToken?: string;
-  notifyExternalActions?: boolean;
-  claimExternalNotificationAttempt?: () => Promise<boolean>;
-  releaseExternalNotificationAttempt?: () => Promise<void>;
-  persistTelegramThreadId?: (threadId: string) => Promise<boolean>;
-  persistChannelThread?: (
-    channel: AgentChannelAdapter["channel"],
-    threadId: string,
-  ) => Promise<boolean>;
 }): Promise<{
   summary: string;
   summaryMessageId: string | null;
-  telegramThreadId?: string;
   created: boolean;
   accepted: boolean;
 }> {
@@ -146,10 +99,6 @@ export async function createEscalation(params: {
   logInfo("escalation.started", {
     projectId: params.project.id,
     conversationId: params.conversation.id,
-    hasMessenger: (params.agentChannels ?? []).length > 0,
-    hasEmail: (params.agentChannels ?? []).some((adapter) =>
-      adapter.channel === "email"
-    ),
     summaryLength: summary.length,
     created,
   });
@@ -231,164 +180,11 @@ export async function createEscalation(params: {
     summaryMessageId: summaryMessageId ?? null,
   });
 
-  const conversationUrl = buildConversationDeepLink(
-    params.env.BETTER_AUTH_URL,
-    params.project.id,
-    params.conversation.id,
-    summaryMessageId,
-  );
-
-  const isUpdate = !created;
-
-  const agentChannels = params.agentChannels ?? [];
-  const notificationsEnabled = params.notifyExternalActions !== false;
-  const hasExternalDestinations = agentChannels.length > 0;
-
-  let telegramThreadId: string | undefined;
-  if (notificationsEnabled && hasExternalDestinations) {
-    try {
-      const notification = await runWithExternalActionLease(
-          params.chatService,
-          params.project.id,
-          params.conversation.id,
-          async () => {
-            const claimed = params.claimExternalNotificationAttempt
-              ? await params.claimExternalNotificationAttempt()
-              : true;
-            if (!claimed) {
-              return { claimed: false, persisted: [] as Array<{
-                channel: AgentChannelAdapter["channel"];
-                threadId: string;
-              }>, failed: false };
-            }
-            const who = [
-              params.conversation.visitorName,
-              params.conversation.visitorEmail,
-            ].filter(Boolean).join(" · ") || "Visitor";
-            const noteText = [
-              isUpdate
-                ? "Conversation updated, needs human review"
-                : "Needs human review",
-              "",
-              who,
-              summary,
-            ].join("\n");
-            const channelDeliveries = agentChannels.map(async (adapter) => {
-              const threadId = await adapter.post({
-                conversationId: params.conversation.id,
-                text: noteText,
-                threadId: isUpdate
-                  ? readChannelThreadId(params.conversation, adapter.channel)
-                  : null,
-                conversationLink: conversationUrl,
-              });
-              return threadId
-                ? { channel: adapter.channel, threadId }
-                : null;
-            });
-            const results = await Promise.allSettled(channelDeliveries);
-            const persisted = results.flatMap((result) =>
-              result.status === "fulfilled" && result.value
-                ? [result.value]
-                : []
-            );
-            for (const [index, result] of results.entries()) {
-              if (result.status !== "rejected") continue;
-              const channel = agentChannels[index]?.channel ?? "email";
-              logError("escalation.delivery_failed", result.reason, {
-                projectId: params.project.id,
-                conversationId: params.conversation.id,
-                channel,
-              });
-            }
-            return {
-              claimed: true,
-              persisted,
-              failed: results.some((result) => result.status === "rejected"),
-            };
-          },
-        );
-      if (!notification.executed) {
-        return { summary, summaryMessageId, created, accepted: true };
-      }
-      if (!notification.value?.claimed) {
-        return { summary, summaryMessageId, created, accepted: true };
-      }
-      if (
-        notification.value.failed &&
-        params.releaseExternalNotificationAttempt
-      ) {
-        await params.releaseExternalNotificationAttempt();
-      }
-      for (const item of notification.value.persisted) {
-        // The email adapter stores its own per-teammate thread ids.
-        if (item.channel === "email") continue;
-        if (item.channel === "telegram") {
-          telegramThreadId = item.threadId;
-        }
-        const persist = item.channel === "telegram"
-          ? params.persistTelegramThreadId
-          : (threadId: string) =>
-            params.persistChannelThread?.(item.channel, threadId)
-            ?? Promise.resolve(false);
-        if (!persist) continue;
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-          try {
-            const persisted = await persist(item.threadId);
-            if (!persisted) {
-              logError(
-                "escalation.channel_thread_persistence_rejected",
-                new Error("Channel thread persistence was rejected"),
-                {
-                  projectId: params.project.id,
-                  conversationId: params.conversation.id,
-                  channel: item.channel,
-                  threadId: item.threadId,
-                },
-              );
-            }
-            break;
-          } catch (error) {
-            if (attempt === 1) {
-              logError("escalation.channel_thread_persistence_failed", error, {
-                projectId: params.project.id,
-                conversationId: params.conversation.id,
-                channel: item.channel,
-                threadId: item.threadId,
-              });
-            }
-          }
-        }
-      }
-      logInfo("escalation.channels_notified", {
-        projectId: params.project.id,
-        conversationId: params.conversation.id,
-        telegramThreadId: telegramThreadId ?? null,
-        isUpdate,
-        repliedToMessageId: isUpdate
-          ? parseTelegramThreadId(params.conversation.telegramThreadId)
-          : null,
-      });
-    } catch (error) {
-      logError("escalation.delivery_failed", error, {
-        projectId: params.project.id,
-        conversationId: params.conversation.id,
-      });
-    }
-  }
-
   logInfo("escalation.completed", {
     projectId: params.project.id,
     conversationId: params.conversation.id,
     created,
-    telegramThreadId: telegramThreadId ?? null,
   });
 
-  return {
-    summary,
-    summaryMessageId,
-    telegramThreadId,
-    created,
-    accepted: true,
-  };
+  return { summary, summaryMessageId, created, accepted: true };
 }

@@ -19,7 +19,7 @@ function originRules(context: SidechatCustomerContext): string {
     case "telegram":
       return "This message came from a chat channel. No greeting, no sign-off.";
     case "system":
-      return "Nobody wrote to you. The customer needs a person. Write the note you would send a colleague: who the customer is, what they want, what you tried, what you need from them. The first line is the email subject: short and specific. No greeting.";
+      return "Nobody wrote to you. The customer needs a person. Write the note you would send a colleague: who the customer is, what they want, what you tried, what you need from them. The first line is the email subject: short and specific. No greeting, and no links: the channel adds the conversation link.";
     default:
       return "The teammate is in the dashboard and can see this thread.";
   }

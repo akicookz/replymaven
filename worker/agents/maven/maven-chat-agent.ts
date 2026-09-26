@@ -1481,6 +1481,25 @@ export class MavenChatAgent extends AIChatAgent<
     return true;
   }
 
+  // The team must hear about an escalation even when Maven's note turn
+  // fails: send a plain line instead of nothing.
+  private async mirrorTeamNoteFallback(): Promise<void> {
+    const meta = readTriggeringUserMeta(this.messages);
+    if (meta.origin !== "system") return;
+    try {
+      const parent = await this.parentAgent(MavenProjectAgent);
+      await parent.mirrorSidechatReply({
+        conversationId: conversationIdFromChildName(this.name),
+        text: "Needs human review\n\nA customer asked for the team. Open the conversation for details.",
+        origin: "system",
+        replyThreadId: null,
+        replyRecipient: null,
+      });
+    } catch (error) {
+      logError("sidechat_mirror.fallback_failed", error, { childName: this.name });
+    }
+  }
+
   private async mirrorAssistantMessage(
     message: UIMessage,
     continuation: boolean,
@@ -2071,6 +2090,7 @@ export class MavenChatAgent extends AIChatAgent<
         error: result.error ?? null,
       });
       await parent.updateSidechatSummary(conversationId, "failed");
+      await this.mirrorTeamNoteFallback();
       return;
     }
 
@@ -2129,6 +2149,7 @@ export class MavenChatAgent extends AIChatAgent<
       };
       if (status === "failed") {
         logWarn("sidechat_turn.empty_complete", turnContext);
+        await this.mirrorTeamNoteFallback();
       } else {
         logInfo("sidechat_turn.completed", turnContext);
       }

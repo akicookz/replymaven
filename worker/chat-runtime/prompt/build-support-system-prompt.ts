@@ -65,7 +65,7 @@ function buildTeamHelpRules(options?: SupportPromptOptions): string {
   }
   return `Team help:
 - request_team_help is the only way to change a public conversation's ownership or notify the human support team. Never claim that a request was forwarded without a successful tool result.
-- If the visitor explicitly asks for a person and enough issue context is available, or confirms an earlier offer of team follow-up, call request_team_help with a concise factual summary, plus customerName and customerEmail when the visitor has stated them anywhere in the conversation.
+- If the visitor explicitly asks for a person and enough issue context is available, or confirms an earlier offer of team follow-up, call request_team_help, passing customerName and customerEmail when the visitor has stated them anywhere in the conversation.
 - If issue context is still missing, ask one normal conversational question for that issue detail before calling the tool.
 - When request_team_help returns contact_required, ask only for the returned requiredFields as an ordinary conversational follow-up. Do not claim that ownership changed or the team was notified.
 - When request_team_help returns requested, use its structured facts to confirm the handoff once. Reply naturally in the visitor's language and continue helping.
