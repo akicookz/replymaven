@@ -29,6 +29,8 @@ import {
   stripInternalTokensStreaming,
 } from "../streaming/internal-tokens";
 import {
+  fallbackAiParticipationForStatus,
+  parseChatState,
   type AiParticipation,
   type MavenStreamPart,
   type SupportPromptSettings,
@@ -81,6 +83,38 @@ function getMetadataString(
   return typeof value === "string" && value.trim() ? value : null;
 }
 
+interface OwnershipSnapshot {
+  status: ChannelTurnOptions["conversation"]["status"];
+  chatState: string;
+}
+
+// This turn's own request_team_help moves ownership one step to
+// waiting_agent; its reply still belongs in the thread (same rule as the
+// widget's decidePublicPostTurn). Anything else keeps the original snapshot,
+// so the append is refused.
+async function ownershipAfterOwnTeamRequest(
+  options: ChannelTurnOptions,
+  snapshot: OwnershipSnapshot,
+): Promise<OwnershipSnapshot> {
+  const current = await options.chatService.getOperational(
+    options.project.id,
+    options.conversation.id,
+  );
+  if (!current) return snapshot;
+  const before = parseChatState(snapshot.chatState, {
+    fallbackAiParticipation: fallbackAiParticipationForStatus(snapshot.status),
+  });
+  const now = parseChatState(JSON.stringify(current.chatState), {
+    fallbackAiParticipation: fallbackAiParticipationForStatus(current.status),
+  });
+  const accepted = current.status === "waiting_agent" &&
+    now.aiParticipation === "assist_until_agent" &&
+    now.ownershipRevision === before.ownershipRevision + 1;
+  return accepted
+    ? { status: current.status, chatState: JSON.stringify(current.chatState) }
+    : snapshot;
+}
+
 export async function runChannelTurn(
   options: ChannelTurnOptions,
 ): Promise<PublicMessageRecord | null> {
@@ -90,7 +124,7 @@ export async function runChannelTurn(
     projectId: project.id,
     conversationId: conversation.id,
   };
-  const ownershipSnapshot = {
+  const ownershipSnapshot: OwnershipSnapshot = {
     status: conversation.status,
     chatState: JSON.stringify(conversation.chatState),
   };
@@ -152,6 +186,7 @@ export async function runChannelTurn(
 
   let content: string | null;
   let sources: PublicSourceReference[] = [];
+  let teamRequested = false;
   try {
     const rawHistory = (
       await options.chatService.getMessages(project.id, conversation.id)
@@ -224,7 +259,9 @@ export async function runChannelTurn(
           telegramService: new TelegramService(db, env.ENCRYPTION_KEY),
           slackService: new SlackService(db, env.ENCRYPTION_KEY),
           acquireHttpRateLimitPermit: () => (toolPermits += 1) <= 100,
-          onTeamRequested() {},
+          onTeamRequested() {
+            teamRequested = true;
+          },
         },
       },
       conversationHistory,
@@ -256,6 +293,9 @@ export async function runChannelTurn(
   }
   if (!content) return null;
 
+  const expectedOwnership = teamRequested
+    ? await ownershipAfterOwnTeamRequest(options, ownershipSnapshot)
+    : ownershipSnapshot;
   const botMessage = await options.chatService
     .addPublicBotMessageIfOwnershipMatches(
       {
@@ -267,7 +307,7 @@ export async function runChannelTurn(
           : null,
       },
       project.id,
-      ownershipSnapshot,
+      expectedOwnership,
     );
   if (!botMessage) {
     logWarn("channel_turn.skipped_ownership_changed", logContext);
