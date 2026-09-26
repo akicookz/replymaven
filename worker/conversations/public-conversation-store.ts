@@ -226,6 +226,14 @@ export interface PublicEmailUpdateInput {
   projectId: string;
   conversationId: string;
   messageId: string;
+  // RFC Message-ID of the sent mail, so later mail can reference it.
+  rfcMessageId?: string | null;
+}
+
+export interface PublicEmailThreadUpdate {
+  userId: string;
+  rfcMessageId: string;
+  subject: string;
 }
 
 export interface PublicPresenceUpdateInput {
@@ -407,6 +415,11 @@ export interface PublicConversationStore {
     conversationId: string,
     channel: "telegram" | "slack",
     threadId: string,
+  ): Promise<void>;
+  updateEmailThread(
+    projectId: string,
+    conversationId: string,
+    update: PublicEmailThreadUpdate,
   ): Promise<void>;
   acquireExternalAction(input: PublicExternalActionLeaseInput): Promise<PublicExternalActionLease | null>;
   releaseExternalAction(input: PublicExternalActionLease): Promise<void>;

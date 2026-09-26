@@ -58,6 +58,11 @@ import {
 import { AiService } from "./services/ai-service";
 import { executeChannelBotNameCommand } from "./services/run-bot-name-command";
 import { ingestTeammateMessage } from "./services/ingest-teammate-message";
+import {
+  buildEmailChannelEnablement,
+  buildEmailInbound,
+  createEmailAgentChannel,
+} from "./services/email-agent-channel";
 import { createTelegramAgentChannel } from "./services/telegram-agent-channel";
 import { listEnabledAgentChannels } from "./services/enabled-agent-channels";
 import {
@@ -1449,6 +1454,13 @@ const app = new Hono<HonoAppContext>()
       chatService,
       projectService,
       agentChannels: listEnabledAgentChannels({
+        email: buildEmailChannelEnablement({
+          env: c.env,
+          projectService,
+          chatService,
+          project: { id: project.id, slug: project.slug, name: project.name },
+          botName: settings?.botName,
+        }),
         telegram: telegramService
           ? {
               storedBotToken: settings?.telegramBotToken,
@@ -2597,6 +2609,13 @@ const app = new Hono<HonoAppContext>()
             slackService.getSlackSettings(project.id),
           ]);
           const channels = listEnabledAgentChannels({
+            email: buildEmailChannelEnablement({
+              env: c.env,
+              projectService,
+              chatService,
+              project: { id: project.id, slug: project.slug, name: project.name },
+              botName: null,
+            }),
             telegram: tgSettings?.telegramBotToken && tgSettings.telegramChatId
               ? {
                   storedBotToken: tgSettings.telegramBotToken,
@@ -2622,23 +2641,7 @@ const app = new Hono<HonoAppContext>()
             content: `[via email] ${cleanedText}`,
             channelThreads: inboundConversation.channelThreads,
             telegramThreadId: inboundConversation.telegramThreadId,
-            email: c.env.RESEND_API_KEY
-              ? {
-                  db,
-                  service: new EmailService(c.env.RESEND_API_KEY),
-                  projectId: project.id,
-                  projectSlug: project.slug,
-                  projectName: project.name,
-                  messageId: inboundEmailMessage.id,
-                  visitorDisplayName:
-                    inboundConversation.visitorName?.trim() ||
-                    inboundConversation.visitorEmail?.trim() ||
-                    "Visitor",
-                  messageContent: cleanedText,
-                  dashboardUrl:
-                    `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${inboundConversation.id}`,
-                }
-              : undefined,
+            email: { db, projectId: project.id },
           });
         } catch (err) {
           console.error("[InboundEmail] Joined-route forward failed:", err);
@@ -2681,7 +2684,8 @@ const app = new Hono<HonoAppContext>()
           const referencesRfcIds = threadMessages
             .map((message) => message.rfcMessageId)
             .filter((id): id is string => Boolean(id));
-          await new EmailService(c.env.RESEND_API_KEY).sendAgentMessageEmail({
+          const emailService = new EmailService(c.env.RESEND_API_KEY);
+          const sent = await emailService.sendAgentMessageEmail({
             to: inboundConversation.visitorEmail,
             projectSlug: project.slug,
             projectName: project.name,
@@ -2697,6 +2701,7 @@ const app = new Hono<HonoAppContext>()
             projectId: project.id,
             conversationId: inboundConversation.id,
             messageId: botMessage.id,
+            rfcMessageId: await emailService.resolveRfcMessageId(sent.id),
           });
         })().catch((error: unknown) => {
           logError("inbound_email.channel_turn_failed", error, {
@@ -2706,59 +2711,37 @@ const app = new Hono<HonoAppContext>()
         }));
       }
     } else if (agentUser) {
-      // ─── Agent reply branch (round-trip from agent's inbox) ───────────
-      const agentMessage = await chatService.appendHuman({
-        projectId: project.id,
-        conversationId: inboundConversation.id,
-        content: cleanedText,
-        userId: agentUser.id,
-        senderName: agentUser.name,
-        senderAvatar: agentUser.avatar,
-        idempotencyKey: `email:${emailId}`,
-        origin: "email",
-        externalReplyTo: referencedMessageId,
-      }).catch(() => null);
-      if (!agentMessage) {
-        return new Response("Conversation not found", { status: 404 });
-      }
-      await chatService.markEmailed({
-        projectId: project.id,
-        conversationId: inboundConversation.id,
-        messageId: agentMessage.id,
+      // ─── Teammate branch: the mail is a message to the team thread ────
+      const emailEnablement = buildEmailChannelEnablement({
+        env: c.env,
+        projectService,
+        chatService,
+        project: { id: project.id, slug: project.slug, name: project.name },
+        botName: (await projectService.getSettings(project.id))?.botName,
       });
-
-      // Send the visitor an email with the agent's reply so the round-trip
-      // continues over email. Skip if the conversation has no visitorEmail —
-      // the message still lands in the dashboard.
-      if (inboundConversation.visitorEmail && c.env.RESEND_API_KEY) {
-        const emailService = new EmailService(c.env.RESEND_API_KEY);
-        const visitorEmail = inboundConversation.visitorEmail;
-        c.executionCtx.waitUntil(
-          runWithConversationExternalAction(
-              chatService,
-              project.id,
-              inboundConversation.id,
-              () => emailService.sendAgentMessageEmail({
-                to: visitorEmail,
-                projectSlug: project.slug,
-                projectName: project.name,
-                conversationId: inboundConversation.id,
-                messageId: agentMessage.id,
-                messageContent: cleanedText,
-                inReplyToRfcId: rfcMessageId,
-                subject: readConversationChannelMetadata(inboundConversation.metadata).subject ??
-                  subject,
-                autoSubmitted: true,
-              }),
-            )
-            .catch((err: unknown) => {
-              console.error(
-                "[InboundEmail] Agent-reply outbound to visitor failed:",
-                err,
-              );
-            }),
-        );
-      }
+      if (!emailEnablement) return c.json({ ok: true });
+      await ingestTeammateMessage({
+        adapter: createEmailAgentChannel(emailEnablement),
+        inbound: buildEmailInbound({
+          emailId,
+          text: cleanedText,
+          rfcMessageId,
+          conversationId: inboundConversation.id,
+          author: {
+            userId: agentUser.id,
+            displayName: agentUser.name,
+            email: agentUser.email,
+          },
+        }),
+        botName: emailEnablement.botName,
+        projectId: project.id,
+        actorUserId: agentUser.id,
+        db,
+        chatService,
+        env: c.env,
+        getAgentModeConversations: () => chatService.listAgentMode(project.id),
+        findByChannelThread: async () => null,
+      });
     }
 
     // Mark this email_id as fully processed (24h TTL). Done last so synchronous

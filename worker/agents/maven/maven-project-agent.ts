@@ -142,6 +142,7 @@ import { TelegramService } from "../../services/telegram-service";
 import { SlackService } from "../../services/slack-service";
 import { listEnabledAgentChannels } from "../../services/enabled-agent-channels";
 import type { AgentChannelAdapter } from "../../services/agent-channel";
+import { buildEmailChannelEnablement } from "../../services/email-agent-channel";
 import { logError } from "../../observability";
 import {
   readLastSidechatTurnOrigin,
@@ -1258,8 +1259,21 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
 
   private async enabledAgentChannels(): Promise<AgentChannelAdapter[]> {
     const db = drizzle(this.env.DB);
-    const settings = await new ProjectService(db).getSettings(this.name);
+    const projectService = new ProjectService(db);
+    const [settings, project] = await Promise.all([
+      projectService.getSettings(this.name),
+      projectService.getProjectById(this.name),
+    ]);
     return listEnabledAgentChannels({
+      email: project
+        ? buildEmailChannelEnablement({
+          env: this.env,
+          projectService,
+          chatService: this.publicStore(),
+          project: { id: project.id, slug: project.slug, name: project.name },
+          botName: settings?.botName,
+        })
+        : null,
       telegram: settings?.telegramBotToken && settings.telegramChatId
         ? {
             storedBotToken: settings.telegramBotToken,

@@ -16,6 +16,16 @@ import {
 import type { AppEnv } from "../types";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
+// Where Maven's answer goes: the Slack thread, the Telegram message, or the
+// RFC id of the teammate's email.
+function replyThreadFor(inbound: AgentChannelInbound): string | null {
+  if (inbound.channel === "slack") {
+    return inbound.replyToExternalId ?? inbound.externalMessageId;
+  }
+  if (inbound.channel === "email") return inbound.replyToExternalId;
+  return inbound.externalMessageId;
+}
+
 const FAILED_DELIVERY =
   "That reply did not reach the visitor. Open the conversation in the dashboard and send it from there.";
 const BUSY = "Maven is already working on this.";
@@ -144,9 +154,7 @@ export async function ingestTeammateMessage(input: {
     authorUserId: inbound.author.userId,
     authorDisplayName: inbound.author.displayName,
     channelMessageId: `${inbound.channel}:${inbound.externalMessageId}`,
-    replyThreadId: inbound.channel === "slack"
-      ? inbound.replyToExternalId ?? inbound.externalMessageId
-      : inbound.externalMessageId,
+    replyThreadId: replyThreadFor(inbound),
     replyRecipient: inbound.author.email,
   });
   if (started.accepted || started.reason === "duplicate") return;

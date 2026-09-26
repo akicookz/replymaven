@@ -3,6 +3,10 @@ import { createSlackAgentChannel } from "./slack-agent-channel";
 import type { SlackService } from "./slack-service";
 import { createTelegramAgentChannel } from "./telegram-agent-channel";
 import type { TelegramService } from "./telegram-service";
+import {
+  createEmailAgentChannel,
+  type EmailChannelEnablement,
+} from "./email-agent-channel";
 
 export interface TelegramChannelEnablement {
   storedBotToken?: string | null;
@@ -21,8 +25,10 @@ export interface SlackChannelEnablement {
 export function listEnabledAgentChannels(input: {
   telegram?: TelegramChannelEnablement | null;
   slack?: SlackChannelEnablement | null;
+  email?: EmailChannelEnablement | null;
 }): AgentChannelAdapter[] {
   const channels: AgentChannelAdapter[] = [];
+  if (input.email) channels.push(createEmailAgentChannel(input.email));
   const telegram = input.telegram;
   if (telegram?.storedBotToken && telegram.chatId) {
     channels.push(createTelegramAgentChannel({

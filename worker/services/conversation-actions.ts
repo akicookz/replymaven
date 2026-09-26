@@ -200,7 +200,8 @@ export async function deliverBotMessageToCustomerChannel(input: {
     .reverse()
     .find((message) => message.author === "visitor" && message.rfcMessageId)
     ?.rfcMessageId ?? null;
-  await new EmailService(input.env.RESEND_API_KEY).sendAgentMessageEmail({
+  const emailService = new EmailService(input.env.RESEND_API_KEY);
+  const sent = await emailService.sendAgentMessageEmail({
     to,
     projectSlug: input.project.slug,
     projectName: input.project.name,
@@ -217,6 +218,7 @@ export async function deliverBotMessageToCustomerChannel(input: {
     projectId: input.project.id,
     conversationId: input.conversation.id,
     messageId: input.message.id,
+    rfcMessageId: await emailService.resolveRfcMessageId(sent.id),
   });
   return { delivered: true };
 }

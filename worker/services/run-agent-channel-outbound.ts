@@ -10,7 +10,6 @@ import {
   getAssignableUsers,
   type AssignableUser,
 } from "./assignable-users";
-import type { EmailService } from "./email-service";
 
 const MAX_FORWARD_CHARS = 1000;
 
@@ -25,16 +24,10 @@ export async function forwardVisitorToJoinedHumans(input: {
   content: string;
   channelThreads?: PublicChannelThreads | null;
   telegramThreadId?: string | null;
+  // Needed to turn joined email routes (user ids) into addresses.
   email?: {
     db: DrizzleD1Database<Record<string, unknown>>;
-    service: Pick<EmailService, "sendVisitorReplyToAgentEmail">;
     projectId: string;
-    projectSlug: string;
-    projectName: string;
-    messageId: string;
-    dashboardUrl: string;
-    messageContent?: string;
-    visitorDisplayName?: string;
   };
   dependencies?: {
     getAssignableUsers(
@@ -81,10 +74,10 @@ export async function forwardVisitorToJoinedHumans(input: {
         return null;
       })
     );
-  const email = input.email;
+  const emailAdapter = input.channels.find((adapter) => adapter.channel === "email");
   const loadAssignableUsers =
     input.dependencies?.getAssignableUsers ?? getAssignableUsers;
-  const emailDeliveries = email
+  const emailDeliveries = emailAdapter && input.email
     ? input.activeHumanRoutes
         .filter(
           (
@@ -97,25 +90,19 @@ export async function forwardVisitorToJoinedHumans(input: {
         .map((route) =>
           (async () => {
             const assignable = await loadAssignableUsers(
-              email.db,
-              email.projectId,
+              input.email!.db,
+              input.email!.projectId,
             );
             const recipient = assignable.find(
               (candidate) => candidate.id === route.userId,
             );
             if (!recipient?.email) return;
-            const visitorDisplayName = email.visitorDisplayName?.trim() ||
-              input.visitorName?.trim() ||
-              "Visitor";
-            await email.service.sendVisitorReplyToAgentEmail({
-              to: recipient.email,
-              projectSlug: email.projectSlug,
-              projectName: email.projectName,
+            await emailAdapter.post({
               conversationId: input.conversationId,
-              messageId: email.messageId,
-              visitorDisplayName,
-              messageContent: email.messageContent ?? input.content,
-              dashboardUrl: email.dashboardUrl,
+              text: `${name}: ${content}`,
+              threadId: null,
+              conversationLink: input.conversationLink,
+              recipient: recipient.email,
             });
           })().catch((error: unknown) => {
             logError("joined_human_route.email_forward_failed", error, {

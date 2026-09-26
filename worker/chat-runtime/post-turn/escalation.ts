@@ -1,4 +1,3 @@
-import { EmailService } from "../../services/email-service";
 import { type PublicConversationStore } from "../../conversations/public-conversation-store";
 import { type ProjectService } from "../../services/project-service";
 import {
@@ -8,47 +7,6 @@ import {
 import { logError, logInfo } from "../../observability";
 import { buildConversationDeepLink } from "../../lib/deep-links";
 import type { PublicChannelThreads } from "../../../shared/maven-conversation";
-
-interface EscalationEmailSender {
-  sendEscalationNotification(input: {
-    ownerEmail: string;
-    projectName: string;
-    projectSlug: string;
-    conversationId: string;
-    visitorName?: string | null;
-    visitorEmail?: string | null;
-    visitorId?: string | null;
-    summary: string;
-    conversationUrl: string;
-  }): Promise<void>;
-}
-
-export async function sendEscalationEmails(
-  emailService: EscalationEmailSender,
-  recipientEmails: string[],
-  input: Omit<
-    Parameters<EscalationEmailSender["sendEscalationNotification"]>[0],
-    "ownerEmail"
-  >,
-): Promise<void> {
-  const seen = new Set<string>();
-  const errors: unknown[] = [];
-  for (const email of recipientEmails) {
-    const recipient = email.trim();
-    const key = recipient.toLowerCase();
-    if (!recipient || seen.has(key)) continue;
-    seen.add(key);
-    try {
-      await emailService.sendEscalationNotification({
-        ...input,
-        ownerEmail: recipient,
-      });
-    } catch (error) {
-      errors.push(error);
-    }
-  }
-  if (errors.length > 0) throw errors[0];
-}
 
 export function parseTelegramThreadId(
   value: string | null | undefined,
@@ -189,7 +147,9 @@ export async function createEscalation(params: {
     projectId: params.project.id,
     conversationId: params.conversation.id,
     hasMessenger: (params.agentChannels ?? []).length > 0,
-    hasEmail: Boolean(params.env.RESEND_API_KEY),
+    hasEmail: (params.agentChannels ?? []).some((adapter) =>
+      adapter.channel === "email"
+    ),
     summaryLength: summary.length,
     created,
   });
@@ -282,14 +242,7 @@ export async function createEscalation(params: {
 
   const agentChannels = params.agentChannels ?? [];
   const notificationsEnabled = params.notifyExternalActions !== false;
-  const recipientEmails =
-    notificationsEnabled && params.env.RESEND_API_KEY
-      ? await params.projectService.getEscalationRecipientEmails(
-          params.project.id,
-        )
-      : [];
-  const hasExternalDestinations =
-    agentChannels.length > 0 || recipientEmails.length > 0;
+  const hasExternalDestinations = agentChannels.length > 0;
 
   let telegramThreadId: string | undefined;
   if (notificationsEnabled && hasExternalDestinations) {
@@ -333,28 +286,7 @@ export async function createEscalation(params: {
                 ? { channel: adapter.channel, threadId }
                 : null;
             });
-            const emailDeliveries = recipientEmails.length > 0 &&
-                params.env.RESEND_API_KEY
-              ? [sendEscalationEmails(
-                  new EmailService(params.env.RESEND_API_KEY),
-                  recipientEmails,
-                  {
-                    projectName:
-                      params.settings?.companyName ?? params.project.name,
-                    projectSlug: params.project.slug,
-                    conversationId: params.conversation.id,
-                    visitorName: params.conversation.visitorName,
-                    visitorEmail: params.conversation.visitorEmail,
-                    visitorId: params.conversation.visitorId,
-                    summary,
-                    conversationUrl,
-                  },
-                ).then(() => null)]
-              : [];
-            const results = await Promise.allSettled([
-              ...channelDeliveries,
-              ...emailDeliveries,
-            ]);
+            const results = await Promise.allSettled(channelDeliveries);
             const persisted = results.flatMap((result) =>
               result.status === "fulfilled" && result.value
                 ? [result.value]
@@ -389,6 +321,8 @@ export async function createEscalation(params: {
         await params.releaseExternalNotificationAttempt();
       }
       for (const item of notification.value.persisted) {
+        // The email adapter stores its own per-teammate thread ids.
+        if (item.channel === "email") continue;
         if (item.channel === "telegram") {
           telegramThreadId = item.threadId;
         }

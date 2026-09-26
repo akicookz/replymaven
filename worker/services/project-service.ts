@@ -33,44 +33,6 @@ export interface PublicHelpProject {
   widgetConfig: WidgetConfigRow | null;
 }
 
-interface EscalationMember {
-  id: string;
-  userId: string | null;
-  email: string;
-  role: string;
-  accessAllProjects: boolean;
-}
-
-export function selectProjectEscalationRecipientEmails(input: {
-  ownerEmail: string | null;
-  projectId: string;
-  members: EscalationMember[];
-  projectMap: Record<string, string[]>;
-  currentUserEmails: Record<string, string>;
-}): string[] {
-  const recipients: string[] = [];
-  const seen = new Set<string>();
-
-  function add(email: string | null | undefined): void {
-    const value = email?.trim();
-    if (!value) return;
-    const key = value.toLowerCase();
-    if (seen.has(key)) return;
-    seen.add(key);
-    recipients.push(value);
-  }
-
-  add(input.ownerEmail);
-  for (const member of input.members) {
-    const hasAccess =
-      member.accessAllProjects ||
-      (input.projectMap[member.id] ?? []).includes(input.projectId);
-    if (!hasAccess || !member.userId) continue;
-    add(input.currentUserEmails[member.userId]);
-  }
-  return recipients;
-}
-
 function encodeBase64Url(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes))
     .replaceAll("+", "-")
@@ -331,33 +293,44 @@ export class ProjectService {
     return rows[0]?.email ?? null;
   }
 
-  async getEscalationRecipientEmails(projectId: string): Promise<string[]> {
+  // Owner plus accepted members with access: the people a team-help note
+  // goes to, with the identity the email channel threads by.
+  async getEscalationRecipients(
+    projectId: string,
+  ): Promise<Array<{ userId: string; email: string; name: string }>> {
     const project = await this.getProjectById(projectId);
     if (!project) return [];
     const teamService = new TeamService(this.db);
-    const [ownerEmail, members, projectMap] = await Promise.all([
-      this.getOwnerEmail(projectId),
+    const [members, projectMap] = await Promise.all([
       teamService.getTeamMembers(project.userId),
       teamService.getMemberProjectMap(project.userId),
     ]);
-    const userIds = members.flatMap((member) =>
-      member.userId ? [member.userId] : []
-    );
-    const memberUsers = userIds.length > 0
-      ? await this.db
-          .select({ id: users.id, email: users.email })
-          .from(users)
-          .where(inArray(users.id, userIds))
-      : [];
-    const currentUserEmails = Object.fromEntries(
-      memberUsers.map((user) => [user.id, user.email]),
-    );
-    return selectProjectEscalationRecipientEmails({
-      ownerEmail,
-      projectId,
-      members,
-      projectMap,
-      currentUserEmails,
-    });
+    const userIds = [
+      project.userId,
+      ...members.flatMap((member) => (member.userId ? [member.userId] : [])),
+    ];
+    const rows = await this.db
+      .select({ id: users.id, email: users.email, name: users.name })
+      .from(users)
+      .where(inArray(users.id, userIds));
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const recipients: Array<{ userId: string; email: string; name: string }> = [];
+    const seen = new Set<string>();
+    function add(userId: string): void {
+      const row = byId.get(userId);
+      const email = row?.email?.trim();
+      if (!row || !email || seen.has(email.toLowerCase())) return;
+      seen.add(email.toLowerCase());
+      recipients.push({ userId: row.id, email, name: row.name });
+    }
+    add(project.userId);
+    for (const member of members) {
+      const hasAccess =
+        member.accessAllProjects ||
+        (projectMap[member.id] ?? []).includes(projectId);
+      if (!hasAccess || !member.userId) continue;
+      add(member.userId);
+    }
+    return recipients;
   }
 }

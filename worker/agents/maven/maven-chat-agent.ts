@@ -65,6 +65,7 @@ import type {
   PublicTeamRequestClaimInput,
   PublicTeamRequestClaimResult,
   PublicTeamRequestSummaryInput,
+  PublicEmailThreadUpdate,
 } from "../../conversations/public-conversation-store";
 import { canAutoCloseConversationStatus } from "../../conversations/conversation-staleness";
 import {
@@ -167,7 +168,7 @@ import { TelegramService } from "../../services/telegram-service";
 import { SlackService } from "../../services/slack-service";
 import { listEnabledAgentChannels } from "../../services/enabled-agent-channels";
 import { forwardVisitorToJoinedHumans } from "../../services/run-agent-channel-outbound";
-import { EmailService } from "../../services/email-service";
+import { buildEmailChannelEnablement } from "../../services/email-agent-channel";
 import { ToolService } from "../../services/tool-service";
 import { VisitorBanService } from "../../services/visitor-ban-service";
 import { MAVEN_ASSIGNEE_ID } from "../../../shared/maven-assignee";
@@ -1861,6 +1862,15 @@ export class MavenChatAgent extends AIChatAgent<
     if (gate === "muted") return new Response(null, { status: 204 });
     if (gate === "human_mode") {
       const channels = listEnabledAgentChannels({
+        email: project
+          ? buildEmailChannelEnablement({
+            env: this.env,
+            projectService: new ProjectService(db),
+            chatService: this as unknown as PublicConversationStore,
+            project: { id: project.id, slug: project.slug, name: project.name },
+            botName: settings?.botName,
+          })
+          : null,
         telegram: settings?.telegramBotToken && settings.telegramChatId
           ? {
               storedBotToken: settings.telegramBotToken,
@@ -1893,22 +1903,7 @@ export class MavenChatAgent extends AIChatAgent<
             content: submitted.content,
             channelThreads: currentState.channelThreads,
             telegramThreadId: currentState.telegramThreadId,
-            email: this.env.RESEND_API_KEY && project
-              ? {
-                  db,
-                  service: new EmailService(this.env.RESEND_API_KEY),
-                  projectId: project.id,
-                  projectSlug: project.slug,
-                  projectName: project.name,
-                  messageId: submitted.id,
-                  visitorDisplayName:
-                    currentState.visitorName?.trim() ||
-                    currentState.visitorEmail?.trim() ||
-                    "Visitor",
-                  dashboardUrl:
-                    `${this.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${currentState.id}`,
-                }
-              : undefined,
+            email: project ? { db, projectId: project.id } : undefined,
           });
         })());
       }
@@ -2899,8 +2894,9 @@ export class MavenChatAgent extends AIChatAgent<
       const updated = messages.map((message) => {
         if (message.id !== input.messageId) return message;
         found = true;
-        return message.emailedAt === null
-          ? { ...message, emailedAt: now }
+        const rfcMessageId = input.rfcMessageId ?? message.rfcMessageId;
+        return message.emailedAt === null || rfcMessageId !== message.rfcMessageId
+          ? { ...message, emailedAt: message.emailedAt ?? now, rfcMessageId }
           : message;
       });
       if (!found) return false;
@@ -3198,6 +3194,44 @@ export class MavenChatAgent extends AIChatAgent<
           ...state.channelThreads,
           slack: threadId,
         },
+        updatedAt: Date.now(),
+      });
+      await this.publishPublicProjection(saved, this.readPublicMessages());
+    });
+  }
+
+  // Store-facade aliases: inside a public turn the child stands in for the
+  // store, so the tool code can call the same method names either way.
+  async updateChannelThread(
+    projectId: string,
+    conversationId: string,
+    channel: "telegram" | "slack",
+    threadId: string,
+  ): Promise<void> {
+    this.assertPublicInput(projectId, conversationId);
+    await this.updatePublicChannelThread(channel, threadId);
+  }
+
+  async updateEmailThread(
+    projectId: string,
+    conversationId: string,
+    update: PublicEmailThreadUpdate,
+  ): Promise<void> {
+    this.assertPublicInput(projectId, conversationId);
+    await this.updatePublicEmailThread(update);
+  }
+
+  async updatePublicEmailThread(update: PublicEmailThreadUpdate): Promise<void> {
+    await this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      if (state.archivedAt !== null || state.purgeStartedAt !== null) return;
+      const current = state.channelThreads.email;
+      const email = {
+        subject: current?.subject ?? update.subject,
+        byUser: { ...(current?.byUser ?? {}), [update.userId]: update.rfcMessageId },
+      };
+      const saved = this.saveNextPublicState(state, {
+        channelThreads: { ...state.channelThreads, email },
         updatedAt: Date.now(),
       });
       await this.publishPublicProjection(saved, this.readPublicMessages());

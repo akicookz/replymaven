@@ -46,6 +46,7 @@ import type {
   PublicCustomerMutationResult,
   PublicDeliveryUpdateInput,
   PublicEmailUpdateInput,
+  PublicEmailThreadUpdate,
   PublicInboxCounts,
   PublicLastMessagePreview,
   PublicLegacyEscalationMetadataUpdate,
@@ -217,6 +218,7 @@ interface PublicChildStub {
     channel: "telegram" | "slack",
     threadId: string,
   ): Promise<void>;
+  updatePublicEmailThread(update: PublicEmailThreadUpdate): Promise<void>;
   acquireExternalAction(
     input: PublicExternalActionLeaseInput,
   ): Promise<PublicExternalActionLease | null>;
@@ -995,6 +997,15 @@ export class AgentPublicConversationStore implements PublicConversationStore {
   ): Promise<void> {
     const child = await this.resolveChild(projectId, conversationId);
     await child?.updatePublicChannelThread(channel, threadId);
+  }
+
+  async updateEmailThread(
+    projectId: string,
+    conversationId: string,
+    update: PublicEmailThreadUpdate,
+  ): Promise<void> {
+    const child = await this.resolveChild(projectId, conversationId);
+    await child?.updatePublicEmailThread(update);
   }
 
   async acquireExternalAction(

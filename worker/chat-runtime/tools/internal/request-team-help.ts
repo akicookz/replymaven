@@ -4,6 +4,10 @@ import { type ProjectService } from "../../../services/project-service";
 import { type TelegramService } from "../../../services/telegram-service";
 import { type SlackService } from "../../../services/slack-service";
 import { listEnabledAgentChannels } from "../../../services/enabled-agent-channels";
+import {
+  buildEmailChannelEnablement,
+  type EmailChannelEnablement,
+} from "../../../services/email-agent-channel";
 import { logError, logInfo, logWarn } from "../../../observability";
 import { createEscalation } from "../../post-turn/escalation";
 import {
@@ -191,8 +195,10 @@ function enabledChannels(
     slackChannelId?: string | null;
     botName?: string | null;
   } | null,
+  email: EmailChannelEnablement | null = null,
 ) {
   return listEnabledAgentChannels({
+    email,
     telegram: telegramService
       ? {
           storedBotToken: settings?.telegramBotToken,
@@ -260,6 +266,13 @@ export async function repairAcceptedTeamRequest(
         dependencies.telegramService,
         dependencies.slackService,
         settings,
+        buildEmailChannelEnablement({
+          env: dependencies.env,
+          projectService: dependencies.projectService,
+          chatService: dependencies.chatService,
+          project,
+          botName: settings?.botName,
+        }),
       ),
       project,
       conversation,
@@ -557,6 +570,13 @@ export function createRequestTeamHelpTool(dependencies: {
             dependencies.telegramService,
             dependencies.slackService,
             settings,
+            buildEmailChannelEnablement({
+              env: dependencies.env,
+              projectService: dependencies.projectService,
+              chatService: dependencies.chatService,
+              project,
+              botName: settings?.botName,
+            }),
           ),
           project,
           conversation: {

@@ -1,3 +1,4 @@
+import { Lexer, type Token, type Tokens } from "marked";
 import { Resend } from "resend";
 
 // ─── Email Design Tokens ──────────────────────────────────────────────────────
@@ -74,6 +75,92 @@ export function htmlToText(html: string): string {
     .trim();
 }
 
+// Bot replies are markdown; mail clients show it raw. Flatten it before send.
+export function markdownToPlainText(markdown: string): string {
+  const tokens = Lexer.lex(markdown, { gfm: true });
+  return renderBlocks(tokens).replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function renderBlocks(tokens: Token[], indent = ""): string {
+  const out: string[] = [];
+  for (const token of tokens) {
+    switch (token.type) {
+      case "heading":
+      case "paragraph":
+        out.push(indent + renderInline((token as Tokens.Paragraph).tokens ?? []));
+        break;
+      case "list": {
+        const list = token as Tokens.List;
+        out.push(list.items.map((item, index) => {
+          const marker = list.ordered ? `${Number(list.start || 1) + index}. ` : "- ";
+          const body = renderBlocks(item.tokens, indent + "  ").trimStart();
+          return `${indent}${marker}${body}`;
+        }).join("\n"));
+        break;
+      }
+      case "blockquote":
+        out.push(renderBlocks((token as Tokens.Blockquote).tokens, indent + "> "));
+        break;
+      case "code":
+        out.push((token as Tokens.Code).text.split("\n").map((line) => `${indent}  ${line}`).join("\n"));
+        break;
+      case "table": {
+        const table = token as Tokens.Table;
+        const rows = [table.header, ...table.rows].map((row) =>
+          indent + row.map((cell) => renderInline(cell.tokens)).join(" | ")
+        );
+        out.push(rows.join("\n"));
+        break;
+      }
+      case "hr":
+      case "space":
+        break;
+      case "html":
+        out.push(indent + htmlToText((token as Tokens.HTML).text));
+        break;
+      default:
+        if ("tokens" in token && Array.isArray(token.tokens)) {
+          out.push(indent + renderInline(token.tokens as Token[]));
+        } else if ("text" in token && typeof token.text === "string") {
+          out.push(indent + token.text);
+        }
+    }
+  }
+  return out.join("\n\n");
+}
+
+function renderInline(tokens: Token[]): string {
+  return tokens.map((token) => {
+    switch (token.type) {
+      case "link": {
+        const link = token as Tokens.Link;
+        const label = renderInline(link.tokens);
+        const bare = link.href.replace(/^mailto:/i, "");
+        return label && label !== link.href && label !== bare
+          ? `${label} (${link.href})`
+          : bare;
+      }
+      case "image":
+        return (token as Tokens.Image).href;
+      case "strong":
+      case "em":
+      case "del":
+        return renderInline((token as Tokens.Strong).tokens);
+      case "codespan":
+        return (token as Tokens.Codespan).text;
+      case "br":
+        return "\n";
+      case "escape":
+      case "text":
+        return "tokens" in token && Array.isArray(token.tokens)
+          ? renderInline(token.tokens as Token[])
+          : (token as Tokens.Text).text;
+      default:
+        return "raw" in token && typeof token.raw === "string" ? token.raw : "";
+    }
+  }).join("");
+}
+
 // ─── Sending domain & platform sender ─────────────────────────────────────────
 
 const EMAIL_DOMAIN = "updates.replymaven.com";
@@ -119,18 +206,6 @@ export function parseEmailMessageId(
   return pick?.[1] ?? null;
 }
 
-function buildVisitorSubjectIdentifier(opts: {
-  name?: string | null;
-  email?: string | null;
-  id?: string | null;
-}): string {
-  const name = opts.name?.trim();
-  const email = opts.email?.trim();
-  const id = opts.id?.trim();
-  const raw = name || email || (id ? `Visitor ${id.slice(0, 8)}` : "Visitor");
-  return raw.length > 60 ? `${raw.slice(0, 57)}...` : raw;
-}
-
 // ─── OTP Email Template ───────────────────────────────────────────────────────
 
 export function buildOtpEmailHtml(otp: string): string {
@@ -161,7 +236,7 @@ export class EmailService {
     text?: string;
     replyTo?: string;
     headers?: Record<string, string>;
-  }): Promise<void> {
+  }): Promise<{ id: string | null }> {
     let body: { html?: string; text: string } | { text: string };
     if (email.text !== undefined) {
       body = { text: email.text };
@@ -171,7 +246,7 @@ export class EmailService {
       throw new Error("Email requires HTML or plain text content");
     }
 
-    const { error } = await this.resend.emails.send({
+    const { data, error } = await this.resend.emails.send({
       from: email.from ?? PLATFORM_FROM,
       to: email.to,
       subject: email.subject,
@@ -182,6 +257,45 @@ export class EmailService {
     if (error) {
       throw new Error(`Resend send failed: ${error.name}: ${error.message}`);
     }
+    return { id: data?.id ?? null };
+  }
+
+  // Resend rewrites Message-ID on send and only exposes the final value on
+  // the retrieved email (the SDK type omits it). One retry covers the small
+  // gap before the sent mail is readable.
+  async resolveRfcMessageId(id: string | null): Promise<string | null> {
+    if (!id) return null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const { data } = await this.resend.emails.get(id);
+      const messageId = (data as Record<string, unknown> | null)?.message_id;
+      if (typeof messageId === "string" && messageId) return messageId;
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+    }
+    return null;
+  }
+
+  async sendTeammateEmail(input: {
+    from: string;
+    replyTo: string;
+    to: string;
+    subject: string;
+    text: string;
+    inReplyTo: string | null;
+  }): Promise<{ id: string | null }> {
+    const headers: Record<string, string> = {};
+    if (input.inReplyTo) {
+      const rfc = formatRfcMessageId(input.inReplyTo);
+      headers["In-Reply-To"] = rfc;
+      headers.References = rfc;
+    }
+    return this.send({
+      from: input.from,
+      replyTo: input.replyTo,
+      to: input.to,
+      subject: input.subject,
+      text: input.text,
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
+    });
   }
 
   async sendOtpEmail(to: string, otp: string): Promise<void> {
@@ -209,40 +323,6 @@ export class EmailService {
 <p style="${MUTED_TEXT} font-size: 13px; margin: 24px 0 0;">This invitation will expire in 7 days. If you didn't expect this invitation, you can safely ignore this email.</p>
       `),
     });
-  }
-
-  // ─── Escalation Notification (to project owner) ────────────────────────────
-
-  async sendEscalationNotification(details: {
-    ownerEmail: string;
-    projectName: string;
-    projectSlug: string;
-    conversationId: string;
-    visitorName?: string | null;
-    visitorEmail?: string | null;
-    visitorId?: string | null;
-    summary: string;
-    conversationUrl: string;
-  }): Promise<void> {
-    try {
-      const visitor = buildVisitorSubjectIdentifier({
-        name: details.visitorName,
-        email: details.visitorEmail,
-        id: details.visitorId,
-      });
-      // Sent from the project address, not the platform one: replies to
-      // `support@` are dropped as a reserved local part, so answering this
-      // notification from an inbox would go nowhere.
-      await this.send({
-        from: `${details.projectName} <${details.projectSlug}@${EMAIL_DOMAIN}>`,
-        replyTo: `${details.projectSlug}+c${details.conversationId}@${EMAIL_DOMAIN}`,
-        to: details.ownerEmail,
-        subject: `Needs human review - ${visitor}`,
-        text: `Conversation needs your review\n\n${details.summary}\n\nOpen conversation: ${details.conversationUrl}\n\nReply to this email to answer. Your reply is added to the conversation and sent to the visitor when we have their address.`,
-      });
-    } catch (error) {
-      console.error("[EmailService] Escalation notification email failed:", error);
-    }
   }
 
   // ─── Usage Alert Notifications ──────────────────────────────────────────────
@@ -358,7 +438,7 @@ ${msg.body}
     referencesRfcIds?: string[];
     subject?: string | null;
     autoSubmitted?: boolean;
-  }): Promise<void> {
+  }): Promise<{ id: string | null }> {
     const {
       to,
       projectSlug,
@@ -380,7 +460,7 @@ ${msg.body}
     const isPlaceholderOnly =
       imageUrls.length > 0 &&
       (messageContent === "Sent an image" || messageContent === "Sent images");
-    const bodyText = isPlaceholderOnly ? "" : messageContent;
+    const bodyText = isPlaceholderOnly ? "" : markdownToPlainText(messageContent);
 
     const imageLinks = imageUrls.map((url) =>
       url.startsWith("/") ? `${APP_ORIGIN}${url}` : url
@@ -410,7 +490,7 @@ ${msg.body}
       headers["Auto-Submitted"] = "auto-generated";
     }
 
-    await this.send({
+    return this.send({
       from: `${projectName} <${projectSlug}@${EMAIL_DOMAIN}>`,
       replyTo: `${projectSlug}+c${conversationId}@${EMAIL_DOMAIN}`,
       to,
@@ -420,43 +500,6 @@ ${msg.body}
         bodyText,
         ...imageLinks.map((url) => `Image: ${url}`),
       ].filter(Boolean).join("\n\n"),
-    });
-  }
-
-  async sendVisitorReplyToAgentEmail(details: {
-    to: string;
-    projectSlug: string;
-    projectName: string;
-    conversationId: string;
-    messageId: string;
-    visitorDisplayName: string;
-    messageContent: string;
-    dashboardUrl: string;
-  }): Promise<void> {
-    const {
-      to,
-      projectSlug,
-      projectName,
-      conversationId,
-      messageId,
-      visitorDisplayName,
-      messageContent,
-      dashboardUrl,
-    } = details;
-
-    await this.send({
-      from: `${projectName} <${projectSlug}@${EMAIL_DOMAIN}>`,
-      replyTo: `${projectSlug}+c${conversationId}@${EMAIL_DOMAIN}`,
-      to,
-      subject: `Re: ${visitorDisplayName} replied - ${projectName}`,
-      headers: {
-        "X-Conversation-Id": conversationId,
-        "X-Project-Slug": projectSlug,
-        "Message-ID": buildEmailMessageId(messageId),
-        "Auto-Submitted": "auto-generated",
-        "Precedence": "bulk",
-      },
-      text: `${visitorDisplayName} replied\n\n${messageContent}\n\nView conversation: ${dashboardUrl}\n\nReply to this email to respond. Your reply will be sent to ${visitorDisplayName} and added to the conversation.`,
     });
   }
 
