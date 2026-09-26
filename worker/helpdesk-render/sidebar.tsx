@@ -10,6 +10,9 @@ import { resolveHelpUploadUrl } from "./resolve-help-upload-url";
 import { HelpTabLinks } from "./tab-links";
 import { HelpTopNavLinks } from "./top-nav-links";
 
+const SEARCH_SVG =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>';
+
 export interface HelpSidebarProps {
   project: ProjectRow;
   categories: HelpCategoryRow[];
@@ -25,6 +28,22 @@ export interface HelpSidebarProps {
 export function HelpSidebar(props: HelpSidebarProps) {
   return (
     <aside class="help-sidebar" id="rm-help-sidebar" aria-label="Help menu">
+      <button
+        type="button"
+        class="help-sidebar-search"
+        data-help-search-open
+        aria-label="Search help center"
+        aria-haspopup="dialog"
+        aria-controls="rm-help-search"
+      >
+        <span
+          class="help-sidebar-search-icon"
+          aria-hidden="true"
+          dangerouslySetInnerHTML={{ __html: SEARCH_SVG }}
+        />
+        <span class="help-sidebar-search-label">Search…</span>
+        <kbd class="help-sidebar-search-kbd" data-help-search-kbd>⌘K</kbd>
+      </button>
       <HelpTabLinks
         tabs={props.nav.tabs}
         activeTabId={props.nav.activeTabId}
