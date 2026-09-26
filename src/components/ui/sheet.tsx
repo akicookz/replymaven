@@ -43,7 +43,7 @@ function SheetOverlay({
 }
 
 const SHELL =
-  "glass-reading fixed z-50 flex min-w-0 transform-gpu flex-col overflow-hidden border border-hairline shadow-lg transition ease-in-out data-[state=closed]:animate-out data-[state=closed]:duration-200 data-[state=open]:animate-in data-[state=open]:duration-300"
+  "glass-overlay fixed z-50 flex min-w-0 transform-gpu flex-col overflow-hidden transition ease-in-out data-[state=closed]:animate-out data-[state=closed]:duration-200 data-[state=open]:animate-in data-[state=open]:duration-300"
 
 const SIDES = {
   right:

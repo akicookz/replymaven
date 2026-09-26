@@ -60,7 +60,7 @@ function CustomerPickerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[min(82vh,720px)] overflow-hidden rounded-3xl bg-card/95 p-0 shadow-[0_24px_80px_rgba(0,0,0,0.45),0_0_0_1px_rgba(255,255,255,0.08)] backdrop-blur-xl sm:max-w-xl">
+      <DialogContent className="max-h-[min(82vh,720px)] overflow-hidden p-0 sm:max-w-xl">
         <DialogHeader className="px-6 pt-6 sm:px-7 sm:pt-7">
           <DialogTitle className="text-balance font-display text-2xl">
             {title}

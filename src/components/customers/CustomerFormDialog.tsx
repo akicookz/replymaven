@@ -147,7 +147,7 @@ function CustomerFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[min(88vh,820px)] overflow-y-auto rounded-3xl bg-card/95 p-0 shadow-[0_24px_80px_rgba(0,0,0,0.45),0_0_0_1px_rgba(255,255,255,0.08)] backdrop-blur-xl sm:max-w-3xl">
+      <DialogContent className="max-h-[min(88vh,820px)] overflow-y-auto p-0 sm:max-w-3xl">
         <form onSubmit={handleSubmit}>
           <DialogHeader className="px-6 pt-6 sm:px-7 sm:pt-7">
             <div className="mb-1 flex size-11 items-center justify-center rounded-2xl bg-brand/12 text-brand">

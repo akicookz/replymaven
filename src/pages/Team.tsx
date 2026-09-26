@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ChevronDown,
+  ChevronsUpDown,
   UserPlus,
   Loader2,
   Shield,
@@ -546,16 +546,23 @@ function MemberRow({
 
 // ─── Team Page ────────────────────────────────────────────────────────────────
 
-function TeamSwitcher() {
+function TeamTitle() {
   const [open, setOpen] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
   const { data } = useTeams();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const teams = data?.teams ?? [];
-  const activeTeam = teams.find((team) => team.isActive);
+  const activeTeam = teams.find((team) => team.isActive) ?? teams[0];
+  const name = activeTeam?.name ?? "Team";
 
-  if (teams.length <= 1) return null;
+  if (teams.length <= 1) {
+    return (
+      <h2 className="min-w-0 truncate text-sm font-semibold text-ink-1">
+        {name}
+      </h2>
+    );
+  }
 
   async function switchTeam(teamId: string) {
     setOpen(false);
@@ -580,22 +587,15 @@ function TeamSwitcher() {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button
+        <button
           type="button"
-          variant="ghost"
-          size="sm"
           disabled={isSwitching}
-          aria-label="Switch team"
-          className="min-w-0 max-w-56 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
+          aria-label={`Switch team, current team ${name}`}
+          className="-ml-2 flex h-8 min-w-0 max-w-64 items-center gap-1 rounded-md px-2 text-sm font-semibold text-ink-1 transition-colors hover:bg-glass-button disabled:opacity-60"
         >
-          <span className="truncate">{activeTeam?.name ?? "Select team"}</span>
-          <ChevronDown
-            className={cn(
-              "size-3.5 transition-transform",
-              open && "rotate-180",
-            )}
-          />
-        </Button>
+          <span className="truncate">{name}</span>
+          <ChevronsUpDown className="size-3.5 shrink-0 text-ink-5" strokeWidth={1.5} />
+        </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-60 p-1">
         <div className="space-y-0.5">
@@ -607,8 +607,8 @@ function TeamSwitcher() {
               className={cn(
                 "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors",
                 team.isActive
-                  ? "bg-accent font-medium text-foreground"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  ? "bg-glass-button font-medium text-ink-1"
+                  : "text-ink-5 hover:bg-glass-button hover:text-ink-1",
               )}
             >
               <span className="flex-1 truncate">
@@ -655,33 +655,6 @@ function Team() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-start gap-3">
-          <MobileMenuButton />
-          <div className="min-w-0">
-            <div className="flex min-w-0 items-center gap-2">
-              <h1 className="shrink-0 text-xl font-bold text-foreground md:text-2xl">
-                Team
-              </h1>
-              <TeamSwitcher />
-            </div>
-            <p className="text-xs md:text-sm text-muted-foreground mt-1">
-              {seatCurrent} of {seatMax} seat{seatMax !== 1 ? "s" : ""} used
-            </p>
-          </div>
-        </div>
-        {isOwner && (
-          <Button
-            onClick={() => setShowInvite(true)}
-            disabled={seatCurrent >= seatMax}
-            className="w-full sm:w-auto"
-          >
-            <UserPlus className="w-4 h-4 mr-2" />
-            Invite Member
-          </Button>
-        )}
-      </div>
-
       <Sheet open={showInvite} onOpenChange={setShowInvite}>
         <SheetContent className="sm:max-w-2xl">
           <SheetHeader>
@@ -696,14 +669,34 @@ function Team() {
 
       {/* Members Table */}
       <div className="glass-card rounded-card overflow-x-auto">
+        <div className="flex items-center justify-between gap-3 px-4 pt-4">
+          <div className="flex min-w-0 items-center gap-2">
+            <MobileMenuButton />
+            <TeamTitle />
+            <span className="shrink-0 text-xs text-muted-foreground">
+              {seatCurrent} of {seatMax} seat{seatMax !== 1 ? "s" : ""} used
+            </span>
+          </div>
+          {isOwner && (
+            <Button
+              size="sm"
+              onClick={() => setShowInvite(true)}
+              disabled={seatCurrent >= seatMax}
+              className="shrink-0"
+            >
+              <UserPlus />
+              Invite member
+            </Button>
+          )}
+        </div>
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-muted-foreground">
-              <th className="px-4 pt-4 pb-2 font-medium">Member</th>
-              <th className="px-4 pt-4 pb-2 font-medium">Role</th>
-              <th className="px-4 pt-4 pb-2 font-medium">Status</th>
-              <th className="px-4 pt-4 pb-2 font-medium">Access</th>
-              <th className="px-4 pt-4 pb-2" />
+              <th className="px-4 pt-3 pb-2 font-medium">Member</th>
+              <th className="px-4 pt-3 pb-2 font-medium">Role</th>
+              <th className="px-4 pt-3 pb-2 font-medium">Status</th>
+              <th className="px-4 pt-3 pb-2 font-medium">Access</th>
+              <th className="px-4 pt-3 pb-2" />
             </tr>
           </thead>
           <tbody>
@@ -748,11 +741,6 @@ function Team() {
             ))}
           </tbody>
         </table>
-        {members.length === 0 && !showInvite && (
-          <p className="px-4 pb-4 text-sm text-muted-foreground">
-            No team members yet. Invite your team to collaborate on projects.
-          </p>
-        )}
       </div>
 
       {seatCurrent >= seatMax && (

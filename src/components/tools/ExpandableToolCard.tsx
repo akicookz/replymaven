@@ -142,7 +142,7 @@ export function ExpandableToolCard({
         sideOffset={6}
         collisionPadding={16}
         className={cn(
-          "max-h-[min(34rem,70vh)] w-(--radix-popover-trigger-width) min-w-80 overflow-y-auto p-0 ring-1 ring-border",
+          "max-h-[min(34rem,70vh)] w-(--radix-popover-trigger-width) min-w-80 overflow-y-auto p-0",
           contentClassName,
         )}
       >
