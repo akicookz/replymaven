@@ -71,11 +71,11 @@ function SortableArticleCard({
     <li
       ref={setNodeRef}
       style={style}
-      className="group relative flex flex-col overflow-hidden rounded-xl bg-muted/40 hover:bg-muted/60 transition-colors"
+      className="group relative flex flex-col overflow-hidden rounded-xl bg-glass-card hover:bg-glass-button transition-colors"
     >
       <Link to={editHref} className="flex flex-col">
         {article.thumbnail && (
-          <div className="aspect-[16/9] w-full bg-muted/60 overflow-hidden">
+          <div className="aspect-[16/9] w-full bg-glass-button overflow-hidden">
             <img
               src={article.thumbnail}
               alt=""
@@ -91,10 +91,10 @@ function SortableArticleCard({
             </span>
             <span
               className={cn(
-                "shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full",
+                "shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-[6px]",
                 article.status === "published"
                   ? "bg-green-500/15 text-green-700 dark:text-green-300"
-                  : "bg-muted text-muted-foreground",
+                  : "bg-glass-button text-muted-foreground",
               )}
             >
               {article.status === "published" ? "Published" : "Draft"}
@@ -179,7 +179,7 @@ function HelpArticleList({
 
   if (articles.length === 0) {
     return (
-      <div className="px-4 py-10 rounded-xl bg-muted/30 border-2 border-dashed border-muted text-sm text-muted-foreground text-center">
+      <div className="px-4 py-10 rounded-xl glass-card border-2 border-dashed border-muted text-sm text-muted-foreground text-center">
         No articles in this category yet. Click "New Article" to create one.
       </div>
     );

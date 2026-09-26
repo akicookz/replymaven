@@ -67,7 +67,7 @@ function UsageBar({
           {used.toLocaleString()} / {max.toLocaleString()}
         </span>
       </div>
-      <div className="h-2 rounded-full bg-muted overflow-hidden">
+      <div className="h-2 rounded-full bg-glass-button overflow-hidden">
         <div
           className={`h-full rounded-full transition-all ${
             isDanger
@@ -92,14 +92,14 @@ function StatusBadge({ status }: { status: string }) {
     past_due: { label: "Past Due", icon: AlertTriangle, className: "text-yellow-500 bg-yellow-500/15" },
     canceled: { label: "Canceled", icon: XCircle, className: "text-red-500 bg-red-500/15" },
     unpaid: { label: "Unpaid", icon: AlertTriangle, className: "text-red-500 bg-red-500/15" },
-    incomplete: { label: "Incomplete", icon: Clock, className: "text-muted-foreground bg-muted" },
+    incomplete: { label: "Incomplete", icon: Clock, className: "text-muted-foreground bg-glass-button" },
   };
 
   const c = config[status] ?? config.incomplete;
   const Icon = c.icon;
 
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${c.className}`}>
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[6px] text-xs font-medium ${c.className}`}>
       <Icon className="w-3 h-3" />
       {c.label}
     </span>
@@ -119,7 +119,7 @@ function ConvoStatusBadge({ status }: { status: string }) {
   const c = config[status] ?? { label: status, className: "bg-status-closed/10 text-status-closed" };
 
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${c.className}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-[6px] text-[11px] font-medium ${c.className}`}>
       {c.label}
     </span>
   );
@@ -256,7 +256,7 @@ function UsageLog() {
 
   if (isError) {
     return (
-      <div className="rounded-2xl bg-card p-6 text-center space-y-2">
+      <div className="glass-card rounded-card p-6 text-center space-y-2">
         <AlertTriangle className="w-6 h-6 text-muted-foreground mx-auto" />
         <p className="text-sm text-muted-foreground">Failed to load usage log.</p>
       </div>
@@ -264,7 +264,7 @@ function UsageLog() {
   }
 
   return (
-    <div className="rounded-2xl bg-card p-6 space-y-4">
+    <div className="glass-card rounded-card p-6 space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-foreground">Usage Log</h2>
@@ -342,7 +342,7 @@ function UsageLog() {
       <div className="overflow-x-auto -mx-6">
         <table className="w-full min-w-[500px]">
           <thead>
-            <tr className="bg-muted/30">
+            <tr className="bg-glass-card">
               <th className="px-6 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 Visitor
               </th>
@@ -370,7 +370,7 @@ function UsageLog() {
               Array.from({ length: 5 }).map((_, i) => (
                 <tr key={i}>
                   <td className="px-6 py-3" colSpan={4}>
-                    <div className="h-4 bg-muted/50 rounded animate-pulse" />
+                    <div className="h-4 bg-glass-button rounded animate-pulse" />
                   </td>
                 </tr>
               ))
@@ -512,7 +512,7 @@ function Billing() {
           </div>
         </div>
 
-        <div className="rounded-2xl bg-card p-8 text-center space-y-4">
+        <div className="glass-card rounded-card p-8 text-center space-y-4">
           <CreditCard className="w-10 h-10 text-muted-foreground mx-auto" />
           <div className="space-y-1">
             <p className="font-medium text-foreground">No active subscription</p>
@@ -611,7 +611,7 @@ function Billing() {
       )}
 
       {/* Current Plan */}
-      <div className="rounded-2xl bg-card p-6 space-y-4">
+      <div className="glass-card rounded-card p-6 space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-foreground">
@@ -634,7 +634,7 @@ function Billing() {
 
       {/* Usage */}
       {limits && (
-        <div className="rounded-2xl bg-card p-6 space-y-4">
+        <div className="glass-card rounded-card p-6 space-y-4">
           <div className="flex items-baseline justify-between">
             <h2 className="text-lg font-semibold text-foreground">Usage</h2>
             {data?.usagePeriodStart && data?.usagePeriodEnd && (

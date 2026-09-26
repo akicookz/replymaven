@@ -129,7 +129,7 @@ function Customers() {
         </Button>
       </div>
 
-      <div className="overflow-hidden rounded-xl bg-card">
+      <div className="glass-card rounded-card overflow-hidden">
         {customersQuery.isLoading ? (
           <>
             <div className="px-4 py-4 sm:px-6">
@@ -174,13 +174,13 @@ function Customers() {
             {showSearch ? (
               <div className="px-4 pt-4 sm:px-6">
                 <div className="relative max-w-sm">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-ink-6" />
                   <Input
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
                     placeholder="Search customers"
                     aria-label="Search customers"
-                    className="h-10 rounded-xl bg-background/70 pl-9"
+                    className="pl-9"
                   />
                 </div>
               </div>
@@ -188,7 +188,7 @@ function Customers() {
 
             {customers.length === 0 ? (
               <div className="px-6 py-16 text-center">
-                <div className="mx-auto flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                <div className="mx-auto flex size-10 items-center justify-center rounded-full bg-glass-button text-muted-foreground">
                   {debouncedSearch ? (
                     <Search className="size-5" />
                   ) : (
@@ -208,7 +208,7 @@ function Customers() {
               <div role="table" aria-label="Customers" className="mt-3 w-full">
                 <div
                   role="row"
-                  className="hidden grid-cols-[minmax(180px,1.3fr)_minmax(180px,1.3fr)_100px_120px] items-center gap-x-4 bg-muted/25 px-6 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground md:grid xl:grid-cols-[minmax(160px,1.2fr)_minmax(180px,1.3fr)_minmax(120px,0.9fr)_minmax(140px,1fr)_100px_110px_110px]"
+                  className="hidden grid-cols-[minmax(180px,1.3fr)_minmax(180px,1.3fr)_100px_120px] items-center gap-x-4 bg-glass-card px-6 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground md:grid xl:grid-cols-[minmax(160px,1.2fr)_minmax(180px,1.3fr)_minmax(120px,0.9fr)_minmax(140px,1fr)_100px_110px_110px]"
                 >
                   <span role="columnheader">Name</span>
                   <span role="columnheader">Email</span>
@@ -228,7 +228,7 @@ function Customers() {
                       className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 px-4 py-3 text-sm transition-colors duration-150 hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-6 md:grid-cols-[minmax(180px,1.3fr)_minmax(180px,1.3fr)_100px_120px] xl:grid-cols-[minmax(160px,1.2fr)_minmax(180px,1.3fr)_minmax(120px,0.9fr)_minmax(140px,1fr)_100px_110px_110px]"
                     >
                       <span role="cell" className="flex min-w-0 items-center gap-3">
-                        <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-glass-button text-xs font-semibold text-foreground">
                           {customerInitial(customer.name, customer.email)}
                         </span>
                         <span className="min-w-0">

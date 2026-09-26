@@ -34,6 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -361,7 +362,7 @@ function ActionsTab({
     <div className="space-y-6">
       {/* Add Action Form */}
       {showAddForm && (
-      <div className="bg-card rounded-2xl p-5 space-y-4">
+      <div className="glass-card rounded-card p-5 space-y-4">
         <h3 className="text-sm font-semibold text-foreground">Add action</h3>
 
         <form
@@ -418,7 +419,7 @@ function ActionsTab({
                     "w-8 h-8 rounded-lg flex items-center justify-center transition-colors",
                     newIcon === opt.value
                       ? "bg-brand text-white"
-                      : "bg-muted text-muted-foreground hover:bg-muted/80",
+                      : "bg-glass-button text-muted-foreground hover:bg-glass-button",
                   )}
                   title={opt.label}
                 >
@@ -430,22 +431,20 @@ function ActionsTab({
 
           {/* Row 2: Label + Action */}
           <div className="flex flex-col sm:flex-row gap-2">
-            <input
+            <Input
               type="text"
               value={newLabel}
               onChange={(e) => setNewLabel(e.target.value)}
               placeholder="Label"
-              required
-              className="flex-1 px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              required className="flex-1"
             />
             {(newType === "prompt" || newType === "link") && (
-              <input
+              <Input
                 type={newType === "link" ? "url" : "text"}
                 value={newAction}
                 onChange={(e) => setNewAction(e.target.value)}
                 placeholder={newType === "link" ? "https://example.com" : "Pre-filled message"}
-                required
-                className="flex-1 px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                required className="flex-1"
               />
             )}
           </div>
@@ -485,7 +484,7 @@ function ActionsTab({
       {isLoading ? (
         <div className="space-y-2">
           {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="h-16 rounded-xl bg-muted animate-pulse" />
+            <div key={i} className="h-16 rounded-xl bg-glass-button animate-pulse" />
           ))}
         </div>
       ) : isError ? (
@@ -503,11 +502,11 @@ function ActionsTab({
             return (
               <div
                 key={action.id}
-                className="bg-card rounded-xl overflow-hidden group"
+                className="glass-card rounded-card overflow-hidden group"
               >
                 {/* Collapsed Row */}
                 <div
-                  className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors"
+                  className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-glass-card transition-colors"
                   onClick={() => expandAction(action)}
                 >
                   {/* Chevron + Icon */}
@@ -517,7 +516,7 @@ function ActionsTab({
                     ) : (
                       <ChevronRight className="w-4 h-4 text-muted-foreground" />
                     )}
-                    <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center">
+                    <div className="w-8 h-8 rounded-lg bg-glass-button flex items-center justify-center">
                       <IconComp className="w-4 h-4 text-muted-foreground" />
                     </div>
                   </div>
@@ -613,7 +612,7 @@ function ActionsTab({
                               "w-8 h-8 rounded-lg flex items-center justify-center transition-colors",
                               editForm.icon === opt.value
                                 ? "bg-brand text-white"
-                                : "bg-muted text-muted-foreground hover:bg-muted/80",
+                                : "bg-glass-button text-muted-foreground hover:bg-glass-button",
                             )}
                             title={opt.label}
                           >
@@ -664,14 +663,13 @@ function ActionsTab({
                             {/* Form description */}
                             <div className="space-y-2">
                               <Label className="text-xs text-muted-foreground">Form description</Label>
-                              <textarea
+                              <Textarea
                                 value={editForm.ticketDescription}
                                 onChange={(e) =>
                                   setEditForm((prev) => ({ ...prev, ticketDescription: e.target.value }))
                                 }
                                 placeholder="We'll get back to you within 1-2 hours."
                                 rows={2}
-                                className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
                               />
                             </div>
 
@@ -689,7 +687,7 @@ function ActionsTab({
                                   {editForm.ticketFields.map((field, index) => (
                                     <div
                                       key={index}
-                                      className="flex items-center gap-2 px-3 py-2 bg-background rounded-lg group/field"
+                                      className="flex items-center gap-2 px-3 py-2 glass-card rounded-lg group/field"
                                     >
                                       <div className="flex flex-col -space-y-1">
                                         <button
@@ -709,7 +707,7 @@ function ActionsTab({
                                           <ChevronDown className="w-3.5 h-3.5" />
                                         </button>
                                       </div>
-                                      <div className="w-7 h-7 rounded-md bg-muted flex items-center justify-center shrink-0">
+                                      <div className="w-7 h-7 rounded-md bg-glass-button flex items-center justify-center shrink-0">
                                         {field.type === "textarea" ? (
                                           <AlignLeft className="w-3.5 h-3.5 text-muted-foreground" />
                                         ) : (
@@ -747,7 +745,7 @@ function ActionsTab({
                               )}
 
                               {editForm.ticketFields.length < 10 && (
-                                <div className="space-y-3 p-3 bg-background rounded-xl border-2 border-dashed border-muted">
+                                <div className="space-y-3 p-3 glass-card rounded-xl border-2 border-dashed border-muted">
                                   <div className="flex flex-col sm:flex-row gap-2">
                                     <Input
                                       type="text"

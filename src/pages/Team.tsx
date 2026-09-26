@@ -2,8 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Building2,
-  ChevronsUpDown,
+  ChevronDown,
   UserPlus,
   Loader2,
   Shield,
@@ -44,11 +43,13 @@ import {
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Sheet,
   SheetBody,
   SheetCloseButton,
   SheetContent,
+  SheetFooter,
   SheetHeader,
   SheetHeaderContent,
   SheetTitle,
@@ -113,7 +114,7 @@ function ProjectAccessPicker({
   return (
     <div className={cn("grid max-h-64 gap-2 overflow-y-auto pr-1", compact ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3")}>
       {projects.length === 0 ? (
-        <p className="rounded-xl bg-muted/40 px-3 py-4 text-sm text-muted-foreground">
+        <p className="rounded-xl glass-card px-3 py-4 text-sm text-muted-foreground">
           No projects yet.
         </p>
       ) : (
@@ -123,10 +124,8 @@ function ProjectAccessPicker({
             <label
               key={project.id}
               className={cn(
-                "flex min-h-[76px] cursor-pointer items-start justify-between gap-2 rounded-xl p-3 transition-[background-color,box-shadow]",
-                checked
-                  ? "bg-primary/10 shadow-[inset_0_0_0_1px_var(--primary)]"
-                  : "bg-muted/40 shadow-[inset_0_0_0_1px_transparent] hover:bg-muted/60",
+                "glass-button flex cursor-pointer items-center justify-between gap-3 rounded-xl px-3 py-2.5",
+                checked && "bg-glass-raised inset-ring inset-ring-hairline-strong",
               )}
             >
               <span className="min-w-0">
@@ -143,7 +142,6 @@ function ProjectAccessPicker({
                   toggleProject(project.id, nextChecked === true)
                 }
                 aria-label={`Select ${project.name}`}
-                className="mt-0.5 size-4 shrink-0 rounded"
               />
             </label>
           );
@@ -203,10 +201,11 @@ function InviteForm({
 
   if (inviteData) {
     return (
-      <div className="space-y-4">
+      <>
+      <SheetBody className="px-5 py-5">
         <div className="space-y-3">
           {inviteData.map((invite) => (
-            <div key={invite.id} className="rounded-xl bg-muted/40 p-3">
+            <div key={invite.id} className="rounded-xl glass-card p-3">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-foreground">{invite.email}</p>
@@ -225,39 +224,40 @@ function InviteForm({
             </div>
           ))}
         </div>
-
-        <Button onClick={onClose} className="w-full">
-          Done
-        </Button>
-      </div>
+      </SheetBody>
+      <SheetFooter className="px-5 pb-5">
+        <Button onClick={onClose}>Done</Button>
+      </SheetFooter>
+      </>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <>
+    <SheetBody className="space-y-6 px-5 py-5">
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <p className="text-sm font-medium text-foreground">Email addresses</p>
-          <Button type="button" variant="ghost" size="sm" disabled={invites.length >= maxInvites} onClick={() => setInvites((rows) => [...rows, { id: crypto.randomUUID(), email: "", role: "member" }])}>
-            <Plus className="mr-1.5 size-4" /> Add email
+          <Label htmlFor={`invite-email-${invites[0]?.id}`}>Email addresses</Label>
+          <Button type="button" variant="ghost" size="sm" disabled={invites.length >= maxInvites} onClick={() => setInvites((rows) => [...rows, { id: crypto.randomUUID(), email: "", role: "member" }])} className="-mr-2 text-muted-foreground hover:text-foreground">
+            <Plus /> Add email
           </Button>
         </div>
         <div className="space-y-2">
           {invites.map((invite, index) => (
             <div key={invite.id} className="flex items-center gap-2">
-              <Input type="email" value={invite.email} placeholder="teammate@company.com" aria-label={`Email address ${index + 1}`} onChange={(event) => setInvites((rows) => rows.map((row) => row.id === invite.id ? { ...row, email: event.target.value } : row))} />
+              <Input id={`invite-email-${invite.id}`} type="email" value={invite.email} placeholder="teammate@company.com" aria-label={`Email address ${index + 1}`} onChange={(event) => setInvites((rows) => rows.map((row) => row.id === invite.id ? { ...row, email: event.target.value } : row))} />
               <Select value={invite.role} onValueChange={(value) => setInvites((rows) => rows.map((row) => row.id === invite.id ? { ...row, role: value as "admin" | "member" } : row))}>
-                <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="w-28 shrink-0" aria-label={`Role for email ${index + 1}`}><SelectValue /></SelectTrigger>
                 <SelectContent><SelectItem value="admin">Admin</SelectItem><SelectItem value="member">Member</SelectItem></SelectContent>
               </Select>
-              {invites.length > 1 && <Button type="button" variant="ghost" size="icon" aria-label={`Remove email ${index + 1}`} onClick={() => setInvites((rows) => rows.filter((row) => row.id !== invite.id))}><X className="size-4" /></Button>}
+              {invites.length > 1 && <Button type="button" variant="ghost" size="icon" aria-label={`Remove email ${index + 1}`} onClick={() => setInvites((rows) => rows.filter((row) => row.id !== invite.id))} className="shrink-0 text-muted-foreground hover:text-foreground"><X /></Button>}
             </div>
           ))}
         </div>
       </div>
 
       <div className="space-y-2">
-        <p className="text-sm font-medium text-foreground">Project access</p>
+        <Label>Project access</Label>
         <ProjectAccessPicker projects={projects} value={access} onChange={setAccess} />
       </div>
 
@@ -267,8 +267,9 @@ function InviteForm({
         </p>
       )}
 
-      <div className="flex gap-3 pt-2">
-        <Button variant="outline" onClick={onClose} className="flex-1">
+    </SheetBody>
+    <SheetFooter className="px-5 pb-5">
+        <Button variant="ghost" onClick={onClose}>
           Cancel
         </Button>
         <Button
@@ -280,17 +281,16 @@ function InviteForm({
             inviteMutation.isPending ||
             (scoped && access.projectIds.length === 0)
           }
-          className="flex-1"
         >
           {inviteMutation.isPending ? (
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            <Loader2 className="animate-spin" />
           ) : (
-            <UserPlus className="w-4 h-4 mr-2" />
+            <UserPlus />
           )}
-          Send Invite
+          {invites.length > 1 ? "Send invites" : "Send invite"}
         </Button>
-      </div>
-    </div>
+    </SheetFooter>
+    </>
   );
 }
 
@@ -375,7 +375,7 @@ function MemberRow({
   };
 
   return (
-    <tr className="hover:bg-muted/20 transition-colors">
+    <tr className="hover:bg-glass-card transition-colors">
       <td className="px-4 py-3">
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary shrink-0">
@@ -398,12 +398,12 @@ function MemberRow({
       </td>
       <td className="px-4 py-3">
         {isPending ? (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium text-yellow-500 bg-yellow-500/15">
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] text-xs font-medium text-yellow-500 bg-yellow-500/15">
             <Clock className="w-3 h-3" />
             Pending
           </span>
         ) : (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium text-green-500 bg-green-500/15">
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] text-xs font-medium text-green-500 bg-green-500/15">
             <CheckCircle2 className="w-3 h-3" />
             Accepted
           </span>
@@ -580,20 +580,24 @@ function TeamSwitcher() {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           disabled={isSwitching}
-          className="inline-flex h-8 min-w-0 max-w-56 items-center gap-2 rounded-lg bg-card/70 px-2.5 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-card disabled:opacity-60"
+          aria-label="Switch team"
+          className="min-w-0 max-w-56 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
         >
-          <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <span className="truncate">{activeTeam?.name ?? "Select team"}</span>
-          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        </button>
+          <ChevronDown
+            className={cn(
+              "size-3.5 transition-transform",
+              open && "rotate-180",
+            )}
+          />
+        </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-60 p-1">
-        <p className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          Teams
-        </p>
         <div className="space-y-0.5">
           {teams.map((team) => (
             <button
@@ -686,17 +690,15 @@ function Team() {
             </SheetHeaderContent>
             <SheetCloseButton />
           </SheetHeader>
-          <SheetBody className="px-5 py-5">
-            {showInvite && <InviteForm onClose={() => setShowInvite(false)} projects={projectList} maxInvites={Math.max(0, seatMax - seatCurrent)} />}
-          </SheetBody>
+          {showInvite && <InviteForm onClose={() => setShowInvite(false)} projects={projectList} maxInvites={Math.max(0, seatMax - seatCurrent)} />}
         </SheetContent>
       </Sheet>
 
       {/* Members Table */}
-      <div className="rounded-2xl bg-card overflow-x-auto">
+      <div className="glass-card rounded-card overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground">
+            <tr className="text-left text-xs text-muted-foreground">
               <th className="px-4 pt-4 pb-2 font-medium">Member</th>
               <th className="px-4 pt-4 pb-2 font-medium">Role</th>
               <th className="px-4 pt-4 pb-2 font-medium">Status</th>
@@ -723,7 +725,7 @@ function Team() {
                 </span>
               </td>
               <td className="px-4 py-3">
-                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium text-green-500 bg-green-500/15">
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] text-xs font-medium text-green-500 bg-green-500/15">
                   <CheckCircle2 className="w-3 h-3" />
                   Active
                 </span>

@@ -14,6 +14,7 @@ import {
   SkipForward,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 interface CrawledPage {
@@ -235,9 +236,9 @@ function CrawledPageItem({
   };
 
   return (
-    <div className="rounded-lg bg-muted/20 overflow-hidden">
+    <div className="rounded-lg bg-glass-card overflow-hidden">
       <div
-        className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors"
+        className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-glass-button transition-colors"
         onClick={() => setExpanded(!expanded)}
       >
         {expanded ? (
@@ -257,7 +258,7 @@ function CrawledPageItem({
                 refreshMutation.mutate();
               }}
               disabled={refreshMutation.isPending}
-              className="p-1 rounded hover:bg-muted text-muted-foreground disabled:opacity-50"
+              className="p-1 rounded hover:bg-glass-button text-muted-foreground disabled:opacity-50"
               title="Refresh this page"
             >
               <RefreshCw
@@ -283,7 +284,7 @@ function CrawledPageItem({
       </div>
 
       {expanded && (
-        <div className="px-3 py-3 bg-muted/20">
+        <div className="px-3 py-3 bg-glass-card">
           {page.status === "pending" && (
             <p className="text-sm text-muted-foreground">
               This page is still being crawled...
@@ -310,14 +311,13 @@ function CrawledPageItem({
           )}
           {page.status === "crawled" && content !== null && (
             <div className="space-y-2">
-              <textarea
+              <Textarea
                 value={editedContent}
                 onChange={(e) => {
                   setEditedContent(e.target.value);
                   setHasEdits(e.target.value !== content);
                 }}
-                rows={10}
-                className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm font-mono resize-y focus:outline-none focus:ring-2 focus:ring-ring"
+                rows={10} className="font-mono resize-y"
               />
               {hasEdits && (
                 <div className="flex gap-2">

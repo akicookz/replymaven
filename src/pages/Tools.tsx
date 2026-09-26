@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { Segmented } from "@/components/ui/segmented";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
   HeaderFields,
@@ -463,7 +464,7 @@ const TOOL_PRESETS: ToolPreset[] = [
     label: "Create GitHub Issue",
     blurb: "File a bug report in your repository.",
     icon: Github,
-    iconBg: "bg-muted",
+    iconBg: "bg-glass-button",
     iconColor: "text-foreground",
     fields: [
       {
@@ -706,8 +707,8 @@ function PresetToolRow({
       mark={
         <div
           className={cn(
-            "w-8 h-8 rounded-lg flex items-center justify-center",
-            configured ? preset.iconBg : "bg-muted",
+            "w-8 h-8 rounded-glass flex items-center justify-center",
+            configured ? preset.iconBg : "bg-glass-button",
           )}
         >
           <Icon
@@ -774,7 +775,7 @@ function PresetToolRow({
                 )}
               </label>
               {field.multiline ? (
-                <textarea
+                <Textarea
                   value={values[field.key] ?? ""}
                   onChange={(e) => updateField(field.key, e.target.value)}
                   rows={2}
@@ -783,10 +784,9 @@ function PresetToolRow({
                       ? "Leave blank to keep the current headers"
                       : field.placeholder
                   }
-                  className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               ) : (
-                <input
+                <Input
                   type={field.type ?? "text"}
                   value={values[field.key] ?? ""}
                   onChange={(e) => updateField(field.key, e.target.value)}
@@ -795,7 +795,6 @@ function PresetToolRow({
                       ? "Leave blank to keep the current value"
                       : field.placeholder
                   }
-                  className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               )}
               {field.help && (
@@ -1500,13 +1499,13 @@ export function ToolsPanel({
               <label className="text-sm font-medium text-foreground">
                 Description <span className="text-destructive">*</span>
               </label>
-              <textarea
+              <Textarea
                 value={form.description}
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
                 placeholder="Looks up the current status of a customer order by order ID. Returns tracking info and estimated delivery."
                 required
                 rows={2}
-                className="border-border placeholder:text-muted-foreground min-h-[72px] w-full resize-none rounded-lg border bg-input-background px-3 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                className="min-h-[72px]"
               />
               <p className="text-xs text-muted-foreground">
                 Maven uses this to decide when to call it.
@@ -1554,7 +1553,7 @@ export function ToolsPanel({
             />
 
             {/* Parameters */}
-            <div className="space-y-3 rounded-xl bg-muted/20 p-4">
+            <div className="space-y-3 rounded-xl glass-card p-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-foreground">Parameters</h3>
                 <Button
@@ -1571,7 +1570,7 @@ export function ToolsPanel({
               </div>
               <div className="space-y-2">
                 {form.parameters.map((param, i) => (
-                  <div key={i} className="rounded-lg bg-background p-3 space-y-2">
+                  <div key={i} className="rounded-lg glass-card p-3 space-y-2">
                     <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
                       <Input
                         type="text"
@@ -1615,7 +1614,7 @@ export function ToolsPanel({
             </div>
 
             {/* Response Mapping */}
-            <div className="space-y-3 rounded-xl bg-muted/20 p-4">
+            <div className="space-y-3 rounded-xl glass-card p-4">
               <h3 className="text-sm font-semibold text-foreground">Response Mapping</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
@@ -1676,7 +1675,7 @@ export function ToolsPanel({
                   Test
                 </Button>
                 {testingId === editingTool.id && (
-                  <div className="space-y-3 rounded-xl bg-muted/20 p-3">
+                  <div className="space-y-3 rounded-xl glass-card p-3">
                     {editingTool.parameters.length > 0 ? (
                       <div className="space-y-2">
                         {editingTool.parameters.map((param) => (
@@ -1846,7 +1845,7 @@ export function ToolsPanel({
           {isLoading && (
             <div className="space-y-3">
               {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="h-20 rounded-xl bg-muted animate-pulse" />
+                <div key={i} className="h-20 rounded-xl bg-glass-button animate-pulse" />
               ))}
             </div>
           )}
@@ -1868,8 +1867,8 @@ export function ToolsPanel({
               <ExpandableToolCard
                 mark={
                   <div className={cn(
-                    "w-8 h-8 rounded-lg flex items-center justify-center",
-                    telegramConfigured ? "bg-[#229ED9]/15" : "bg-muted",
+                    "w-8 h-8 rounded-glass flex items-center justify-center",
+                    telegramConfigured ? "bg-[#229ED9]/15" : "bg-glass-button",
                   )}>
                     <Send className={cn(
                       "w-4 h-4",
@@ -1898,12 +1897,11 @@ export function ToolsPanel({
                         <label className="text-xs font-medium text-muted-foreground">
                           Bot Token <span className="text-destructive">*</span>
                         </label>
-                        <input
+                        <Input
                           type="password"
                           value={telegramBotToken}
                           onChange={(e) => setTelegramBotToken(e.target.value)}
                           placeholder={telegramConfigured ? "Enter new token to update" : "Paste your bot token from @BotFather"}
-                          className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                         />
                         <p className="text-xs text-muted-foreground">
                           Get a token from @BotFather in Telegram.
@@ -1913,12 +1911,11 @@ export function ToolsPanel({
                         <label className="text-xs font-medium text-muted-foreground">
                           Chat ID
                         </label>
-                        <input
+                        <Input
                           type="text"
                           value={telegramChatId}
                           onChange={(e) => setTelegramChatId(e.target.value)}
                           placeholder={telegramData?.telegramChatId ?? "Connects on its own — or paste an ID"}
-                          className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                         />
                         <p className="text-xs text-muted-foreground">
                           Save the token, then add the bot to your group and send any message. The chat connects itself and the bot confirms in the group. Paste an ID here only if you want a specific chat.
@@ -1983,8 +1980,8 @@ export function ToolsPanel({
               <ExpandableToolCard
                 mark={
                   <div className={cn(
-                    "w-8 h-8 rounded-lg flex items-center justify-center",
-                    slackConfigured ? "bg-[#4A154B]/15" : "bg-muted",
+                    "w-8 h-8 rounded-glass flex items-center justify-center",
+                    slackConfigured ? "bg-[#4A154B]/15" : "bg-glass-button",
                   )}>
                     <Headset className={cn(
                       "w-4 h-4",
@@ -2013,36 +2010,33 @@ export function ToolsPanel({
                         <label className="text-xs font-medium text-muted-foreground">
                           Bot Token <span className="text-destructive">*</span>
                         </label>
-                        <input
+                        <Input
                           type="password"
                           value={slackBotToken}
                           onChange={(e) => setSlackBotToken(e.target.value)}
                           placeholder={slackConfigured ? "Enter new token to update" : "Paste your Slack bot token"}
-                          className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                         />
                       </div>
                       <div className="space-y-1.5">
                         <label className="text-xs font-medium text-muted-foreground">
                           Signing Secret <span className="text-destructive">*</span>
                         </label>
-                        <input
+                        <Input
                           type="password"
                           value={slackSigningSecret}
                           onChange={(e) => setSlackSigningSecret(e.target.value)}
                           placeholder={slackConfigured ? "Enter new signing secret to update" : "Paste the Slack signing secret"}
-                          className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                         />
                       </div>
                       <div className="space-y-1.5">
                         <label className="text-xs font-medium text-muted-foreground">
                           Channel ID
                         </label>
-                        <input
+                        <Input
                           type="text"
                           value={slackChannelId}
                           onChange={(e) => setSlackChannelId(e.target.value)}
                           placeholder={slackData?.slackChannelId ?? "Connects on its own — or paste a channel ID"}
-                          className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                         />
                         <p className="text-xs text-muted-foreground">
                           {`Point the Slack Events URL at /api/slack/events/${projectId}. The first verified message binds the channel, or paste an ID here.`}
@@ -2107,8 +2101,8 @@ export function ToolsPanel({
               <ExpandableToolCard
                 mark={
                   <div className={cn(
-                    "w-8 h-8 rounded-lg flex items-center justify-center",
-                    emailReceiving ? "bg-brand/15" : "bg-muted",
+                    "w-8 h-8 rounded-glass flex items-center justify-center",
+                    emailReceiving ? "bg-brand/15" : "bg-glass-button",
                   )}>
                     <Inbox className={cn(
                       "w-4 h-4",
@@ -2145,7 +2139,7 @@ export function ToolsPanel({
                           setForwardCopied(true);
                           setTimeout(() => setForwardCopied(false), 1500);
                         }}
-                        className="inset-ring inset-ring-border hover:bg-muted/40 inline-flex items-center gap-1.5 rounded-sm px-1.5 py-0.5 align-baseline font-mono text-xs text-foreground transition-colors"
+                        className="inset-ring inset-ring-border hover:bg-glass-card inline-flex items-center gap-1.5 rounded-sm px-1.5 py-0.5 align-baseline font-mono text-xs text-foreground transition-colors"
                       >
                         {inboundEmail?.forwardTo ?? ""}
                         {forwardCopied
@@ -2186,7 +2180,7 @@ export function ToolsPanel({
                             <DropdownMenuTrigger asChild>
                               <button
                                 type="button"
-                                className="flex size-10 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/40"
+                                className="flex size-10 items-center justify-center rounded-lg text-muted-foreground hover:bg-glass-card"
                                 aria-label={`Address actions for ${address.address}`}
                               >
                                 <MoreHorizontal className="size-4" />
@@ -2229,7 +2223,7 @@ export function ToolsPanel({
                   <ExpandableToolCard
                     key={tool.id}
                     mark={
-                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-glass-button">
                         <Cable className="h-4 w-4 text-muted-foreground" />
                       </div>
                     }

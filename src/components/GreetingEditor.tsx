@@ -27,6 +27,8 @@ import {
   DialogContent,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import PageVisibilityInput from "@/components/PageVisibilityInput";
 import type { AuthorOption } from "@/hooks/use-widget-settings";
 import type {
@@ -352,7 +354,7 @@ function GreetingEditor({
             ))}
           </div>
 
-          <div className="flex items-center justify-between rounded-xl bg-muted/40 px-4 py-3">
+          <div className="flex items-center justify-between rounded-xl glass-card px-4 py-3">
             <div>
               <div className="text-sm font-medium">Enabled</div>
               <div className="text-xs text-muted-foreground">
@@ -375,7 +377,7 @@ function GreetingEditor({
                 </span>
               </label>
               {form.imageUrl && !isVideo ? (
-                <div className="flex gap-0.5 bg-muted/50 rounded-lg p-0.5">
+                <div className="flex gap-0.5 bg-glass-button rounded-lg p-0.5">
                   {(["landscape", "square"] as const).map((aspect) => (
                     <button
                       key={aspect}
@@ -384,7 +386,7 @@ function GreetingEditor({
                       className={cn(
                         "px-2.5 py-1 rounded-md text-xs font-medium capitalize transition-colors",
                         form.imageAspect === aspect
-                          ? "bg-background text-foreground shadow-sm"
+                          ? "bg-glass-raised text-ink-1 shadow-[inset_0_1px_0_0_var(--hairline-strong)]"
                           : "text-muted-foreground hover:text-foreground",
                       )}
                     >
@@ -396,10 +398,10 @@ function GreetingEditor({
             </div>
             <div
               className={cn(
-                "group/media relative flex items-center justify-center overflow-hidden rounded-xl bg-muted/30",
+                "group/media relative flex items-center justify-center overflow-hidden rounded-xl bg-glass-card",
                 mediaFrameClass,
                 !hasMedia &&
-                  "cursor-pointer transition-colors hover:bg-muted/50",
+                  "cursor-pointer transition-colors hover:bg-glass-button",
               )}
               role={hasMedia ? undefined : "button"}
               tabIndex={hasMedia ? undefined : 0}
@@ -545,7 +547,7 @@ function GreetingEditor({
 
           {kind === "announcement" && isVideo ? (
             <div className="space-y-2">
-              <div className="flex items-center justify-between gap-4 rounded-xl bg-muted/30 p-3">
+              <div className="flex items-center justify-between gap-4 rounded-xl glass-card p-3">
                 <div className="min-w-0 space-y-2">
                   <div className="text-sm font-medium text-foreground">
                     Set a thumbnail
@@ -584,9 +586,9 @@ function GreetingEditor({
                 </div>
                 <div
                   className={cn(
-                    "flex aspect-video w-28 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-background/60 text-muted-foreground",
+                    "flex aspect-video w-28 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-glass-button text-muted-foreground",
                     !form.imageUrl &&
-                      "cursor-pointer transition-colors hover:bg-background/80",
+                      "cursor-pointer transition-colors hover:bg-glass-raised",
                   )}
                   role={form.imageUrl ? undefined : "button"}
                   tabIndex={form.imageUrl ? undefined : 0}
@@ -642,7 +644,7 @@ function GreetingEditor({
             <label className="text-sm font-medium text-foreground">
               Title
             </label>
-            <input
+            <Input
               type="text"
               value={form.title}
               onChange={(e) => update("title", e.target.value)}
@@ -652,7 +654,6 @@ function GreetingEditor({
                   : "What's new at Acme"
               }
               maxLength={120}
-              className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
             <p className="text-xs text-muted-foreground text-right">
               {form.title.length}/120
@@ -667,13 +668,12 @@ function GreetingEditor({
                 (optional)
               </span>
             </label>
-            <textarea
+            <Textarea
               value={form.description}
               onChange={(e) => update("description", e.target.value)}
               placeholder="Tell visitors what changed and why they should care."
               rows={3}
               maxLength={500}
-              className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
             />
             <p className="text-xs text-muted-foreground text-right">
               {form.description.length}/500
@@ -687,26 +687,24 @@ function GreetingEditor({
               <label className="text-sm font-medium text-foreground">
                 CTA text
               </label>
-              <input
+              <Input
                 type="text"
                 value={form.ctaText}
                 onChange={(e) => update("ctaText", e.target.value)}
                 placeholder="Read more"
                 maxLength={40}
-                className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground">
                 CTA link
               </label>
-              <input
+              <Input
                 type="url"
                 value={form.ctaLink}
                 onChange={(e) => update("ctaLink", e.target.value)}
                 placeholder="https://example.com/changelog"
                 maxLength={2048}
-                className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
           </div>

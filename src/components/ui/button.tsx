@@ -6,18 +6,17 @@ import { wrapAsChildControl, wrapControlLabel } from "@/components/ui/control-la
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-glass text-sm font-medium leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
         default: "glow-surface text-card-foreground",
         destructive:
           "bg-destructive text-white hover:bg-destructive/90",
-        outline:
-          "border border-border bg-card hover:bg-accent hover:text-accent-foreground",
+        outline: "glass-control text-ink-3 hover:text-ink-1",
         secondary:
-          "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        ghost: "hover:bg-accent hover:text-accent-foreground",
+          "bg-glass-button text-ink-2 shadow-[inset_0_1px_0_0_var(--hairline-inset)] hover:bg-glass-raised",
+        ghost: "hover:bg-glass-button hover:text-ink-1",
         link: "text-primary underline-offset-4 hover:underline",
         "glow-primary":
           "glow-surface text-card-foreground",
@@ -28,9 +27,10 @@ const buttonVariants = cva(
       // (~0.3 of height). Do not collapse these onto one value.
       size: {
         default: "h-9 px-4 py-2",
-        sm: "h-8 rounded-md px-3 text-[13px]",
-        lg: "h-10 px-6",
-        icon: "h-9 w-9",
+        sm: "h-8 rounded-[8px] px-3 text-[13px]",
+        lg: "h-10 rounded-[10px] px-6",
+        icon: "size-9",
+        "icon-sm": "size-8 rounded-[8px]",
       },
     },
     defaultVariants: {

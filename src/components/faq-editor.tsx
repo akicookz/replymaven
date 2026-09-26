@@ -41,6 +41,8 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import FaqSplitModal from "@/components/faq-split-modal";
 import {
   FAQ_DESCRIPTION_MAX_CHARS,
@@ -142,14 +144,14 @@ function SortablePairCard({
       className={`relative rounded-xl p-4 space-y-3 ${
         pairOverLimit
           ? "bg-destructive/5 ring-1 ring-destructive/30"
-          : "bg-muted/30"
+          : "bg-glass-card"
       }`}
       {...attributes}
     >
       <button
         type="button"
         {...listeners}
-        className="absolute top-3 left-3 p-1 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-grab active:cursor-grabbing"
+        className="absolute top-3 left-3 p-1 rounded-lg hover:bg-glass-button text-muted-foreground hover:text-foreground transition-colors cursor-grab active:cursor-grabbing"
         title="Drag to reorder"
       >
         <GripVertical className="w-3.5 h-3.5" />
@@ -159,7 +161,7 @@ function SortablePairCard({
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            className="absolute top-3 right-3 p-1 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            className="absolute top-3 right-3 p-1 rounded-lg hover:bg-glass-button text-muted-foreground hover:text-foreground transition-colors"
             title="Pair actions"
           >
             <MoreVertical className="w-3.5 h-3.5" />
@@ -220,13 +222,12 @@ function SortablePairCard({
         <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
           When customer query is about
         </label>
-        <input
+        <Input
           ref={questionRef}
           type="text"
           value={pair.question}
           onChange={(e) => onUpdatePair(index, "question", e.target.value)}
           placeholder="e.g., What are your shipping rates?"
-          className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
         />
       </div>
 
@@ -234,7 +235,7 @@ function SortablePairCard({
         <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
           Respond with this info
         </label>
-        <textarea
+        <Textarea
           value={pair.answer}
           onChange={(e) => onUpdatePair(index, "answer", e.target.value)}
           onKeyDown={(e) => {
@@ -253,7 +254,6 @@ function SortablePairCard({
           }}
           placeholder="e.g., We offer free shipping on orders over $50. Standard shipping is $5.99 and takes 3-5 business days."
           rows={3}
-          className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
         />
       </div>
 
@@ -609,12 +609,11 @@ function FaqEditor({
         </div>
       )}
 
-      <input
+      <Input
         type="text"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         placeholder="FAQ collection title (e.g., Shipping & Returns)"
-        className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
       />
 
       <div className="space-y-1.5">
@@ -638,14 +637,13 @@ function FaqEditor({
             </button>
           )}
         </div>
-        <textarea
+        <Textarea
           value={description}
           onChange={(e) =>
             setDescription(e.target.value.slice(0, FAQ_DESCRIPTION_MAX_CHARS))
           }
           placeholder="Use when the visitor asks about shipping rates, delivery times, or returns."
           rows={2}
-          className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
         />
         {descriptionSuggestion && (
           <div className="flex items-start gap-2 p-2.5 rounded-xl bg-primary/5">
@@ -676,7 +674,7 @@ function FaqEditor({
             <button
               type="button"
               onClick={() => setDescriptionSuggestion(null)}
-              className="p-1 rounded-md hover:bg-muted text-muted-foreground"
+              className="p-1 rounded-md hover:bg-glass-button text-muted-foreground"
               title="Dismiss"
             >
               <X className="w-3 h-3" />
@@ -698,7 +696,7 @@ function FaqEditor({
             {FAQ_SET_MAX_CHARS.toLocaleString()}
           </span>
         </div>
-        <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+        <div className="h-1.5 w-full rounded-full bg-glass-button overflow-hidden">
           <div
             className={`h-full transition-all ${meterFillClass}`}
             style={{ width: `${meterPercent}%` }}

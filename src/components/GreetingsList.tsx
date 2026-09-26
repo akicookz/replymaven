@@ -165,11 +165,11 @@ function GreetingsList({
     <div className="space-y-3">
       {greetingsApi.query.isLoading ? (
         <div className="space-y-2">
-          <div className="h-16 rounded-xl bg-muted/40 animate-pulse" />
-          <div className="h-16 rounded-xl bg-muted/40 animate-pulse" />
+          <div className="h-16 rounded-xl bg-glass-card animate-pulse" />
+          <div className="h-16 rounded-xl bg-glass-card animate-pulse" />
         </div>
       ) : sorted.length === 0 ? (
-        <div className="px-4 py-6 rounded-xl bg-muted/30 border-2 border-dashed border-muted text-sm text-muted-foreground text-center">
+        <div className="px-4 py-6 rounded-xl glass-card border-2 border-dashed border-muted text-sm text-muted-foreground text-center">
           No greetings yet. Add one to welcome visitors or announce something
           new.
         </div>
@@ -178,14 +178,14 @@ function GreetingsList({
           {sorted.map((g) => (
             <li
               key={g.id}
-              className="flex items-stretch gap-2 overflow-hidden rounded-xl bg-muted/40"
+              className="flex items-stretch gap-2 overflow-hidden rounded-xl bg-glass-card"
             >
               <button
                 type="button"
                 onClick={() => openEdit(g)}
-                className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-glass-button focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
               >
-                <div className="w-12 h-12 rounded-lg bg-muted overflow-hidden shrink-0 flex items-center justify-center">
+                <div className="w-12 h-12 rounded-lg bg-glass-button overflow-hidden shrink-0 flex items-center justify-center">
                   <GreetingThumbnail greeting={g} />
                 </div>
                 <div className="flex-1 min-w-0">

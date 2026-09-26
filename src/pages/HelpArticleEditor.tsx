@@ -30,6 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { MobileMenuButton } from "@/components/PageHeader";
 import { HelpEditorSkeleton } from "@/components/help-editor/editor-skeleton";
 import { resolveCategoryTabId } from "@/lib/help-tabs";
@@ -609,10 +610,10 @@ function HelpArticleEditorPage() {
         <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
           <span
             className={cn(
-              "text-xs font-medium px-2 py-1 rounded-full",
+              "text-xs font-medium px-2 py-1 rounded-[6px]",
               form.status === "published"
                 ? "bg-green-500/15 text-green-700 dark:text-green-300"
-                : "bg-muted text-muted-foreground",
+                : "bg-glass-button text-muted-foreground",
             )}
           >
             {form.status === "published" ? "Published" : "Draft"}
@@ -702,14 +703,13 @@ function HelpArticleEditorPage() {
 
                 <div className="space-y-1.5">
                   <Label htmlFor="article-description">Description</Label>
-                  <textarea
+                  <Textarea
                     id="article-description"
                     value={form.excerpt}
                     onChange={(e) => handleExcerptChange(e.target.value)}
                     maxLength={EXCERPT_MAX}
                     rows={3}
                     placeholder="First text line of the article, filled on save if empty."
-                    className="w-full rounded-lg bg-card border border-border px-3 py-2 text-sm placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
                   />
                   <p className="text-xs text-muted-foreground text-right">
                     {form.excerpt.length} / {EXCERPT_MAX}
@@ -768,7 +768,7 @@ function HelpArticleEditorPage() {
                       </Button>
                     </div>
                     {effectiveOgImageUrl ? (
-                      <div className="mt-1 w-full overflow-hidden rounded-lg bg-muted aspect-[1200/630]">
+                      <div className="mt-1 w-full overflow-hidden rounded-lg bg-glass-button aspect-[1200/630]">
                         <img
                           src={effectiveOgImageUrl}
                           alt=""
@@ -870,7 +870,7 @@ function HelpArticleEditorPage() {
               <SheetCloseButton label="Close preview" />
             </SheetHeaderActions>
           </SheetHeader>
-          <div className="relative flex-1 min-h-0 bg-muted/30">
+          <div className="relative flex-1 min-h-0 bg-glass-card">
             {previewError ? (
               <div className="absolute inset-0 flex items-center justify-center p-6 text-center">
                 <p className="text-sm text-destructive">{previewError}</p>

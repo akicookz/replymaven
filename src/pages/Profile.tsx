@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Camera, Loader2, User, CheckCircle2 } from "lucide-react";
 import { MobileMenuButton } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useSession } from "@/lib/auth-client";
 
 interface ProfileData {
@@ -142,7 +143,7 @@ function EmailChangeSection({ currentEmail }: { currentEmail: string }) {
           }}
         >
           <div className="flex gap-2">
-            <input
+            <Input
               type="text"
               inputMode="numeric"
               maxLength={6}
@@ -153,8 +154,7 @@ function EmailChangeSection({ currentEmail }: { currentEmail: string }) {
                 setOtp(v);
                 setError(null);
               }}
-              placeholder="000000"
-              className="w-36 px-4 py-2.5 rounded-lg border border-input bg-background text-foreground text-center font-mono text-lg tracking-[0.3em] placeholder:text-muted-foreground placeholder:tracking-[0.3em] focus:outline-none focus:ring-2 focus:ring-ring"
+              placeholder="000000" className="w-36 text-center font-mono text-lg tracking-[0.3em] placeholder:tracking-[0.3em]"
               autoFocus
             />
             <Button
@@ -220,15 +220,14 @@ function EmailChangeSection({ currentEmail }: { currentEmail: string }) {
         }}
       >
         <div className="flex items-stretch gap-2">
-          <input
+          <Input
             type="email"
             value={newEmail}
             onChange={(e) => {
               setNewEmail(e.target.value);
               setError(null);
             }}
-            placeholder="you@example.com"
-            className="flex-1 px-4 py-2.5 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            placeholder="you@example.com" className="flex-1"
           />
           {canVerify && (
             <Button
@@ -367,13 +366,13 @@ function Profile() {
         </div>
       </div>
 
-      <div className="rounded-xl bg-card p-6 space-y-6">
+      <div className="glass-card rounded-card p-6 space-y-6">
         {/* Avatar */}
         <div className="flex items-center gap-5">
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="relative w-20 h-20 rounded-full bg-muted flex items-center justify-center overflow-hidden group transition-colors hover:bg-muted/80 shrink-0"
+            className="relative w-20 h-20 rounded-full bg-glass-button flex items-center justify-center overflow-hidden group transition-colors hover:bg-glass-button shrink-0"
             disabled={uploading}
           >
             {avatarPreview ? (
@@ -411,12 +410,11 @@ function Profile() {
         {/* Name */}
         <div className="space-y-2">
           <label className="text-sm font-medium text-foreground">Name</label>
-          <input
+          <Input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Your name"
-            className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
 
@@ -426,12 +424,11 @@ function Profile() {
             Work Title
             <span className="text-muted-foreground font-normal ml-1">(optional)</span>
           </label>
-          <input
+          <Input
             type="text"
             value={workTitle}
             onChange={(e) => setWorkTitle(e.target.value)}
             placeholder="e.g. Support Engineer, CEO"
-            className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
 

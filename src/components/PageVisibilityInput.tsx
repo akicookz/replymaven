@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 interface PageVisibilityInputProps {
   value: string[];
@@ -42,7 +43,7 @@ function PageVisibilityInput({
           {value.map((page, index) => (
             <span
               key={page}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted/50 text-sm font-mono"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-glass-button text-sm font-mono"
             >
               {page}
               <button
@@ -57,13 +58,13 @@ function PageVisibilityInput({
           ))}
         </div>
       ) : (
-        <div className="px-3 py-2 rounded-lg bg-muted/30 border-2 border-dashed border-muted text-sm text-muted-foreground">
+        <div className="px-3 py-2 rounded-lg glass-card border-2 border-dashed border-muted text-sm text-muted-foreground">
           {emptyHint}
         </div>
       )}
 
       <div className="flex gap-2">
-        <input
+        <Input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -73,8 +74,7 @@ function PageVisibilityInput({
               add();
             }
           }}
-          placeholder={inputPlaceholder}
-          className="flex-1 px-4 py-2.5 rounded-lg border border-input bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
+          placeholder={inputPlaceholder} className="flex-1 font-mono"
         />
         <Button
           type="button"
@@ -92,15 +92,15 @@ function PageVisibilityInput({
           <p className="font-medium">Examples:</p>
           <ul className="list-disc list-inside space-y-0.5 text-muted-foreground/70">
             <li>
-              <code className="text-xs bg-muted/50 px-1 rounded">/</code> -
+              <code className="text-xs bg-glass-button px-1 rounded">/</code> -
               homepage only
             </li>
             <li>
-              <code className="text-xs bg-muted/50 px-1 rounded">/pricing</code>{" "}
+              <code className="text-xs bg-glass-button px-1 rounded">/pricing</code>{" "}
               - exact page match
             </li>
             <li>
-              <code className="text-xs bg-muted/50 px-1 rounded">/docs/*</code>{" "}
+              <code className="text-xs bg-glass-button px-1 rounded">/docs/*</code>{" "}
               - all pages under <code>/docs</code>
             </li>
           </ul>

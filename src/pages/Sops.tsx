@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { MobileMenuButton } from "@/components/PageHeader";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -239,7 +240,7 @@ function Sops() {
       {showForm && (
         <form
           onSubmit={handleSubmit}
-          className="bg-card rounded-2xl p-6 space-y-4"
+          className="glass-card rounded-card p-6 space-y-4"
         >
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-foreground">
@@ -248,7 +249,7 @@ function Sops() {
             <button
               type="button"
               onClick={resetForm}
-              className="p-1 rounded-lg hover:bg-muted text-muted-foreground"
+              className="p-1 rounded-lg hover:bg-glass-button text-muted-foreground"
             >
               <X className="w-4 h-4" />
             </button>
@@ -258,7 +259,7 @@ function Sops() {
             <label className="text-sm font-medium text-foreground">
               When this happens
             </label>
-            <textarea
+            <Textarea
               value={form.condition}
               onChange={(e) =>
                 setForm((prev) => ({ ...prev, condition: e.target.value }))
@@ -266,7 +267,6 @@ function Sops() {
               rows={2}
               maxLength={500}
               placeholder="e.g. A customer asks about the status of their order"
-              className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
             />
             <p className="text-xs text-muted-foreground text-right">
               {form.condition.length}/500
@@ -277,7 +277,7 @@ function Sops() {
             <label className="text-sm font-medium text-foreground">
               The bot should
             </label>
-            <textarea
+            <Textarea
               value={form.instruction}
               onChange={(e) =>
                 setForm((prev) => ({
@@ -288,7 +288,6 @@ function Sops() {
               rows={5}
               maxLength={2000}
               placeholder='e.g. Ask for their order number. Then call the check_order connector. If the order status is "shipped", provide the tracking number and estimated delivery date. If "processing", tell them it will ship within 2-3 business days.'
-              className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
             />
             <p className="text-xs text-muted-foreground text-right">
               {form.instruction.length}/2000
@@ -320,7 +319,7 @@ function Sops() {
       {isLoading && (
         <div className="space-y-3">
           {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="h-16 rounded-xl bg-muted animate-pulse" />
+            <div key={i} className="h-16 rounded-xl bg-glass-button animate-pulse" />
           ))}
         </div>
       )}
@@ -339,11 +338,11 @@ function Sops() {
           {guidelines?.map((guideline) => (
             <div
               key={guideline.id}
-              className="bg-card rounded-xl overflow-hidden"
+              className="glass-card rounded-card overflow-hidden"
             >
               {/* Row */}
               <div
-                className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors"
+                className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-glass-card transition-colors"
                 onClick={() =>
                   setExpandedId(
                     expandedId === guideline.id ? null : guideline.id,
@@ -382,7 +381,7 @@ function Sops() {
                       e.stopPropagation();
                       startEdit(guideline);
                     }}
-                    className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"
+                    className="p-1.5 rounded-lg hover:bg-glass-button text-muted-foreground"
                     title="Edit"
                   >
                     <Pencil className="w-4 h-4" />

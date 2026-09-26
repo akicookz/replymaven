@@ -637,7 +637,7 @@ function HelpCenter() {
               {showHomeLink ? (
                 <Link
                   to={`/app/projects/${projectId}/knowledgebase/help-center/home`}
-                  className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-muted/50 px-2.5 py-1.5 text-sm font-medium text-foreground/70"
+                  className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-glass-button px-2.5 py-1.5 text-sm font-medium text-foreground/70"
                 >
                   <Home className="h-4 w-4" />
                   Home
@@ -651,8 +651,8 @@ function HelpCenter() {
                   className={cn(
                     "inline-flex shrink-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm",
                     selectedCategoryId === cat.id
-                      ? "bg-muted font-semibold text-foreground"
-                      : "bg-muted/40 font-medium text-foreground/70",
+                      ? "bg-glass-button font-semibold text-foreground"
+                      : "bg-glass-card font-medium text-foreground/70",
                   )}
                 >
                   <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center overflow-hidden">
@@ -668,9 +668,9 @@ function HelpCenter() {
             {showHomeLink ? (
               <Link
                 to={`/app/projects/${projectId}/knowledgebase/help-center/home`}
-                className="flex items-center gap-2.5 rounded-lg py-1.5 pr-1 transition-colors hover:bg-muted/40"
+                className="flex items-center gap-2.5 rounded-lg py-1.5 pr-1 transition-colors hover:bg-glass-card"
               >
-                <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted text-muted-foreground">
+                <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-glass-button text-muted-foreground">
                   <Home className="h-4 w-4" />
                 </span>
                 <span className="min-w-0 truncate text-sm font-medium text-foreground/70">
@@ -682,7 +682,7 @@ function HelpCenter() {
               Categories
             </h2>
             {categories.length === 0 ? (
-              <div className="rounded-xl border-2 border-dashed border-muted bg-muted/30 px-4 py-6 text-center text-sm text-muted-foreground">
+              <div className="rounded-xl border-2 border-dashed border-muted glass-card px-4 py-6 text-center text-sm text-muted-foreground">
                 No categories yet.
               </div>
             ) : (
@@ -702,8 +702,8 @@ function HelpCenter() {
 
           <section className="min-w-0 space-y-4">
             {categories.length === 0 ? (
-              <div className="space-y-4 rounded-2xl border border-border bg-card/50 px-8 py-16 text-center backdrop-blur-xl">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-muted/50">
+              <div className="glass-card rounded-card space-y-4 px-8 py-16 text-center">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-glass-button">
                   <BookOpen className="h-6 w-6 text-muted-foreground" />
                 </div>
                 <div>

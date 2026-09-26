@@ -112,7 +112,7 @@ export function HomeBackgroundControl({
           </PopoverDescription>
         </PopoverHeader>
         <div className="mt-3 space-y-3">
-          <div className="relative overflow-hidden rounded-lg bg-muted aspect-[16/9]">
+          <div className="relative overflow-hidden rounded-lg bg-glass-button aspect-[16/9]">
             {value.url ? (
               <ImagePositioner
                 src={value.url}
@@ -136,7 +136,7 @@ export function HomeBackgroundControl({
                 }
                 disabled={disabled || uploading}
               >
-                <SelectTrigger id="help-home-bg-fit" size="sm">
+                <SelectTrigger id="help-home-bg-fit">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

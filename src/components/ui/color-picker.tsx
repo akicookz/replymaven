@@ -46,18 +46,18 @@ function ColorPicker({ value, onChange, className }: ColorPickerProps) {
         <button
           type="button"
           className={cn(
-            "group flex h-10 w-full items-center gap-3 rounded-lg border border-input bg-input-background px-3 text-sm transition-colors hover:bg-input-background-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            "glass-control rounded-glass group flex h-9 w-full items-center gap-2.5 px-2.5 text-[13px] outline-none focus-visible:inset-ring focus-visible:inset-ring-hairline-strong",
             className
           )}
         >
           <span
-            className="size-5 shrink-0 rounded-lg shadow-sm"
+            className="size-5 shrink-0 rounded-[5px] inset-ring inset-ring-hairline"
             style={{ backgroundColor: value }}
           />
-          <span className="flex-1 text-left font-mono text-xs text-muted-foreground uppercase">
+          <span className="flex-1 text-left font-mono text-xs text-ink-5 uppercase">
             {value}
           </span>
-          <Pipette className="size-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+          <Pipette className="size-3.5 text-ink-6 opacity-0 transition-opacity group-hover:opacity-100" />
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-56 space-y-3 p-3" align="start">
@@ -72,14 +72,14 @@ function ColorPicker({ value, onChange, className }: ColorPickerProps) {
         {/* Hex input with preview swatch */}
         <div className="flex items-center gap-2">
           <span
-            className="size-8 shrink-0 rounded-lg shadow-sm"
+            className="size-8 shrink-0 rounded-glass inset-ring inset-ring-hairline"
             style={{ backgroundColor: value }}
           />
           <Input
             value={hexInput}
             onChange={handleHexChange}
             onBlur={handleHexBlur}
-            className="h-8 rounded-lg font-mono text-xs uppercase"
+            className="h-8 font-mono text-xs uppercase"
             placeholder="#000000"
             maxLength={7}
           />

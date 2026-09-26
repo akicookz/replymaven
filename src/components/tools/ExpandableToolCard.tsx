@@ -65,7 +65,7 @@ function CardRow({
 }
 
 const ROW_CLASS =
-  "flex min-h-14 w-full min-w-0 items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default disabled:opacity-70";
+  "flex min-h-14 w-full min-w-0 items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-glass-button focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default disabled:opacity-70";
 
 export function ExpandableToolCard({
   mark,
@@ -85,8 +85,8 @@ export function ExpandableToolCard({
   children,
 }: ExpandableToolCardProps) {
   const shell = cn(
-    "box-border overflow-hidden rounded-xl bg-card border-2",
-    configured ? "border-transparent" : "border-dashed border-muted",
+    "box-border overflow-hidden rounded-card",
+    configured ? "glass-card" : "border border-dashed border-hairline-strong",
   );
   const row = (
     <CardRow

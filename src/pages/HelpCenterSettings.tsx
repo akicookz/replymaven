@@ -287,7 +287,7 @@ function HelpCenterSettings() {
         </p>
       </div>
 
-      <div className="rounded-2xl bg-card/50 backdrop-blur-xl border border-border p-6 space-y-5">
+      <div className="glass-card rounded-card p-6 space-y-5">
         <div>
           <h2 className="text-base font-semibold tracking-tight">
             Custom Domain
@@ -295,7 +295,7 @@ function HelpCenterSettings() {
           <p className="text-sm text-muted-foreground mt-1">
             Serve help on your domain with a 200 rewrite, then save that URL
             here. Set up the rewrite first. After you save,{" "}
-            <code className="rounded bg-muted px-1.5 py-0.5">
+            <code className="rounded bg-glass-button px-1.5 py-0.5">
               replymaven.com/help/{project?.slug ?? "your-slug"}
             </code>{" "}
             301s to your path. Leave empty to keep the hosted URL.
@@ -320,7 +320,7 @@ function HelpCenterSettings() {
           {!validationError && customUrl && (
             <p className="text-xs text-muted-foreground">
               Your help center will be served at{" "}
-              <code className="rounded bg-muted px-1.5 py-0.5">
+              <code className="rounded bg-glass-button px-1.5 py-0.5">
                 {customUrl}
               </code>
               .
@@ -406,7 +406,7 @@ function HelpCenterSettings() {
                   </p>
                 )}
                 {testResult.snippet && (
-                  <pre className="mt-2 truncate rounded bg-muted/40 p-2 text-xs text-muted-foreground">
+                  <pre className="mt-2 truncate rounded bg-glass-card p-2 text-xs text-muted-foreground">
                     <code>{testResult.snippet}</code>
                   </pre>
                 )}
@@ -416,7 +416,7 @@ function HelpCenterSettings() {
         )}
       </div>
 
-      <div className="rounded-2xl bg-card/50 backdrop-blur-xl border border-border p-6 space-y-5">
+      <div className="glass-card rounded-card p-6 space-y-5">
         <div>
           <h2 className="text-base font-semibold tracking-tight">
             Top navigation
@@ -441,7 +441,7 @@ function HelpCenterSettings() {
         )}
       </div>
 
-      <div className="rounded-2xl bg-card/50 backdrop-blur-xl border border-border p-6 space-y-5">
+      <div className="glass-card rounded-card p-6 space-y-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 className="text-base font-semibold tracking-tight">
@@ -538,7 +538,7 @@ function HelpCenterSettings() {
         </Button>
       </div>
 
-      <div className="rounded-2xl bg-card/50 backdrop-blur-xl border border-border p-6 space-y-5">
+      <div className="glass-card rounded-card p-6 space-y-5">
         <div>
           <h2 className="text-base font-semibold tracking-tight">
             Analytics

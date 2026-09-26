@@ -32,8 +32,8 @@ function Segmented<T extends string>({
       role="group"
       aria-label={label}
       className={cn(
-        "inset-ring inset-ring-border bg-input-background flex shrink-0 overflow-hidden",
-        size === "sm" ? "h-8 rounded-md" : "h-9 rounded-lg",
+        "glass-control hover:bg-glass-button flex shrink-0 items-center gap-0.5 p-0.5",
+        size === "sm" ? "h-8 rounded-[10px]" : "h-9 rounded-[11px]",
         className,
       )}
     >
@@ -44,11 +44,11 @@ function Segmented<T extends string>({
           aria-pressed={value === option.value}
           onClick={() => onValueChange(option.value)}
           className={cn(
-            "font-medium transition-colors",
-            size === "sm" ? "px-2.5 text-xs" : "px-4 text-sm",
+            "h-full font-medium transition-colors focus-visible:outline-none focus-visible:inset-ring focus-visible:inset-ring-hairline-strong",
+            size === "sm" ? "rounded-[8px] px-2.5 text-xs" : "rounded-glass px-3 text-[13px]",
             value === option.value
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+              ? "bg-glass-raised text-ink-1 shadow-[inset_0_1px_0_0_var(--hairline-strong)]"
+              : "text-ink-6 hover:text-ink-2",
           )}
         >
           {option.label}

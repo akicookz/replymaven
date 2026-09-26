@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Save, Loader2, RefreshCw, FileText, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 
 interface PdfDetailProps {
   projectId: string;
@@ -95,15 +96,14 @@ function PdfResourceDetail({
           </span>
         </div>
         <div className="space-y-2">
-          <textarea
+          <Textarea
             value={editedContent}
             onChange={(e) => {
               setEditedContent(e.target.value);
               setHasEdits(true);
             }}
             placeholder="Paste or type the PDF content here..."
-            rows={8}
-            className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm font-mono resize-y focus:outline-none focus:ring-2 focus:ring-ring"
+            rows={8} className="font-mono resize-y"
           />
           <div className="flex gap-2">
             {hasEdits && (
@@ -153,14 +153,13 @@ function PdfResourceDetail({
         </Button>
       </div>
 
-      <textarea
+      <Textarea
         value={editedContent}
         onChange={(e) => {
           setEditedContent(e.target.value);
           setHasEdits(e.target.value !== originalContent);
         }}
-        rows={12}
-        className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm font-mono resize-y focus:outline-none focus:ring-2 focus:ring-ring"
+        rows={12} className="font-mono resize-y"
       />
 
       {hasEdits && (

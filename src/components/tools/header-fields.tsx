@@ -36,7 +36,7 @@ function HeaderFields({ value, onChange, emptyState }: HeaderFieldsProps) {
   }
 
   return (
-    <div className="space-y-3 rounded-xl bg-muted/20 p-4">
+    <div className="space-y-3 rounded-xl glass-card p-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground">Headers</h3>
         <Button

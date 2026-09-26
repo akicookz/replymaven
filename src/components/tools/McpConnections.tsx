@@ -216,14 +216,14 @@ function ProviderMark({ preset }: { preset: McpPreset }) {
       src={preset.icon}
       alt=""
       aria-hidden="true"
-      className="size-8 shrink-0 rounded-lg bg-muted object-contain p-1.5"
+      className="size-8 shrink-0 rounded-glass bg-glass-button object-contain p-1.5"
     />
   );
 }
 
 function GenericServerMark() {
   return (
-    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted">
+    <span className="flex size-8 shrink-0 items-center justify-center rounded-glass bg-glass-button">
       <Server className="size-4 text-muted-foreground" />
     </span>
   );
@@ -544,7 +544,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
                   void navigator.clipboard.writeText(connection.url);
                   toast.success("Connector URL copied.");
                 }}
-                className="relative flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring after:absolute after:size-10 after:content-['']"
+                className="relative flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-glass-button hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring after:absolute after:size-10 after:content-['']"
               >
                 <Copy className="size-3.5" />
               </button>
@@ -628,7 +628,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
             </div>
 
             {groups.length === 0 ? (
-              <p className="rounded-xl bg-background/60 px-3 py-4 text-sm text-muted-foreground">
+              <p className="rounded-xl glass-card px-3 py-4 text-sm text-muted-foreground">
                 No tools match your search.
               </p>
             ) : groups.map((group) => {
@@ -638,13 +638,13 @@ function McpConnections({ projectId }: McpConnectionsProps) {
               const canAllowAll = group.safety === "read" ||
                 group.tools.every((tool) => tool.alwaysAllowed);
               return (
-                <div key={group.safety} className="space-y-2 rounded-xl bg-background/45 p-2">
+                <div key={group.safety} className="space-y-2 rounded-xl glass-card p-2">
                   <div className="flex min-w-0 items-center gap-2">
                     <button
                       type="button"
                       aria-expanded={open}
                       onClick={() => toggleToolGroup(connection.id, group.safety)}
-                      className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-left transition-colors hover:bg-glass-button focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       {open ? (
                         <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
@@ -654,7 +654,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
                       <span className="truncate text-sm font-medium text-foreground">
                         {groupLabel(group.safety)}
                       </span>
-                      <span className="rounded-md bg-muted px-2 py-0.5 text-xs tabular-nums text-muted-foreground">
+                      <span className="rounded-md bg-glass-button px-2 py-0.5 text-xs tabular-nums text-muted-foreground">
                         {group.tools.length}
                       </span>
                     </button>
@@ -664,7 +664,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
                         <DropdownMenuTrigger asChild>
                           <button
                             type="button"
-                            className="flex h-8 shrink-0 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            className="flex h-8 shrink-0 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-foreground transition-colors hover:bg-glass-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                           >
                             {permissionLabel(currentPermission)}
                             <ChevronDown className="size-3.5 text-muted-foreground" />
@@ -725,7 +725,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
                         return (
                           <div
                             key={tool.toolName}
-                            className="flex min-h-10 items-center gap-3 rounded-xl bg-background/75 px-3 py-1.5"
+                            className="flex min-h-10 items-center gap-3 rounded-xl bg-glass-button px-3 py-1.5"
                             title={tool.description || undefined}
                           >
                             <p className="min-w-0 flex-1 truncate text-sm text-foreground">
@@ -733,7 +733,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
                             </p>
                             {data?.canManage && (
                               <div
-                                className="flex shrink-0 rounded-lg bg-muted p-0.5"
+                                className="flex shrink-0 rounded-lg bg-glass-button p-0.5"
                                 aria-label={`${tool.displayName} permission`}
                               >
                                 <button
@@ -748,7 +748,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
                                   className={cn(
                                     "flex size-8 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-35",
                                     permission === "allow"
-                                      ? "bg-background text-foreground shadow-sm"
+                                      ? "bg-glass-raised text-ink-1 shadow-[inset_0_1px_0_0_var(--hairline-strong)]"
                                       : "text-muted-foreground hover:text-foreground",
                                   )}
                                 >
@@ -763,7 +763,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
                                   className={cn(
                                     "flex size-8 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                                     permission === "ask"
-                                      ? "bg-background text-foreground shadow-sm"
+                                      ? "bg-glass-raised text-ink-1 shadow-[inset_0_1px_0_0_var(--hairline-strong)]"
                                       : "text-muted-foreground hover:text-foreground",
                                   )}
                                 >
@@ -778,7 +778,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
                                   className={cn(
                                     "flex size-8 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                                     permission === "disabled"
-                                      ? "bg-background text-foreground shadow-sm"
+                                      ? "bg-glass-raised text-ink-1 shadow-[inset_0_1px_0_0_var(--hairline-strong)]"
                                       : "text-muted-foreground hover:text-foreground",
                                   )}
                                 >
@@ -854,7 +854,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
 
   return (
     <section className="space-y-3" aria-label="MCP connectors">
-      {isLoading && <div className="h-24 rounded-2xl bg-muted/50 animate-pulse" />}
+      {isLoading && <div className="h-24 rounded-2xl bg-glass-button animate-pulse" />}
       {isError && (
         <div className="flex items-center gap-2 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
           <AlertCircle className="size-4 shrink-0" />
@@ -865,7 +865,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
       {data && (
         <>
           {!data.canManage && (
-            <p className="rounded-xl bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
+            <p className="rounded-xl bg-glass-button px-4 py-3 text-sm text-muted-foreground">
               Only project owners and admins can change connectors.
             </p>
           )}

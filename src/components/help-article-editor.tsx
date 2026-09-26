@@ -390,10 +390,10 @@ function HelpArticleEditor({
 
   return (
     <div
-      className="rounded-xl bg-card border border-border overflow-hidden"
+      className="glass-card rounded-card overflow-hidden"
       style={accentStyle}
     >
-      <div className="flex items-center gap-1 px-2 py-1.5 bg-muted/30 border-b border-border">
+      <div className="flex items-center gap-1 px-2 py-1.5 bg-glass-card border-b border-border">
         <Button
           type="button"
           size="sm"

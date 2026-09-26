@@ -31,6 +31,8 @@ import {
 } from "@/components/ui/select";
 import { ColorPicker } from "@/components/ui/color-picker";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   fontFaceCss,
   resolveWidgetFont,
@@ -104,13 +106,12 @@ function Step1({
           </label>
           <div className="relative">
             <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <input
+            <Input
               type="text"
               value={websiteUrl}
               onChange={(e) => onChange(e.target.value)}
               placeholder="example.com"
-              autoFocus
-              className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-input bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              autoFocus className="pl-9"
             />
           </div>
         </div>
@@ -320,28 +321,28 @@ function Step2({
         </div>
 
         {/* Skeleton: URL bar with progress */}
-        <div className="rounded-xl bg-muted/30 p-4 space-y-4">
+        <div className="rounded-xl glass-card p-4 space-y-4">
           <div className="flex items-center gap-3">
             <Globe className="w-4 h-4 text-muted-foreground animate-pulse" />
-            <div className="h-4 w-48 rounded-md bg-muted animate-pulse" />
+            <div className="h-4 w-48 rounded-md bg-glass-button animate-pulse" />
             <div className="flex-1" />
             <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />
           </div>
-          <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+          <div className="h-1.5 w-full rounded-full bg-glass-button overflow-hidden">
             <div className="h-full w-2/3 rounded-full bg-primary/30 animate-pulse" />
           </div>
         </div>
 
         {/* Skeleton: Extracted content lines */}
-        <div className="rounded-xl bg-muted/30 p-5 space-y-3">
-          <div className="h-3 w-24 rounded bg-muted animate-pulse" />
+        <div className="rounded-xl glass-card p-5 space-y-3">
+          <div className="h-3 w-24 rounded bg-glass-button animate-pulse" />
           <div className="space-y-2.5">
-            <div className="h-3.5 w-full rounded bg-muted animate-pulse" />
-            <div className="h-3.5 w-5/6 rounded bg-muted animate-pulse" style={{ animationDelay: "100ms" }} />
-            <div className="h-3.5 w-full rounded bg-muted animate-pulse" style={{ animationDelay: "200ms" }} />
-            <div className="h-3.5 w-2/3 rounded bg-muted animate-pulse" style={{ animationDelay: "300ms" }} />
-            <div className="h-3.5 w-4/5 rounded bg-muted animate-pulse" style={{ animationDelay: "400ms" }} />
-            <div className="h-3.5 w-full rounded bg-muted animate-pulse" style={{ animationDelay: "500ms" }} />
+            <div className="h-3.5 w-full rounded bg-glass-button animate-pulse" />
+            <div className="h-3.5 w-5/6 rounded bg-glass-button animate-pulse" style={{ animationDelay: "100ms" }} />
+            <div className="h-3.5 w-full rounded bg-glass-button animate-pulse" style={{ animationDelay: "200ms" }} />
+            <div className="h-3.5 w-2/3 rounded bg-glass-button animate-pulse" style={{ animationDelay: "300ms" }} />
+            <div className="h-3.5 w-4/5 rounded bg-glass-button animate-pulse" style={{ animationDelay: "400ms" }} />
+            <div className="h-3.5 w-full rounded bg-glass-button animate-pulse" style={{ animationDelay: "500ms" }} />
           </div>
         </div>
       </div>
@@ -373,14 +374,13 @@ function Step2({
           <label className="text-sm font-medium text-foreground">
             Website Name
           </label>
-          <input
+          <Input
             type="text"
             value={profile.websiteName}
             onChange={(e) =>
               setProfile({ ...profile, websiteName: e.target.value })
             }
             placeholder="My Awesome App"
-            className="w-full px-4 py-2.5 rounded-lg border border-input bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
 
@@ -388,14 +388,13 @@ function Step2({
           <label className="text-sm font-medium text-foreground">
             Company Name
           </label>
-          <input
+          <Input
             type="text"
             value={profile.companyName}
             onChange={(e) =>
               setProfile({ ...profile, companyName: e.target.value })
             }
             placeholder="Acme Inc."
-            className="w-full px-4 py-2.5 rounded-lg border border-input bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
       </div>
@@ -425,14 +424,13 @@ function Step2({
         <label className="text-sm font-medium text-foreground">
           Company Context
         </label>
-        <textarea
+        <Textarea
           value={profile.context}
           onChange={(e) =>
             setProfile({ ...profile, context: e.target.value })
           }
           rows={8}
           placeholder="Describe what your company does, your products/services, pricing, policies, and anything your AI support agent should know..."
-          className="w-full px-4 py-3 rounded-lg border border-input bg-input-background text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none"
         />
         <p className="text-xs text-muted-foreground">
           This context helps your AI agent answer questions accurately.
@@ -727,13 +725,13 @@ function WidgetStylePreview({
 
   return (
     <div className="rounded-xl border border-border/70 overflow-hidden bg-input-background shadow-sm">
-      <div className="flex items-center gap-2.5 px-3 py-2.5 bg-muted/50">
+      <div className="flex items-center gap-2.5 px-3 py-2.5 bg-glass-button">
         <div className="flex items-center gap-1.5 shrink-0" aria-hidden>
           <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f57]/90" />
           <span className="w-2.5 h-2.5 rounded-full bg-[#febc2e]/90" />
           <span className="w-2.5 h-2.5 rounded-full bg-[#28c840]/90" />
         </div>
-        <div className="flex-1 flex items-center gap-2 min-w-0 px-3 py-1.5 rounded-lg bg-background text-xs text-muted-foreground">
+        <div className="flex-1 flex items-center gap-2 min-w-0 px-3 py-1.5 rounded-lg bg-glass-button text-xs text-muted-foreground">
           <Globe className="w-3.5 h-3.5 shrink-0 text-muted-foreground/80" />
           <span className="truncate">{domain}</span>
         </div>

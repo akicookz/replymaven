@@ -125,13 +125,13 @@ export function WidgetInstallationDrawer({
             icon={Code}
           >
             <div className="relative">
-              <pre className="overflow-x-auto rounded-xl bg-muted/50 p-3 pr-14 font-mono text-xs">
+              <pre className="overflow-x-auto rounded-xl bg-glass-button p-3 pr-14 font-mono text-xs">
                 {embedSnippet}
               </pre>
               <button
                 type="button"
                 onClick={() => void copyText(embedSnippet, "embed")}
-                className="absolute right-1.5 top-1.5 flex size-10 items-center justify-center rounded-lg bg-background transition-[background-color,scale] hover:bg-muted active:scale-[0.96]"
+                className="absolute right-1.5 top-1.5 flex size-10 items-center justify-center rounded-glass bg-glass-button transition-[background-color,scale] hover:bg-glass-button active:scale-[0.96]"
                 aria-label="Copy embed code"
               >
                 {copied ? (
@@ -151,7 +151,7 @@ export function WidgetInstallationDrawer({
             description="Sign customer data on your server so support threads stay together across devices."
             icon={ShieldCheck}
           >
-            <div className="rounded-2xl bg-muted/40 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.05)]">
+            <div className="rounded-2xl glass-card p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.05)]">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-start gap-3">
                   <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand/12 text-brand">
@@ -188,7 +188,7 @@ export function WidgetInstallationDrawer({
               </div>
 
               {identitySecret ? (
-                <div className="mt-4 rounded-xl bg-background/65 p-3">
+                <div className="mt-4 rounded-xl glass-card p-3">
                   <div className="flex items-center justify-between gap-3">
                     <code className="min-w-0 break-all text-xs text-foreground">
                       {identitySecret}
@@ -196,7 +196,7 @@ export function WidgetInstallationDrawer({
                     <button
                       type="button"
                       onClick={() => void copyText(identitySecret, "secret")}
-                      className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted/55 transition-[background-color,scale] duration-150 ease-out hover:bg-muted active:scale-[0.96]"
+                      className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-glass-button transition-[background-color,scale] duration-150 ease-out hover:bg-glass-button active:scale-[0.96]"
                       aria-label="Copy customer signing secret"
                     >
                       {copiedSecret ? (
@@ -223,7 +223,7 @@ export function WidgetInstallationDrawer({
                   live for 15 minutes and may never exceed one hour.
                 </p>
               </div>
-              <pre className="overflow-x-auto rounded-xl bg-muted/50 p-3 font-mono text-xs leading-5">
+              <pre className="overflow-x-auto rounded-xl bg-glass-button p-3 font-mono text-xs leading-5">
                 {identityServerSnippet}
               </pre>
             </div>
@@ -239,12 +239,12 @@ export function WidgetInstallationDrawer({
                   change. The stable external ID keeps every device together.
                 </p>
               </div>
-              <pre className="overflow-x-auto rounded-xl bg-muted/50 p-3 font-mono text-xs leading-5">
+              <pre className="overflow-x-auto rounded-xl bg-glass-button p-3 font-mono text-xs leading-5">
                 {identityBrowserSnippet}
               </pre>
             </div>
 
-            <div className="rounded-2xl bg-muted/35 p-4">
+            <div className="rounded-2xl glass-card p-4">
               <p className="text-sm font-medium">Trust boundary</p>
               <ul className="mt-2 space-y-1.5 text-pretty text-xs text-muted-foreground">
                 <li>The signing secret never belongs in browser code.</li>

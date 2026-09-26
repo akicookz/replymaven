@@ -135,7 +135,7 @@ interface AnalyticsEmbedRowProps {
 function AnalyticsEmbedRow(props: AnalyticsEmbedRowProps) {
   const { embed } = props;
   return (
-    <li className="rounded-xl bg-muted/50 p-4 space-y-3">
+    <li className="rounded-xl bg-glass-button p-4 space-y-3">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-medium">{PROVIDER_LABELS[embed.provider]}</p>
         <Button

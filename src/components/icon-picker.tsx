@@ -162,7 +162,7 @@ function IconPicker({ value, onChange }: IconPickerProps) {
                   "aspect-square flex items-center justify-center rounded-lg transition-colors",
                   isSelected
                     ? "ring-2 ring-brand text-brand bg-brand/10"
-                    : "text-muted-foreground bg-muted/50 hover:bg-muted",
+                    : "text-muted-foreground bg-glass-button hover:bg-glass-button",
                 )}
               >
                 <IconGlyph name={name} className="w-5 h-5" />
@@ -180,7 +180,7 @@ function IconPicker({ value, onChange }: IconPickerProps) {
       <TabsContent value="image" className="space-y-3">
         {imageUrl ? (
           <div className="space-y-3">
-            <div className="relative aspect-[4/5] max-w-[220px] overflow-hidden rounded-xl bg-muted/30">
+            <div className="relative aspect-[4/5] max-w-[220px] overflow-hidden rounded-xl bg-glass-card">
               <img
                 src={imageUrl}
                 alt="Category cover"
@@ -227,8 +227,8 @@ function IconPicker({ value, onChange }: IconPickerProps) {
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
             className={cn(
-              "w-full flex flex-col items-center justify-center gap-2 rounded-xl bg-muted/40 px-6 py-10 text-center transition-colors",
-              "hover:bg-muted/60 disabled:opacity-60",
+              "w-full flex flex-col items-center justify-center gap-2 rounded-xl glass-card px-6 py-10 text-center transition-colors",
+              "hover:bg-glass-button disabled:opacity-60",
             )}
           >
             {uploading ? (

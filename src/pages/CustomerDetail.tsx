@@ -9,7 +9,6 @@ import {
   Loader2,
   Mail,
   Merge,
-  MonitorSmartphone,
   Save,
   Trash2,
   UserRound,
@@ -21,6 +20,7 @@ import type {
 import { MobileMenuButton } from "@/components/PageHeader";
 import CustomerFieldsEditor from "@/components/customers/CustomerFieldsEditor";
 import CustomerPickerDialog from "@/components/customers/CustomerPickerDialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -33,6 +33,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { WidgetSectionCard } from "@/components/WidgetSettings";
 import {
   customerFieldsToRows,
   CustomerApiError,
@@ -185,11 +186,11 @@ function CustomerDetail() {
 
   if (customerQuery.isLoading) {
     return (
-      <div className="mx-auto max-w-6xl space-y-5 px-4 py-8 sm:px-6 lg:px-8">
+      <div className="space-y-6">
         <Skeleton className="h-8 w-52" />
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
-          <Skeleton className="h-[560px] rounded-3xl" />
-          <Skeleton className="h-[420px] rounded-3xl" />
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
+          <Skeleton className="h-[420px] rounded-2xl" />
+          <Skeleton className="h-[320px] rounded-2xl" />
         </div>
       </div>
     );
@@ -197,12 +198,12 @@ function CustomerDetail() {
 
   if (customerQuery.isError || !customer) {
     return (
-      <div className="mx-auto max-w-xl px-6 py-20 text-center">
+      <div className="mx-auto max-w-xl py-20 text-center">
         <UserRound className="mx-auto size-8 text-muted-foreground" />
-        <h1 className="mt-4 text-balance font-display text-2xl font-semibold">
+        <h1 className="mt-4 text-balance text-xl font-bold text-foreground md:text-2xl">
           Customer not found
         </h1>
-        <Button asChild variant="outline" className="mt-5 min-h-10">
+        <Button asChild variant="outline" className="mt-5">
           <Link to={`/app/projects/${projectId}/customers`}>
             <ArrowLeft />
             Back to customers
@@ -213,12 +214,17 @@ function CustomerDetail() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+    <div className="space-y-6">
       <CustomerRealtimeBridge projectId={projectId} />
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-start gap-2">
           <MobileMenuButton />
-          <Button asChild variant="ghost" size="icon" className="size-10 shrink-0">
+          <Button
+            asChild
+            variant="ghost"
+            size="icon"
+            className="-ml-2 hidden shrink-0 text-muted-foreground hover:text-foreground md:inline-flex"
+          >
             <Link
               to={`/app/projects/${projectId}/customers`}
               aria-label="Back to customers"
@@ -227,23 +233,20 @@ function CustomerDetail() {
             </Link>
           </Button>
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-brand">
-              Customer profile
-            </p>
-            <h1 className="mt-2 text-balance font-display text-3xl font-semibold tracking-tight sm:text-4xl">
+            <h1 className="truncate text-xl font-bold text-foreground md:text-2xl">
               {customer.name ?? customer.email ?? "Unnamed customer"}
             </h1>
-            <p className="mt-2 text-pretty text-sm text-muted-foreground">
+            <p className="mt-1 text-pretty text-xs text-muted-foreground md:text-sm">
               First seen {formatDate(customer.firstSeenAt)} · Last seen{" "}
               {formatDate(customer.lastSeenAt)}
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2 sm:justify-end">
+        <div className="flex shrink-0 gap-2">
           <Button
             variant="outline"
             onClick={() => setMergeOpen(true)}
-            className="min-h-10 transition-transform duration-150 ease-out active:scale-[0.96]"
+            className="transition-transform duration-150 ease-out active:scale-[0.96]"
           >
             <Merge />
             Merge
@@ -251,7 +254,7 @@ function CustomerDetail() {
           <Button
             variant="ghost"
             onClick={() => setDeleteOpen(true)}
-            className="min-h-10 text-destructive transition-transform duration-150 ease-out hover:text-destructive active:scale-[0.96]"
+            className="text-destructive transition-transform duration-150 ease-out hover:bg-destructive/10 hover:text-destructive active:scale-[0.96]"
           >
             <Trash2 />
             Delete
@@ -259,23 +262,11 @@ function CustomerDetail() {
         </div>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)] lg:items-start">
-        <div className="space-y-5">
-          <form
-            onSubmit={handleSave}
-            className="rounded-3xl bg-card/45 p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.055),0_14px_45px_rgba(0,0,0,0.12)] sm:p-6"
-          >
-            <div>
-              <h2 className="text-balance font-display text-xl font-semibold">
-                Profile fields
-              </h2>
-              <p className="mt-1 text-pretty text-sm text-muted-foreground">
-                Keep the customer record aligned with the account data in your
-                own application.
-              </p>
-            </div>
-            <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)] lg:items-start">
+        <form onSubmit={handleSave}>
+          <WidgetSectionCard title="Profile">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
                 <Label htmlFor="detail-name">Name</Label>
                 <Input
                   id="detail-name"
@@ -284,7 +275,7 @@ function CustomerDetail() {
                   maxLength={200}
                 />
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <Label htmlFor="detail-email">Contact email</Label>
                 <Input
                   id="detail-email"
@@ -294,7 +285,7 @@ function CustomerDetail() {
                   maxLength={320}
                 />
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <Label htmlFor="detail-phone">Phone</Label>
                 <Input
                   id="detail-phone"
@@ -303,21 +294,18 @@ function CustomerDetail() {
                   maxLength={50}
                 />
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <Label htmlFor="detail-external-id">External ID</Label>
                 <Input
                   id="detail-external-id"
                   value={externalId}
                   onChange={(event) => setExternalId(event.target.value)}
-                  placeholder="account_123"
+                  placeholder="Your app's user ID"
                   maxLength={255}
                 />
-                <p className="text-pretty text-[11px] text-muted-foreground">
-                  The stable user or account ID from your application.
-                </p>
               </div>
             </div>
-            <div className="mt-6">
+            <div className="pt-2">
               <CustomerFieldsEditor
                 rows={fieldRows}
                 onChange={setFieldRows}
@@ -326,15 +314,15 @@ function CustomerDetail() {
               />
             </div>
             {formError ? (
-              <p className="mt-4 rounded-2xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              <p className="rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
                 {formError}
               </p>
             ) : null}
-            <div className="mt-5 flex justify-end">
+            <div className="flex justify-end pt-2">
               <Button
                 type="submit"
                 disabled={updateMutation.isPending}
-                className="min-h-10 pl-4 pr-3.5 transition-transform duration-150 ease-out active:scale-[0.96]"
+                className="transition-transform duration-150 ease-out active:scale-[0.96]"
               >
                 {updateMutation.isPending ? (
                   <Loader2 className="animate-spin" />
@@ -344,80 +332,57 @@ function CustomerDetail() {
                 Save changes
               </Button>
             </div>
-          </form>
-        </div>
+          </WidgetSectionCard>
+        </form>
 
-        <div className="space-y-5">
-          <section className="rounded-3xl bg-card/45 p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.055),0_14px_45px_rgba(0,0,0,0.12)] sm:p-6">
-            <div className="flex items-center gap-3">
-              <MonitorSmartphone className="size-5 text-brand" />
-              <div>
-                <h2 className="font-display text-xl font-semibold">
-                  Connected visitors
-                </h2>
-                <p className="text-pretty text-sm text-muted-foreground">
-                  Widget visitor IDs whose conversations belong to this customer.
-                </p>
-              </div>
-            </div>
-            <div className="mt-5 space-y-2">
-              {customer.visitors.length === 0 ? (
-                <p className="rounded-2xl bg-muted/30 px-4 py-8 text-center text-pretty text-sm text-muted-foreground">
-                  No widget visitors connected yet.
-                </p>
-              ) : (
-                customer.visitors.map((visitor) => (
-                  <div
-                    key={visitor.id}
-                    className="rounded-2xl bg-muted/30 px-4 py-3"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-xs font-medium text-muted-foreground">
-                        Visitor ID
-                      </span>
-                      <span className="rounded-lg bg-background/55 px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-                        {visitorLinkLabel(visitor.linkedBy)}
-                      </span>
-                    </div>
-                    <p className="mt-1 break-all text-sm text-foreground/90">
+        <div className="space-y-6">
+          <WidgetSectionCard title="Connected visitors">
+            {customer.visitors.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No widget visitors connected yet.
+              </p>
+            ) : (
+              <div className="space-y-4">
+                {customer.visitors.map((visitor) => (
+                  <div key={visitor.id} className="space-y-1.5">
+                    <p className="break-all font-mono text-xs text-foreground/90">
                       {visitor.visitorId}
                     </p>
-                    <p className="mt-2 text-pretty text-[11px] text-muted-foreground">
-                      Connected {formatDate(visitor.createdAt)}
-                    </p>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-xs text-muted-foreground">
+                        Connected {formatDate(visitor.createdAt)}
+                      </span>
+                      <Badge variant="secondary">
+                        {visitorLinkLabel(visitor.linkedBy)}
+                      </Badge>
+                    </div>
                   </div>
-                ))
-              )}
-            </div>
-          </section>
-
-          <section className="rounded-3xl bg-card/45 p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.055),0_14px_45px_rgba(0,0,0,0.12)] sm:p-6">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="font-display text-xl font-semibold">
-                  Conversations
-                </h2>
-                <p className="text-pretty text-sm text-muted-foreground">
-                  Every support thread linked to this customer.
-                </p>
+                ))}
               </div>
-              <span className="rounded-xl bg-muted/45 px-2.5 py-1 text-xs tabular-nums text-muted-foreground">
+            )}
+          </WidgetSectionCard>
+
+          <WidgetSectionCard
+            title="Conversations"
+            action={
+              <Badge variant="secondary" className="tabular-nums">
                 {customer.conversations.length}
-              </span>
-            </div>
-            <div className="mt-5 space-y-2">
-              {customer.conversations.length === 0 ? (
-                <p className="rounded-2xl bg-muted/30 px-4 py-8 text-center text-sm text-muted-foreground">
-                  No linked conversations.
-                </p>
-              ) : (
-                customer.conversations.map((conversation) => (
+              </Badge>
+            }
+          >
+            {customer.conversations.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No linked conversations.
+              </p>
+            ) : (
+              <div className="-mx-3 space-y-1">
+                {customer.conversations.map((conversation) => (
                   <Link
                     key={conversation.id}
                     to={`/app/projects/${projectId}/conversations?filter=${customerConversationFilter(conversation)}&id=${conversation.id}`}
-                    className="group flex min-h-14 items-center gap-3 rounded-2xl bg-muted/30 px-3 py-2.5 transition-[background-color,scale] duration-150 ease-out hover:bg-muted/50 active:scale-[0.96]"
+                    className="group flex items-center gap-3 rounded-xl px-3 py-2 transition-[background-color,scale] duration-150 ease-out hover:bg-accent/50 active:scale-[0.98]"
                   >
-                    <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-background/55 text-muted-foreground">
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent/50 text-muted-foreground [&_svg]:size-4">
                       {conversation.visitorEmail ? <Mail /> : <CalendarDays />}
                     </span>
                     <span className="min-w-0 flex-1">
@@ -426,17 +391,17 @@ function CustomerDetail() {
                           conversation.visitorEmail ??
                           "Anonymous visitor"}
                       </span>
-                      <span className="block text-xs text-muted-foreground">
+                      <span className="block text-xs text-muted-foreground first-letter:uppercase">
                         {conversation.status.replace("_", " ")} ·{" "}
                         {formatDate(conversation.lastActivityAt)}
                       </span>
                     </span>
                     <ArrowUpRight className="size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
                   </Link>
-                ))
-              )}
-            </div>
-          </section>
+                ))}
+              </div>
+            )}
+          </WidgetSectionCard>
         </div>
       </div>
 
@@ -452,14 +417,11 @@ function CustomerDetail() {
       />
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <DialogContent className="rounded-3xl bg-card/95 shadow-[0_24px_80px_rgba(0,0,0,0.45),0_0_0_1px_rgba(255,255,255,0.08)] backdrop-blur-xl">
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle className="text-balance font-display text-2xl">
-              Delete customer?
-            </DialogTitle>
-            <DialogDescription className="text-pretty">
-              The profile and connected visitor links are removed. Retained
-              support conversations remain, but become unlinked from a customer.
+            <DialogTitle>Delete customer?</DialogTitle>
+            <DialogDescription>
+              Conversations stay, but are no longer linked to a customer.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

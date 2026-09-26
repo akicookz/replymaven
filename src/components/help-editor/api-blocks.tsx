@@ -4,6 +4,7 @@ import type { NodeViewProps } from "@tiptap/react";
 import { Plus, X } from "lucide-react";
 import type { MarkdownSerializerState } from "prosemirror-markdown";
 import type { Node as PMNode } from "@tiptap/pm/model";
+import { Checkbox } from "@/components/ui/checkbox";
 
 /**
  * API doc blocks. Each is an atom node whose structured data round-trips
@@ -317,10 +318,11 @@ function ApiParamsView({ node, updateAttributes, deleteNode }: NodeViewProps) {
               aria-label="Parameter type"
             />
             <label className="help-editor-api-required">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={row.required === true}
-                onChange={(e) => updateRow(i, { required: e.target.checked })}
+                onCheckedChange={(checked) =>
+                  updateRow(i, { required: checked === true })
+                }
               />
               required
             </label>

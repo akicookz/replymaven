@@ -16,6 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { type FaqPair } from "./faq-editor";
 
 interface ResourceSummary {
@@ -165,12 +166,11 @@ function FaqGenerateModal({
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
               Topic
             </label>
-            <textarea
+            <Textarea
               value={topic}
               onChange={(e) => setTopic(e.target.value.slice(0, 500))}
               placeholder="Shipping & returns"
               rows={2}
-              className="w-full px-3.5 py-2.5 rounded-lg border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
               disabled={generate.isPending}
             />
             <div className="flex justify-end text-xs text-muted-foreground">
@@ -205,7 +205,7 @@ function FaqGenerateModal({
                       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors ${
                         checked
                           ? "bg-primary/10"
-                          : "bg-muted/40 hover:bg-muted/70"
+                          : "bg-glass-card hover:bg-glass-button"
                       } disabled:opacity-50 disabled:cursor-not-allowed`}
                     >
                       <Icon className="w-4 h-4 shrink-0 text-muted-foreground" />

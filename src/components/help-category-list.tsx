@@ -88,7 +88,7 @@ function SortableCategoryRow({
 
   return (
     <li ref={setNodeRef} style={style}>
-      <div className="group relative flex items-center gap-2 rounded-lg pr-1 py-1.5 transition-colors hover:bg-muted/40">
+      <div className="group relative flex items-center gap-2 rounded-lg pr-1 py-1.5 transition-colors hover:bg-glass-card">
         <button
           type="button"
           aria-label="Drag to reorder"
@@ -103,7 +103,7 @@ function SortableCategoryRow({
           onClick={onSelect}
           className="flex-1 min-w-0 flex items-center gap-2.5 text-left"
         >
-          <span className="shrink-0 h-8 w-8 rounded-md bg-muted overflow-hidden inline-flex items-center justify-center text-muted-foreground">
+          <span className="shrink-0 h-8 w-8 rounded-md bg-glass-button overflow-hidden inline-flex items-center justify-center text-muted-foreground">
             <CategoryIcon icon={category.icon} className="h-4 w-4" />
           </span>
           <span
@@ -122,7 +122,7 @@ function SortableCategoryRow({
             <button
               type="button"
               aria-label={`Actions for ${category.name}`}
-              className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-border bg-background shadow-sm text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100 transition-opacity"
+              className="h-7 w-7 inline-flex items-center justify-center rounded-md glass-control text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100 transition-opacity"
             >
               <MoreVertical className="w-4 h-4" />
             </button>
@@ -154,7 +154,7 @@ function SortableCategoryRow({
             <li key={article.id}>
               <Link
                 to={`/app/projects/${projectId}/knowledgebase/help-center/articles/${article.id}`}
-                className="flex items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/60"
+                className="flex items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground hover:text-foreground hover:bg-glass-button"
               >
                 <span
                   className={cn(
@@ -208,7 +208,7 @@ function HelpCategoryList({
 
   if (categories.length === 0) {
     return (
-      <div className="px-4 py-6 rounded-xl bg-muted/30 border-2 border-dashed border-muted text-sm text-muted-foreground text-center">
+      <div className="px-4 py-6 rounded-xl glass-card border-2 border-dashed border-muted text-sm text-muted-foreground text-center">
         No categories yet.
       </div>
     );

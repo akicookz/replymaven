@@ -16,6 +16,7 @@ import {
   Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import FaqEditor from "@/components/faq-editor";
 import FaqGenerateModal, { type FaqDraft } from "@/components/faq-generate-modal";
@@ -324,7 +325,7 @@ function Resources() {
         />
 
         {showForm && (
-          <div className="bg-card rounded-2xl p-6 space-y-4">
+          <div className="glass-card rounded-card p-6 space-y-4">
             <div className="flex gap-2">
               <Button
                 variant={formType === "webpage" ? "default" : "outline"}
@@ -385,22 +386,20 @@ function Resources() {
                   }}
                   className="space-y-3"
                 >
-                  <input
+                  <Input
                     type="text"
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder="Resource title"
                     required
-                    className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                   />
                   {formType === "webpage" && (
-                    <input
+                    <Input
                       type="url"
                       value={url}
                       onChange={(e) => setUrl(e.target.value)}
                       placeholder="https://example.com/page"
                       required
-                      className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                     />
                   )}
                   {formType === "pdf" && (
@@ -470,7 +469,7 @@ function Resources() {
             {Array.from({ length: 3 }).map((_, i) => (
               <div
                 key={i}
-                className="h-16 rounded-xl bg-muted animate-pulse"
+                className="h-16 rounded-xl bg-glass-button animate-pulse"
               />
             ))}
           </div>
@@ -483,10 +482,10 @@ function Resources() {
               return (
                 <div
                   key={resource.id}
-                  className="bg-card rounded-xl overflow-hidden"
+                  className="glass-card rounded-card overflow-hidden"
                 >
                   <div
-                    className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors"
+                    className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-glass-card transition-colors"
                     onClick={() => toggleExpanded(resource.id)}
                   >
                     <div className="flex items-center gap-2 shrink-0">
@@ -495,7 +494,7 @@ function Resources() {
                       ) : (
                         <ChevronRight className="w-4 h-4 text-muted-foreground" />
                       )}
-                      <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center">
+                      <div className="w-8 h-8 rounded-lg bg-glass-button flex items-center justify-center">
                         <Icon className="w-4 h-4 text-muted-foreground" />
                       </div>
                     </div>
@@ -514,7 +513,7 @@ function Resources() {
                     </div>
                     <span
                       className={cn(
-                        "text-xs px-2 py-0.5 rounded-full shrink-0",
+                        "text-xs px-2 py-0.5 rounded-[6px] shrink-0",
                         statusColors[resource.status] ?? statusColors.pending,
                       )}
                     >
@@ -530,7 +529,7 @@ function Resources() {
                           });
                         }}
                         disabled={reindex.isPending}
-                        className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground disabled:opacity-50"
+                        className="p-1.5 rounded-lg hover:bg-glass-button text-muted-foreground disabled:opacity-50"
                         title={
                           resource.type === "webpage"
                             ? "Re-crawl & Index"

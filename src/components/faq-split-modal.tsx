@@ -21,6 +21,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   FAQ_DESCRIPTION_MAX_CHARS,
   FAQ_SET_MAX_CHARS,
@@ -212,19 +214,18 @@ function FaqSplitModal({
                 return (
                   <div
                     key={bIdx}
-                    className="space-y-3 p-4 rounded-2xl bg-muted/40"
+                    className="space-y-3 p-4 rounded-2xl glass-card"
                   >
                     <div className="space-y-2">
-                      <input
+                      <Input
                         type="text"
                         value={bucket.title}
                         onChange={(e) =>
                           updateBucketField(bIdx, "title", e.target.value)
                         }
-                        placeholder="Bucket title"
-                        className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm font-medium focus:outline-none focus:ring-2 focus:ring-ring"
+                        placeholder="Bucket title" className="font-medium"
                       />
-                      <textarea
+                      <Textarea
                         value={bucket.description}
                         onChange={(e) =>
                           updateBucketField(
@@ -237,8 +238,7 @@ function FaqSplitModal({
                           )
                         }
                         placeholder="When to refer to this FAQ"
-                        rows={2}
-                        className="w-full px-3 py-2 rounded-lg border border-input bg-background text-xs resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+                        rows={2} className="text-xs"
                       />
                       <div
                         className={`flex justify-between text-xs ${
@@ -262,7 +262,7 @@ function FaqSplitModal({
                       {bucket.pairs.map((pair, pIdx) => (
                         <div
                           key={pIdx}
-                          className="flex items-start gap-2 p-2.5 rounded-xl bg-background"
+                          className="flex items-start gap-2 p-2.5 rounded-xl glass-card"
                         >
                           <div className="flex-1 min-w-0 text-sm">
                             <div className="font-medium line-clamp-2">
@@ -277,7 +277,7 @@ function FaqSplitModal({
                               <DropdownMenuTrigger asChild>
                                 <button
                                   type="button"
-                                  className="text-xs text-muted-foreground hover:text-foreground p-1.5 rounded-lg hover:bg-muted shrink-0"
+                                  className="text-xs text-muted-foreground hover:text-foreground p-1.5 rounded-lg hover:bg-glass-button shrink-0"
                                   title="Move to another bucket"
                                 >
                                   <ArrowRight className="w-3.5 h-3.5" />
@@ -307,7 +307,7 @@ function FaqSplitModal({
             )}
           </div>
 
-          <DialogFooter className="px-6 py-4 bg-muted/30 shrink-0 rounded-b-lg">
+          <DialogFooter className="px-6 py-4 bg-glass-card shrink-0 rounded-b-lg">
             <Button
               variant="outline"
               onClick={() => handleClose(false)}

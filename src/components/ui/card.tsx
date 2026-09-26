@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 const cardVariants = cva("text-card-foreground", {
   variants: {
     variant: {
-      default: "bg-card flex flex-col gap-6 rounded-xl py-6",
+      default: "glass-card rounded-card flex flex-col gap-6 py-6",
       "glow-primary":
         "rounded-3xl bg-black/80 backdrop-blur-2xl border border-brand/10 shadow-[inset_0_10px_30px_-12px_rgba(37,99,235,0.22)]",
       "glow-secondary":

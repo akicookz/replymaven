@@ -447,7 +447,7 @@ function Layout() {
                 to={currentProject ? `/app/projects/${currentProject.id}/settings?tab=billing` : "/app/account/billing"}
                 className="group block rounded-md px-2 py-1"
               >
-                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                <div className="h-1.5 rounded-full bg-glass-button overflow-hidden">
                   <div
                     className={cn(
                       "h-full rounded-full transition-all",
@@ -514,7 +514,7 @@ function Layout() {
                   <CreditCard className="w-4 h-4 shrink-0" />
                   Billing
                 </Link>
-                <div className="h-px bg-muted my-1" />
+                <div className="h-px bg-glass-button my-1" />
                 <button
                   onClick={handleSignOut}
                   className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"

@@ -57,7 +57,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
               </p>
             </div>
             {this.state.error && (
-              <pre className="bg-muted/50 border border-border rounded-xl p-4 text-xs text-left overflow-x-auto font-mono text-muted-foreground max-h-32 overflow-y-auto">
+              <pre className="bg-glass-button border border-border rounded-xl p-4 text-xs text-left overflow-x-auto font-mono text-muted-foreground max-h-32 overflow-y-auto">
                 {this.state.error.message}
               </pre>
             )}

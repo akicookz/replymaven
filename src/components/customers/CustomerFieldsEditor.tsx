@@ -2,6 +2,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 import {
   createEmptyCustomerFieldRow,
   type CustomerFieldRow,
@@ -37,20 +38,15 @@ function CustomerFieldsEditor({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <Label className="text-sm font-medium">Custom fields</Label>
-          <p className="mt-1 text-pretty text-xs text-muted-foreground">
-            Store useful account details from your own customer data.
-          </p>
-        </div>
+      <div className="flex items-center justify-between gap-4">
+        <Label>Custom fields</Label>
         <Button
           type="button"
           variant="ghost"
           size="sm"
           onClick={addRow}
           disabled={disabled || rows.length >= 50}
-          className="shrink-0 text-muted-foreground transition-[color,scale] duration-150 ease-out hover:text-foreground active:scale-[0.96]"
+          className="-mr-2 shrink-0 text-muted-foreground transition-[color,scale] duration-150 ease-out hover:text-foreground active:scale-[0.96]"
         >
           <Plus />
           Add field
@@ -58,19 +54,18 @@ function CustomerFieldsEditor({
       </div>
 
       {rows.length === 0 ? (
-        <div className="rounded-xl bg-muted/15 px-4 py-4 text-center text-xs text-muted-foreground/60">
+        <div className="text-sm text-muted-foreground">
           No custom fields yet.
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {rows.map((row, index) => (
-            <div
-              key={row.id}
-              className="rounded-xl bg-muted/20 p-3"
-            >
-              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
-                <div className="space-y-1.5">
-                  <Label htmlFor={`${row.id}-key`}>Field name</Label>
+            <div key={row.id}>
+              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-end gap-2 sm:gap-3">
+                <div className={cn(index === 0 && "space-y-2")}>
+                  <Label htmlFor={`${row.id}-key`} className={cn(index > 0 && "sr-only")}>
+                    Field name
+                  </Label>
                   <Input
                     id={`${row.id}-key`}
                     value={row.key}
@@ -84,8 +79,10 @@ function CustomerFieldsEditor({
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <Label htmlFor={`${row.id}-value`}>Value</Label>
+                <div className={cn(index === 0 && "space-y-2")}>
+                  <Label htmlFor={`${row.id}-value`} className={cn(index > 0 && "sr-only")}>
+                    Value
+                  </Label>
                   <Input
                     id={`${row.id}-value`}
                     value={row.value}
@@ -105,7 +102,7 @@ function CustomerFieldsEditor({
                   onClick={() => removeRow(row.id)}
                   disabled={disabled}
                   aria-label={`Remove ${row.key || "custom field"}`}
-                  className="h-10 w-10 text-muted-foreground transition-[color,scale] duration-150 ease-out hover:text-destructive active:scale-[0.96]"
+                  className="text-muted-foreground transition-[color,scale] duration-150 ease-out hover:text-destructive active:scale-[0.96]"
                 >
                   <Trash2 />
                 </Button>

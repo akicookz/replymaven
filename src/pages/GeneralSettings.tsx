@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 type ToneOfVoice = "professional" | "friendly" | "casual" | "formal" | "custom";
@@ -55,9 +56,6 @@ const AUTO_CLOSE_OPTIONS = [
   { value: 720, label: "After 12 hours" },
   { value: 1440, label: "After 1 day" },
 ];
-
-const textareaClass =
-  "w-full min-h-0 rounded-lg border border-border bg-input-background px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 resize-none";
 
 function Field({
   label,
@@ -329,7 +327,7 @@ function GeneralSettings() {
             label="Project slug"
             hint="Widget embed, help URL, and inbound email. This cannot change."
           >
-            <div className="flex h-9 items-center gap-1 rounded-lg bg-muted/40 px-3">
+            <div className="flex h-9 items-center gap-1 rounded-lg glass-card px-3">
               <span className="min-w-0 flex-1 truncate font-mono text-sm text-foreground">
                 {project?.slug ?? ""}
               </span>
@@ -337,7 +335,7 @@ function GeneralSettings() {
                 type="button"
                 aria-label="Copy slug"
                 onClick={copySlug}
-                className="-mr-1.5 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                className="-mr-1.5 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-glass-button hover:text-foreground"
               >
                 <Copy className="h-4 w-4" />
               </button>
@@ -440,7 +438,7 @@ function GeneralSettings() {
                   "rounded-lg px-3 py-2 text-sm capitalize transition-colors",
                   form.toneOfVoice === tone
                     ? "bg-primary/10 font-medium text-foreground"
-                    : "bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground",
+                    : "bg-glass-card text-muted-foreground hover:bg-glass-button hover:text-foreground",
                 )}
               >
                 {tone}
@@ -449,7 +447,7 @@ function GeneralSettings() {
           </div>
         </Field>
         {form.toneOfVoice === "custom" && (
-          <textarea
+          <Textarea
             value={form.customTonePrompt}
             onChange={(e) =>
               setForm((prev) => ({
@@ -459,7 +457,7 @@ function GeneralSettings() {
             }
             rows={3}
             placeholder="Describe the tone you want your bot to use..."
-            className={textareaClass}
+            className="min-h-0"
           />
         )}
       </WidgetSectionCard>
@@ -491,14 +489,14 @@ function GeneralSettings() {
               : "Company context refreshed from website."}
           </p>
         )}
-        <textarea
+        <Textarea
           value={form.companyContext}
           onChange={(e) =>
             setForm((prev) => ({ ...prev, companyContext: e.target.value }))
           }
           rows={8}
           placeholder="Describe your business, products, policies, and anything the assistant should know."
-          className={textareaClass}
+          className="min-h-0"
         />
       </WidgetSectionCard>
 

@@ -122,7 +122,7 @@ export function BillingToggle({
         2 months free
       </span>
       <div
-        className="inline-flex items-center gap-1 p-1 rounded-xl bg-muted/50"
+        className="inline-flex items-center gap-1 p-1 rounded-xl bg-glass-button"
         role="group"
         aria-label="Billing interval"
       >
@@ -132,7 +132,7 @@ export function BillingToggle({
           className={cn(
             "min-h-10 px-4 py-1.5 rounded-lg text-sm font-medium transition-[background-color,color,box-shadow,scale] duration-150 active:scale-[0.96]",
             interval === "monthly"
-              ? "bg-background text-foreground shadow-sm"
+              ? "bg-glass-raised text-ink-1 shadow-[inset_0_1px_0_0_var(--hairline-strong)]"
               : "text-muted-foreground hover:text-foreground",
           )}
         >
@@ -144,7 +144,7 @@ export function BillingToggle({
           className={cn(
             "min-h-10 px-4 py-1.5 rounded-lg text-sm font-medium transition-[background-color,color,box-shadow,scale] duration-150 active:scale-[0.96]",
             interval === "annual"
-              ? "bg-background text-foreground shadow-sm"
+              ? "bg-glass-raised text-ink-1 shadow-[inset_0_1px_0_0_var(--hairline-strong)]"
               : "text-muted-foreground hover:text-foreground",
           )}
         >
@@ -202,7 +202,7 @@ export function PricingCards({
             >
               {isCurrent && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                  <span className="text-[11px] bg-brand text-white px-3 py-1 rounded-full font-medium">
+                  <span className="text-[11px] bg-brand text-white px-3 py-1 rounded-[6px] font-medium">
                     Current Plan
                   </span>
                 </div>
@@ -212,7 +212,7 @@ export function PricingCards({
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm text-muted-foreground">{plan.name}</h3>
                   {plan.highlighted && plan.badge && (
-                    <span className="text-[11px] bg-brand/10 text-brand px-2 py-0.5 rounded-full font-medium">
+                    <span className="text-[11px] bg-brand/10 text-brand px-2 py-0.5 rounded-[6px] font-medium">
                       {plan.badge}
                     </span>
                   )}
@@ -336,12 +336,12 @@ export function PricingCardsSelect({
                       {plan.name.replace("ReplyMaven ", "")}
                     </span>
                     {plan.badge && (
-                      <span className="text-[11px] bg-brand/10 text-brand px-2 py-0.5 rounded-full font-medium">
+                      <span className="text-[11px] bg-brand/10 text-brand px-2 py-0.5 rounded-[6px] font-medium">
                         {plan.badge}
                       </span>
                     )}
                     {isCurrent && (
-                      <span className="text-[11px] bg-brand text-white px-2 py-0.5 rounded-full font-medium">
+                      <span className="text-[11px] bg-brand text-white px-2 py-0.5 rounded-[6px] font-medium">
                         Current
                       </span>
                     )}

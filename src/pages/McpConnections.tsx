@@ -173,7 +173,7 @@ function McpConnections() {
         </div>
       </div>
 
-      <section className="rounded-2xl bg-card p-6">
+      <section className="glass-card rounded-card p-6">
         <div className="mb-4">
           <h2 className="text-sm font-semibold text-foreground">
             Connect a client
@@ -191,7 +191,7 @@ function McpConnections() {
 
           {snippets.map((snippet) => (
             <TabsContent key={snippet.id} value={snippet.id} className="mt-4">
-              <div className="overflow-hidden rounded-xl bg-background">
+              <div className="overflow-hidden rounded-xl glass-card">
                 <div className="flex items-center justify-between gap-3 px-4 py-3">
                   <p className="truncate text-xs text-muted-foreground">
                     {snippet.location}
@@ -220,7 +220,7 @@ function McpConnections() {
         </Tabs>
       </section>
 
-      <section className="rounded-2xl bg-card p-6">
+      <section className="glass-card rounded-card p-6">
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
             <h2 className="text-sm font-semibold text-foreground">
@@ -228,7 +228,7 @@ function McpConnections() {
             </h2>
           </div>
           {!connectionsQuery.isLoading && (
-            <span className="shrink-0 rounded-full bg-muted/60 px-2.5 py-1 text-xs font-medium text-muted-foreground tabular-nums">
+            <span className="shrink-0 rounded-[6px] bg-glass-button px-2.5 py-1 text-xs font-medium text-muted-foreground tabular-nums">
               {connections.length} active
             </span>
           )}
@@ -237,7 +237,7 @@ function McpConnections() {
         {connectionsQuery.isLoading ? (
           <div className="space-y-3" aria-label="Loading connected apps">
             {[0, 1].map((item) => (
-              <div key={item} className="h-24 animate-pulse rounded-xl bg-muted/40" />
+              <div key={item} className="h-24 animate-pulse rounded-xl bg-glass-card" />
             ))}
           </div>
         ) : connectionsQuery.isError ? (
@@ -245,7 +245,7 @@ function McpConnections() {
             Connections could not be loaded. Refresh the page to try again.
           </div>
         ) : connections.length === 0 ? (
-          <div className="flex flex-col items-center rounded-xl bg-background/50 px-5 py-10 text-center">
+          <div className="flex flex-col items-center rounded-xl glass-card px-5 py-10 text-center">
             <ShieldCheck className="mb-3 size-8 text-muted-foreground" />
             <p className="font-medium text-foreground">No connected clients yet</p>
           </div>
@@ -254,10 +254,10 @@ function McpConnections() {
             {connections.map((connection) => (
               <article
                 key={connection.id}
-                className="flex flex-col gap-4 rounded-xl bg-background/50 p-4 sm:flex-row sm:items-center"
+                className="flex flex-col gap-4 rounded-xl glass-card p-4 sm:flex-row sm:items-center"
               >
                 <div className="flex min-w-0 flex-1 items-start gap-3">
-                  <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                  <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-glass-button text-muted-foreground">
                     <Plug className="size-4" />
                   </div>
                   <div className="min-w-0">
@@ -271,7 +271,7 @@ function McpConnections() {
                       {connection.scopes.map((scope) => (
                         <span
                           key={scope}
-                          className="rounded-full bg-muted px-2 py-1 text-[11px] text-muted-foreground"
+                          className="rounded-[6px] bg-glass-button px-2 py-1 text-[11px] text-muted-foreground"
                         >
                           {getScopeLabel(scope)}
                         </span>

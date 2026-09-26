@@ -22,9 +22,6 @@ import type {
   WidgetPreviewMode,
 } from "@/hooks/use-widget-settings";
 
-const WIDGET_CARD_CLASS_NAME =
-  "bg-white/[0.04] backdrop-blur-xl rounded-2xl shadow-none";
-
 interface SaveState {
   mutate: () => void;
   isPending: boolean;
@@ -152,8 +149,8 @@ export function WidgetSettingsLoading({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="h-80 rounded-2xl bg-muted animate-pulse" />
-        <div className="h-80 rounded-2xl bg-muted animate-pulse" />
+        <div className="h-80 rounded-2xl bg-glass-button animate-pulse" />
+        <div className="h-80 rounded-2xl bg-glass-button animate-pulse" />
       </div>
     </div>
   );
@@ -167,7 +164,7 @@ export function WidgetSectionCard({
   children,
 }: WidgetSectionCardProps) {
   return (
-    <Card className={WIDGET_CARD_CLASS_NAME}>
+    <Card>
       {title || description || action ? (
         <CardHeader className="gap-0">
           {title ? (
@@ -201,7 +198,7 @@ export function WidgetPreviewPanel({
 }: WidgetPreviewPanelProps) {
   return (
     <>
-      <Card className={cn(WIDGET_CARD_CLASS_NAME, "relative gap-0 overflow-hidden py-0")}>
+      <Card className="relative gap-0 overflow-hidden py-0">
         <CardContent className="p-0">
           <div className="pointer-events-none absolute inset-x-0 top-0 z-10 p-3">
             <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-xl border border-hairline bg-background/70 p-1.5 shadow-lg backdrop-blur-md">
@@ -212,18 +209,18 @@ export function WidgetPreviewPanel({
                   onChange={(e) => onPagePathChange(e.target.value)}
                   placeholder="/pricing"
                   aria-label="Preview page path"
-                  className="min-w-0 flex-1 basis-full rounded-lg bg-muted/40 px-3 py-1.5 text-xs font-mono outline-none focus-visible:ring-2 focus-visible:ring-ring sm:basis-0"
+                  className="min-w-0 flex-1 basis-full rounded-lg glass-card px-3 py-1.5 text-xs font-mono outline-none focus-visible:ring-2 focus-visible:ring-ring sm:basis-0"
                 />
               ) : null}
               <div className="flex shrink-0 items-center gap-2 max-sm:w-full max-sm:justify-end">
               {position !== "center-inline" ? (
-                <div className="flex shrink-0 gap-0.5 rounded-lg bg-muted/50 p-0.5">
+                <div className="flex shrink-0 gap-0.5 rounded-lg bg-glass-button p-0.5">
                   <button
                     onClick={() => setPreviewMode("launcher")}
                     className={cn(
                       "rounded-md px-3 py-1 text-xs font-medium transition-colors",
                       previewMode === "launcher"
-                        ? "bg-background text-foreground shadow-sm"
+                        ? "bg-glass-raised text-ink-1 shadow-[inset_0_1px_0_0_var(--hairline-strong)]"
                         : "text-muted-foreground hover:text-foreground",
                     )}
                     title="Closed widget with greeting and intro popups"
@@ -235,7 +232,7 @@ export function WidgetPreviewPanel({
                     className={cn(
                       "rounded-md px-3 py-1 text-xs font-medium transition-colors",
                       previewMode === "open"
-                        ? "bg-background text-foreground shadow-sm"
+                        ? "bg-glass-raised text-ink-1 shadow-[inset_0_1px_0_0_var(--hairline-strong)]"
                         : "text-muted-foreground hover:text-foreground",
                     )}
                     title="Widget opened on its home screen"
@@ -249,7 +246,7 @@ export function WidgetPreviewPanel({
                   onClick={onReplay}
                   aria-label="Replay greetings and intro timers"
                   title="Replay greetings and intro timers"
-                  className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+                  className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-glass-button hover:text-foreground"
                 >
                   <RotateCcw className="size-3.5" />
                 </button>
@@ -270,7 +267,7 @@ export function WidgetPreviewPanel({
       </Card>
 
       {showEmbedSnippet && embedSnippet ? (
-        <Card className={WIDGET_CARD_CLASS_NAME}>
+        <Card>
           <CardHeader>
             <CardTitle className="text-sm">Embed</CardTitle>
             <CardDescription>
@@ -279,12 +276,12 @@ export function WidgetPreviewPanel({
           </CardHeader>
           <CardContent>
             <div className="relative">
-              <pre className="bg-muted/50 rounded-xl p-3 text-xs font-mono overflow-x-auto">
+              <pre className="bg-glass-button rounded-xl p-3 text-xs font-mono overflow-x-auto">
                 {embedSnippet}
               </pre>
               <button
                 onClick={() => navigator.clipboard.writeText(embedSnippet)}
-                className="absolute top-1.5 right-1.5 p-1.5 rounded-lg bg-background hover:bg-muted"
+                className="absolute top-1.5 right-1.5 p-1.5 rounded-lg bg-glass-button hover:bg-glass-raised"
                 title="Copy"
               >
                 <Copy className="w-3.5 h-3.5" />

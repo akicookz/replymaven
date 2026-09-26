@@ -55,6 +55,7 @@
   --color-glass-bar: var(--glass-bar);
   --color-glass-button: var(--glass-button);
   --color-glass-raised: var(--glass-raised);
+  --color-glass-card: var(--glass-card);
   --color-glass-focus: var(--glass-focus);
   --color-glass-peek-1: var(--glass-peek-1);
   --color-glass-peek-2: var(--glass-peek-2);
@@ -168,6 +169,7 @@
   --glass-bar: rgba(22, 22, 26, 0.5);
   --glass-button: rgba(255, 255, 255, 0.07);
   --glass-raised: rgba(255, 255, 255, 0.12);
+  --glass-card: rgba(255, 255, 255, 0.04);
   /* Focus card: a clean, visible frosted surface (solid enough to read as a
      card over the dark focus center — not black) with subtle wallpaper frost. */
   --glass-focus: rgba(33, 34, 40, 0.9);
@@ -181,6 +183,7 @@
   --hairline: rgba(255, 255, 255, 0.07);
   --hairline-strong: rgba(255, 255, 255, 0.16);
   --hairline-inset: rgba(255, 255, 255, 0.1);
+  --hairline-soft: rgba(255, 255, 255, 0.04);
 
   --ink-1: #ffffff;
   --ink-2: #f5f5f7;

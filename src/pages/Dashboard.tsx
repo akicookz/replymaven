@@ -121,9 +121,9 @@ function StatCard({
   change?: { value: number; positive: boolean };
 }) {
   return (
-    <div className="bg-card rounded-xl p-5 flex flex-col gap-3">
+    <div className="glass-card rounded-card p-5 flex flex-col gap-3">
       <div className="flex items-center gap-3">
-        <div className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center">
+        <div className="w-9 h-9 rounded-glass bg-glass-button flex items-center justify-center">
           <Icon className="w-[18px] h-[18px] text-muted-foreground" />
         </div>
         <span className="text-[13px] text-muted-foreground font-medium">
@@ -259,19 +259,19 @@ function Dashboard() {
           {Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}
-              className="h-[104px] rounded-xl bg-card animate-pulse"
+              className="glass-card rounded-card h-[104px] animate-pulse"
             />
           ))}
         </div>
         {/* Chart + actions skeleton */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="h-[340px] rounded-xl bg-card animate-pulse" />
-          <div className="h-[340px] rounded-xl bg-card animate-pulse" />
+          <div className="glass-card rounded-card h-[340px] animate-pulse" />
+          <div className="glass-card rounded-card h-[340px] animate-pulse" />
         </div>
         {/* Table + status skeleton */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2 h-[280px] rounded-xl bg-card animate-pulse" />
-          <div className="h-[280px] rounded-xl bg-card animate-pulse" />
+          <div className="glass-card rounded-card lg:col-span-2 h-[280px] animate-pulse" />
+          <div className="glass-card rounded-card h-[280px] animate-pulse" />
         </div>
       </div>
     );
@@ -359,7 +359,7 @@ function Dashboard() {
       {/* Chart + Quick Actions */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Conversations Chart */}
-        <div className="bg-card rounded-xl p-6">
+        <div className="glass-card rounded-card p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-sm font-semibold text-foreground">
               Conversations over time
@@ -415,7 +415,7 @@ function Dashboard() {
         </div>
 
         {/* Needs Review */}
-        <div className="bg-card rounded-xl p-6">
+        <div className="glass-card rounded-card p-6">
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-sm font-semibold text-foreground">
               Needs review
@@ -459,13 +459,13 @@ function Dashboard() {
 
       {/* Recent Conversations */}
       <div>
-        <div className="bg-card rounded-xl">
+        <div className="glass-card rounded-card">
           <div className="flex items-center justify-between px-4 sm:px-6 py-4">
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-semibold text-foreground">
                 Recent Conversations
               </h2>
-              <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full font-medium">
+              <span className="text-xs bg-glass-button text-muted-foreground px-2 py-0.5 rounded-[6px] font-medium">
                 {data.recentConversations.length}
               </span>
             </div>
@@ -502,7 +502,7 @@ function Dashboard() {
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="relative shrink-0">
-                        <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-sm">
+                        <div className="w-8 h-8 rounded-full bg-glass-button flex items-center justify-center text-sm">
                           {meta.country ? countryToFlag(meta.country) : (
                             <Users className="w-3.5 h-3.5 text-muted-foreground" />
                           )}
@@ -530,7 +530,7 @@ function Dashboard() {
                     </div>
                     <span
                       className={cn(
-                        "text-[11px] font-medium px-2 py-0.5 rounded-full w-fit capitalize",
+                        "text-[11px] font-medium px-2 py-0.5 rounded-[6px] w-fit capitalize",
                         STATUS_BADGE_STYLES[convo.status] ??
                         "bg-status-closed/10 text-status-closed border-status-closed/25",
                       )}

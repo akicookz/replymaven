@@ -72,13 +72,13 @@ function CustomerPickerDialog({
 
         <div className="px-6 pt-4 sm:px-7">
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-ink-6" />
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search customers"
               aria-label="Search customers"
-              className="h-11 rounded-2xl pl-10"
+              className="pl-9"
               autoFocus
             />
           </div>
@@ -95,7 +95,7 @@ function CustomerPickerDialog({
               Could not load customers.
             </p>
           ) : customers.length === 0 ? (
-            <div className="rounded-2xl bg-muted/35 px-4 py-10 text-center">
+            <div className="rounded-2xl glass-card px-4 py-10 text-center">
               <UserRound className="mx-auto size-6 text-muted-foreground" />
               <p className="mt-2 text-sm text-muted-foreground">
                 No matching customers.
@@ -109,7 +109,7 @@ function CustomerPickerDialog({
                   type="button"
                   onClick={() => onSelect(customer)}
                   disabled={pending}
-                  className="group flex min-h-14 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-[background-color,scale] duration-150 ease-out hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] disabled:opacity-50"
+                  className="group flex min-h-14 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-[background-color,scale] duration-150 ease-out hover:bg-glass-button focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] disabled:opacity-50"
                 >
                   <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand/12 text-sm font-semibold text-brand">
                     {(customer.name?.[0] ?? customer.email?.[0] ?? "?").toUpperCase()}

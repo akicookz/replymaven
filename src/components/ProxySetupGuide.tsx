@@ -211,27 +211,27 @@ export function ProxySetupBody({ projectSlug }: ProxySetupGuideProps) {
       <ol className="list-decimal space-y-2 pl-4 text-sm text-muted-foreground">
         <li>
           Add a <strong className="font-medium text-foreground">200 rewrite</strong>{" "}
-          from <code className="rounded bg-muted px-1 py-0.5">/docs</code> to{" "}
-          <code className="rounded bg-muted px-1 py-0.5">
+          from <code className="rounded bg-glass-button px-1 py-0.5">/docs</code> to{" "}
+          <code className="rounded bg-glass-button px-1 py-0.5">
             https://replymaven.com/help/{projectSlug}
           </code>
           . A 301 on your side will break SEO.
         </li>
         <li>
           Send{" "}
-          <code className="rounded bg-muted px-1 py-0.5">
+          <code className="rounded bg-glass-button px-1 py-0.5">
             X-ReplyMaven-Help-Proxy: 1
           </code>{" "}
           or{" "}
-          <code className="rounded bg-muted px-1 py-0.5">X-Forwarded-Host</code>{" "}
+          <code className="rounded bg-glass-button px-1 py-0.5">X-Forwarded-Host</code>{" "}
           set to your domain. Without that, ReplyMaven 301s the hosted path
           and the rewrite loops.
         </li>
         <li>
           Also rewrite{" "}
-          <code className="rounded bg-muted px-1 py-0.5">/docs/sitemap.xml</code>{" "}
+          <code className="rounded bg-glass-button px-1 py-0.5">/docs/sitemap.xml</code>{" "}
           and{" "}
-          <code className="rounded bg-muted px-1 py-0.5">/docs/robots.txt</code>.
+          <code className="rounded bg-glass-button px-1 py-0.5">/docs/robots.txt</code>.
         </li>
         <li>
           Use <strong className="font-medium text-foreground">Test connection</strong>
@@ -241,7 +241,7 @@ export function ProxySetupBody({ projectSlug }: ProxySetupGuideProps) {
 
       <p className="text-xs text-muted-foreground">
         The hosted URL{" "}
-        <code className="rounded bg-muted px-1.5 py-0.5">
+        <code className="rounded bg-glass-button px-1.5 py-0.5">
           replymaven.com/help/{projectSlug}
         </code>{" "}
         is noindex. After you save, it 301s to your path.{" "}
@@ -266,7 +266,7 @@ export function ProxySetupBody({ projectSlug }: ProxySetupGuideProps) {
               "flex flex-col items-center gap-2 rounded-xl px-2 py-3 text-xs font-medium transition-colors",
               activeTab === guide.id
                 ? "bg-primary text-primary-foreground"
-                : "bg-muted/60 text-muted-foreground hover:bg-muted",
+                : "bg-glass-button text-muted-foreground hover:bg-glass-button",
             )}
           >
             <guide.Logo className="size-5" />

@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import {
   WidgetPageShell,
   WidgetPreviewPanel,
@@ -159,11 +160,10 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
           <label className="text-sm font-medium text-foreground">
             Header Text
           </label>
-          <input
+          <Input
             type="text"
             value={state.form.headerText ?? ""}
             onChange={(e) => state.updateForm({ headerText: e.target.value })}
-            className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
 
@@ -174,14 +174,13 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
               (optional)
             </span>
           </label>
-          <input
+          <Input
             type="text"
             value={state.form.headerSubtitle ?? ""}
             onChange={(e) =>
               state.updateForm({ headerSubtitle: e.target.value })
             }
             placeholder="We typically reply instantly"
-            className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
       </WidgetSectionCard>
@@ -198,7 +197,7 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
               </label>
               <div className="flex items-center gap-3">
                 <div
-                  className="w-14 h-14 rounded-full border-2 border-dashed border-border flex items-center justify-center overflow-hidden bg-muted/30 shrink-0"
+                  className="w-14 h-14 rounded-full border-2 border-dashed border-border flex items-center justify-center overflow-hidden bg-glass-card shrink-0"
                   style={state.form.avatarUrl ? { borderStyle: "solid" } : {}}
                 >
                   {state.form.avatarUrl ? (
@@ -256,9 +255,9 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
               </label>
               <div
                 className={cn(
-                  "relative w-full h-28 rounded-xl border-2 border-border flex items-center justify-center overflow-hidden bg-muted/30",
+                  "relative w-full h-28 rounded-xl border-2 border-border flex items-center justify-center overflow-hidden bg-glass-card",
                   !state.form.bannerUrl &&
-                    "border-dashed cursor-pointer hover:bg-muted/50 transition-colors",
+                    "border-dashed cursor-pointer hover:bg-glass-button transition-colors",
                 )}
                 onClick={
                   state.form.bannerUrl
@@ -332,14 +331,13 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
               <label className="text-sm font-medium text-foreground">
                 Home Title
               </label>
-              <input
+              <Input
                 type="text"
                 value={state.form.homeTitle ?? "How can we help?"}
                 onChange={(e) =>
                   state.updateForm({ homeTitle: e.target.value })
                 }
                 placeholder="How can we help?"
-                className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
 
@@ -350,7 +348,7 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
                   (optional)
                 </span>
               </label>
-              <input
+              <Input
                 type="text"
                 value={state.form.homeSubtitle ?? ""}
                 onChange={(e) =>
@@ -359,12 +357,11 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
                   })
                 }
                 placeholder="We typically reply instantly"
-                className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
           </>
         ) : (
-          <div className="px-4 py-3 rounded-lg border border-input bg-background text-sm text-muted-foreground">
+          <div className="rounded-xl glass-card px-4 py-3 text-sm text-muted-foreground">
             Center inline widgets skip the standalone home screen and open
             directly as an inline chat experience.
           </div>
@@ -413,7 +410,7 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
                 })
               }
             >
-              <SelectTrigger className="bg-muted/50 border-border">
+              <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

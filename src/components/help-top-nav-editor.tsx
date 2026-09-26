@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { cn } from "@/lib/utils";
+import { Textarea } from "@/components/ui/textarea";
 
 export interface HelpTopNavItem {
   label: string;
@@ -26,7 +26,7 @@ interface HelpTopNavEditorProps {
 
 const MAX_ITEMS = 3;
 export const DEFAULT_BUTTON_CLASSES =
-  "inline-flex h-8 items-center justify-center rounded-md bg-secondary px-3 text-sm font-medium text-secondary-foreground transition-colors hover:bg-secondary/80";
+  "inline-flex h-8 items-center justify-center rounded-md bg-glass-button px-3 text-sm font-medium text-secondary-foreground transition-colors hover:bg-glass-button";
 const LEGACY_DEFAULT_BUTTON_CLASSES =
   "inline-flex h-9 items-center justify-center rounded-md bg-primary px-5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors";
 const LEGACY_COMPACT_DEFAULT_BUTTON_CLASSES =
@@ -133,7 +133,7 @@ function TopNavItemRow({
   }
 
   return (
-    <li className="rounded-xl bg-muted/40 p-4 space-y-3">
+    <li className="rounded-xl glass-card p-4 space-y-3">
       <div className="grid gap-3 sm:grid-cols-[1fr_1.5fr_10rem_auto] sm:items-end">
         <div className="space-y-1.5">
           <Label htmlFor={`help-topnav-label-${index}`} className="text-xs">
@@ -199,7 +199,7 @@ function TopNavItemRow({
           Style classes
         </summary>
         <div className="mt-2 space-y-1.5">
-          <textarea
+          <Textarea
             id={`help-topnav-classes-${index}`}
             aria-label="Style classes"
             value={item.classes ?? ""}
@@ -210,9 +210,7 @@ function TopNavItemRow({
             onChange={(e: ChangeEvent<HTMLTextAreaElement>) =>
               onChange({ classes: e.target.value })
             }
-            className={cn(
-              "flex min-h-[60px] w-full rounded-lg border border-input bg-card px-3 py-2 text-xs font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
-            )}
+            className="min-h-[60px] font-mono text-xs md:text-xs"
           />
           <p className="text-xs text-muted-foreground">
             See the{" "}

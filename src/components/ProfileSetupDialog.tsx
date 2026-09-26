@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 
 interface ProfileData {
   id: string;
@@ -139,7 +140,7 @@ function ProfileSetupDialog({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="relative w-20 h-20 rounded-full bg-muted flex items-center justify-center overflow-hidden group transition-colors hover:bg-muted/80"
+              className="relative w-20 h-20 rounded-full bg-glass-button flex items-center justify-center overflow-hidden group transition-colors hover:bg-glass-button"
               disabled={uploading}
             >
               {currentAvatar ? (
@@ -174,12 +175,11 @@ function ProfileSetupDialog({
           {/* Name */}
           <div className="space-y-2">
             <label className="text-sm font-medium text-foreground">Name</label>
-            <input
+            <Input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Your name"
-              className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
 
@@ -189,12 +189,11 @@ function ProfileSetupDialog({
               Work Title
               <span className="text-muted-foreground font-normal ml-1">(optional)</span>
             </label>
-            <input
+            <Input
               type="text"
               value={workTitle}
               onChange={(e) => setWorkTitle(e.target.value)}
               placeholder="e.g. Support Engineer, CEO"
-              className="w-full px-4 py-2.5 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
 
