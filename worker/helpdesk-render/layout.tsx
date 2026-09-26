@@ -304,8 +304,7 @@ const HELP_NAV_SCRIPT = `
 `;
 
 // Search dialog (button, Cmd/Ctrl K, "/"), active tab kept in view with edge
-// fades, and the Ask button. The async widget script runs before window load
-// and sets window.ReplyMaven at once, so a missing API at load means no widget.
+// fades.
 const HELP_TOPBAR_SCRIPT = `
 (function(){
   var dialog = document.getElementById('rm-help-search');
@@ -361,21 +360,6 @@ const HELP_TOPBAR_SCRIPT = `
     window.addEventListener('load', syncFade);
   }
 
-  var ask = document.querySelector('[data-help-ask]');
-  if (ask) {
-    var openChat = function(){
-      if (window.ReplyMaven) window.ReplyMaven.open('chat');
-    };
-    var loaded = document.readyState === 'complete';
-    window.addEventListener('load', function(){
-      loaded = true;
-      if (!window.ReplyMaven) ask.hidden = true;
-    });
-    ask.addEventListener('click', function(){
-      if (window.ReplyMaven || loaded) openChat();
-      else window.addEventListener('load', openChat, { once: true });
-    });
-  }
 })();
 `;
 

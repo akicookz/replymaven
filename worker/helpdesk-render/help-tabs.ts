@@ -95,7 +95,7 @@ export function resolveHelpTabs(input: ResolveHelpTabsInput): HelpTabContext {
   };
 }
 
-/** What the top bar and drawer need to draw the tabs and the Ask button. */
+/** What the top bar and drawer need to draw the tabs. */
 export interface HelpNav {
   tabs: HelpTabLink[];
   activeTabId: string | null;

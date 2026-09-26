@@ -162,7 +162,7 @@ html.help-nav-open .help-menu-icon-close { display: inline-flex; }
   .help-topbar-nav { display: flex; }
 }
 
-/* ─── Top bar: tabs, search, ask ─────────────────────────────────────────── */
+/* ─── Top bar: tabs and search ───────────────────────────────────────────── */
 
 .help-tab {
   display: inline-flex;
@@ -186,8 +186,7 @@ html.help-nav-open .help-menu-icon-close { display: inline-flex; }
   font-weight: 600;
 }
 .help-tab:focus-visible,
-.help-sidebar-search:focus-visible,
-.help-topbar-ask:focus-visible {
+.help-sidebar-search:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
 }
@@ -246,6 +245,9 @@ html.help-nav-open .help-menu-icon-close { display: inline-flex; }
   cursor: pointer;
   transition: background-color 150ms ease, color 150ms ease;
 }
+.help-top-nav-button {
+  border-radius: var(--help-top-nav-button-radius);
+}
 .help-sidebar-search:hover {
   background: var(--muted);
   color: var(--foreground);
@@ -273,32 +275,6 @@ html.help-nav-open .help-menu-icon-close { display: inline-flex; }
   font-size: 0.6875rem;
   font-weight: 500;
   color: var(--muted-foreground);
-}
-
-.help-topbar-ask {
-  display: none;
-}
-@media (min-width: 1024px) {
-  .help-topbar-ask {
-    display: inline-flex;
-    align-items: center;
-    flex-shrink: 0;
-    height: 2rem;
-    padding: 0 0.75rem;
-    border: 0;
-    border-radius: var(--help-radius-md);
-    background: var(--primary);
-    color: var(--primary-foreground);
-    font: inherit;
-    font-size: 0.875rem;
-    font-weight: 500;
-    white-space: nowrap;
-    cursor: pointer;
-    transition: background-color 120ms ease;
-  }
-  .help-topbar-ask:hover {
-    background: var(--brand-dark);
-  }
 }
 
 .help-search-dialog {

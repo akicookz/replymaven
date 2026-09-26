@@ -73,6 +73,7 @@ ${palette({ bg: "#ffffff", fg: "#0a0a0a", primary, code: "#f6f8fa", codeFg: "#1f
   --radius: ${radius};
   --help-search-radius: ${searchRadii.box};
   --help-search-trigger-radius: ${searchRadii.trigger};
+  --help-top-nav-button-radius: ${searchRadii.trigger};
   --help-search-button-radius: ${searchRadii.button};
   --font-sans: ${fontStack};
   --font-heading: ${fontStack};

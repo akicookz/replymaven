@@ -71,10 +71,6 @@ export function HelpTopBar(props: HelpTopBarProps) {
         />
         <div class="help-topbar-actions">
           <HelpTopNavLinks items={props.topNav} class="help-topbar-nav" />
-          {/* Hidden by script if the widget fails to load on this page. */}
-          <button type="button" class="help-topbar-ask" data-help-ask>
-            {props.nav.botName ? `Ask ${props.nav.botName}` : "Contact us"}
-          </button>
           <button
             id="rm-theme-toggle"
             type="button"
