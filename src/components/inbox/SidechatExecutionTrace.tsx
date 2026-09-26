@@ -1,10 +1,11 @@
-import { Brain, ChevronDown, Plug } from "lucide-react";
+import { Brain, ChevronDown } from "lucide-react";
 import type {
   SidechatToolTraceState,
   SidechatTraceItem,
 } from "@/lib/inbox/types";
 import { isSidechatToolRunning } from "@/lib/inbox/sidechat";
 import { renderMarkdown } from "@/lib/utils";
+import ToolSourceIcon from "./ToolSourceIcon";
 
 interface SidechatExecutionTraceProps {
   items: SidechatTraceItem[];
@@ -124,18 +125,7 @@ function ToolTrace({
           className="flex min-h-10 cursor-pointer list-none items-center gap-2 text-[12.5px] text-ink-4 hover:text-ink-2 motion-safe:transition-colors motion-safe:duration-150 [&::-webkit-details-marker]:hidden"
           aria-label={`${sourceName}: ${item.tool.displayName}`}
         >
-          <span className="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-[6px] bg-ink-1/5 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]">
-            {item.tool.source.icon ? (
-              <img
-                src={item.tool.source.icon}
-                alt=""
-                aria-hidden="true"
-                className="size-full object-contain p-0.5"
-              />
-            ) : (
-              <Plug aria-hidden="true" className="size-3 text-ink-5" />
-            )}
-          </span>
+          <ToolSourceIcon icon={item.tool.source.icon} name={sourceName} />
           {running ? (
             <span
               data-sidechat-tool-running

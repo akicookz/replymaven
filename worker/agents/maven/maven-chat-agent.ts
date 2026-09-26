@@ -201,6 +201,7 @@ import {
   type SidechatReplyResult,
   EMAIL_CUSTOMER_TOOL_NAME,
 } from "../sidechat/action-tools";
+import { NATIVE_TOOL_ICON } from "../../lib/connector-favicon";
 
 type SidechatDataParts = Record<string, unknown> & {
   "turn-accepted": { messageId: string };
@@ -646,7 +647,7 @@ async function executeSidechatTurn(input: {
             safety: "read" as const,
             tool: {
               displayName: "Search",
-              source: { kind: "http" as const, name: "Docs", icon: null },
+              source: { kind: "http" as const, name: "Docs", icon: NATIVE_TOOL_ICON },
             },
           },
         ],
@@ -656,7 +657,7 @@ async function executeSidechatTurn(input: {
             safety: "read" as const,
             tool: {
               displayName: "List",
-              source: { kind: "http" as const, name: "Docs", icon: null },
+              source: { kind: "http" as const, name: "Docs", icon: NATIVE_TOOL_ICON },
             },
           },
         ],
@@ -666,7 +667,7 @@ async function executeSidechatTurn(input: {
             safety: "read" as const,
             tool: {
               displayName: "Read",
-              source: { kind: "http" as const, name: "Docs", icon: null },
+              source: { kind: "http" as const, name: "Docs", icon: NATIVE_TOOL_ICON },
             },
           },
         ],
@@ -676,7 +677,7 @@ async function executeSidechatTurn(input: {
             safety: "write" as const,
             tool: {
               displayName: "Apply",
-              source: { kind: "http" as const, name: "Docs", icon: null },
+              source: { kind: "http" as const, name: "Docs", icon: NATIVE_TOOL_ICON },
             },
           },
         ],
@@ -1100,7 +1101,7 @@ const SIDECHAT_ACTION_TOOL_PRESENTATIONS: Array<
         [DECIDE_PENDING_ACTION_TOOL_NAME]: "Decide",
         [SET_CUSTOMER_CONTACT_TOOL_NAME]: "Customer",
       }[name] ?? name,
-      source: { kind: "http" as const, name: "Conversation", icon: null },
+      source: { kind: "http" as const, name: "Conversation", icon: NATIVE_TOOL_ICON },
     },
   },
 ]);

@@ -68,7 +68,7 @@ function buildTeamHelpRules(options?: SupportPromptOptions): string {
 - Call request_team_help right away, without asking whether they want it, when the visitor asks for a person, when the request needs something you cannot do yourself (refunds, billing or account changes, anything no tool covers), or when you are not confident in your answer. Pass customerName and customerEmail when the visitor has stated them anywhere in the conversation.
 - If issue context is still missing, ask one normal conversational question for that issue detail before calling the tool.
 - When request_team_help returns contact_required, ask only for the returned requiredFields as an ordinary conversational follow-up. Do not claim that ownership changed or the team was notified.
-- When request_team_help returns requested, tell the visitor once, naturally and in their language, that their inquiry is with the team and they will get back to them by email, using the response time from the result when there is one. Then keep helping where you can.
+- When request_team_help returns requested, tell the visitor once, naturally and in their language, that their inquiry is with the team and they will get back to them by email, using replyTime from the result when there is one. replyTime is already today's expectation; restate it in your own words and never list other response windows. Then keep helping where you can.
 - When request_team_help returns unavailable, say naturally in the visitor's language that the notification could not be sent. Do not claim that ownership changed.
 `;
 }

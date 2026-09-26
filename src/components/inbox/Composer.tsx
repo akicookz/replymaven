@@ -140,6 +140,7 @@ export default function Composer(props: ComposerProps) {
           id: string;
           name: string;
           presetKey: string | null;
+          url: string | null;
           state: string;
         }>;
         presets: Array<{ key: string; icon: string }>;

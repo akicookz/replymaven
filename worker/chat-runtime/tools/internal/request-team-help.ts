@@ -6,6 +6,12 @@ import { createEscalation } from "../../post-turn/escalation";
 import { requestTeamNote } from "../../../services/team-note";
 import type { AppEnv } from "../../../types";
 import {
+  createLanguageModel,
+  runWithModelFallback,
+  type ModelRuntimeState,
+} from "../../llm/create-language-model";
+import { renderContactTimingMessage } from "../../llm/render-contact-timing-message";
+import {
   fallbackAiParticipationForStatus,
   parseChatState,
   type MavenToolDefinition,
@@ -22,7 +28,8 @@ export type RequestTeamHelpResult =
       status: "requested";
       requestState: "created" | "already_pending";
       agentLabel: string;
-      avgResponseTime: string | null;
+      // Today's expectation for this visitor, not the whole configured policy.
+      replyTime: string | null;
     }
   | {
       status: "contact_required";
@@ -69,14 +76,14 @@ function createUnavailableResult(): RequestTeamHelpResult {
 
 function createRequestedResult(
   agentLabel: string,
-  avgResponseTime: string | null,
+  replyTime: string | null,
   requestState: "created" | "already_pending",
 ): RequestTeamHelpResult {
   return {
     status: "requested",
     requestState,
     agentLabel,
-    avgResponseTime,
+    replyTime,
   };
 }
 
@@ -250,6 +257,7 @@ export function createRequestTeamHelpTool(dependencies: {
     MAVEN_PROJECT_AGENT: AppEnv["MAVEN_PROJECT_AGENT"];
   };
   executionCtx: ExecutionContext;
+  modelRuntime: ModelRuntimeState;
   onTeamRequested(): void;
 }): MavenToolDefinition {
   const capability = createCapability(dependencies.context.projectId);
@@ -283,6 +291,46 @@ export function createRequestTeamHelpTool(dependencies: {
       return project && conversation ? capability : null;
     },
   };
+
+  // The configured policy often lists several windows (business days,
+  // weekends); the visitor needs the one that applies now.
+  async function renderTodayReplyTime(
+    settings: Awaited<ReturnType<ProjectService["getSettings"]>>,
+    conversation: { metadata: Record<string, unknown> },
+  ): Promise<string | null> {
+    const avgResponseTime = settings?.avgResponseTime?.trim() || null;
+    if (!avgResponseTime && !settings?.workingHours?.trim()) return null;
+    const location = (key: string) => {
+      const value = conversation.metadata[key];
+      return typeof value === "string" && value.trim() ? value : null;
+    };
+    try {
+      return await runWithModelFallback({
+        runtime: dependencies.modelRuntime,
+        stage: "render_team_help_timing",
+        operation: (config) =>
+          renderContactTimingMessage(createLanguageModel(config), {
+            nowMs: Date.now(),
+            currentMessage: "",
+            workingHours: settings?.workingHours,
+            avgResponseTime: settings?.avgResponseTime,
+            companyContext: settings?.companyContext,
+            visitorLocation: {
+              timezone: location("timezone"),
+              city: location("city"),
+              region: location("region"),
+              country: location("country"),
+            },
+          }, { throwOnModelError: true }),
+        logContext: {
+          projectId: dependencies.context.projectId,
+          conversationId: dependencies.context.conversationId,
+        },
+      });
+    } catch {
+      return avgResponseTime;
+    }
+  }
 
   async function run(input: unknown): Promise<RequestTeamHelpResult> {
     {
@@ -324,11 +372,13 @@ export function createRequestTeamHelpTool(dependencies: {
       );
 
       const agentLabel = settings?.agentName?.trim() || "our team";
-      const avgResponseTime = settings?.avgResponseTime?.trim() || null;
+      let replyTimePromise: Promise<string | null> | null = null;
+      const todayReplyTime = () =>
+        (replyTimePromise ??= renderTodayReplyTime(settings, conversation));
       if (conversation.status === "agent_replied") {
         return createRequestedResult(
           agentLabel,
-          avgResponseTime,
+          await todayReplyTime(),
           "already_pending",
         );
       }
@@ -352,7 +402,7 @@ export function createRequestTeamHelpTool(dependencies: {
       if (chatState.aiParticipation === "human_only") {
         return createRequestedResult(
           agentLabel,
-          avgResponseTime,
+          await todayReplyTime(),
           "already_pending",
         );
       }
@@ -361,7 +411,7 @@ export function createRequestTeamHelpTool(dependencies: {
         await repairAcceptedTeamRequest(dependencies);
         return createRequestedResult(
           agentLabel,
-          avgResponseTime,
+          await todayReplyTime(),
           "already_pending",
         );
       }
@@ -417,7 +467,7 @@ export function createRequestTeamHelpTool(dependencies: {
       if (claim.status === "already_requested") {
         return createRequestedResult(
           agentLabel,
-          avgResponseTime,
+          await todayReplyTime(),
           "already_pending",
         );
       }
@@ -440,7 +490,7 @@ export function createRequestTeamHelpTool(dependencies: {
       if (!claimedConversation) {
         return createRequestedResult(
           agentLabel,
-          avgResponseTime,
+          await todayReplyTime(),
           "created",
         );
       }
@@ -458,14 +508,14 @@ export function createRequestTeamHelpTool(dependencies: {
       ) {
         return createRequestedResult(
           agentLabel,
-          avgResponseTime,
+          await todayReplyTime(),
           "already_pending",
         );
       }
       if (claimedConversation.status !== "waiting_agent") {
         return createRequestedResult(
           agentLabel,
-          avgResponseTime,
+          await todayReplyTime(),
           "created",
         );
       }
@@ -505,7 +555,7 @@ export function createRequestTeamHelpTool(dependencies: {
         }
         return createRequestedResult(
           agentLabel,
-          avgResponseTime,
+          await todayReplyTime(),
           "created",
         );
       } catch (error) {
@@ -515,7 +565,7 @@ export function createRequestTeamHelpTool(dependencies: {
         });
         return createRequestedResult(
           agentLabel,
-          avgResponseTime,
+          await todayReplyTime(),
           "created",
         );
       }

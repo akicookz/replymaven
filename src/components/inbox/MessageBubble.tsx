@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Mail, Plug, Trash2 } from "lucide-react";
+import { Mail, Trash2 } from "lucide-react";
 import {
   deriveEmailAction,
   deriveMessageStatus,
@@ -21,6 +21,7 @@ import MessageImages from "./MessageImages";
 import SidechatReplyDraftCard from "./SidechatReplyDraftCard";
 import SidechatKnowledgeChangeCard from "./SidechatKnowledgeChangeCard";
 import SidechatExecutionTrace from "./SidechatExecutionTrace";
+import ToolSourceIcon from "./ToolSourceIcon";
 
 interface MessageBubbleProps {
   message: Message;
@@ -342,18 +343,11 @@ export default function MessageBubble({
                 className="mb-2 flex min-w-0 items-center gap-2"
                 aria-label={`${approvalTool.source.name}: ${approvalTool.displayName}`}
               >
-                <span className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-[8px] bg-ink-1/5">
-                  {approvalTool.source.icon ? (
-                    <img
-                      src={approvalTool.source.icon}
-                      alt=""
-                      aria-hidden="true"
-                      className="size-full object-contain p-1"
-                    />
-                  ) : (
-                    <Plug aria-hidden="true" className="size-3.5 text-ink-5" />
-                  )}
-                </span>
+                <ToolSourceIcon
+                  icon={approvalTool.source.icon}
+                  name={approvalTool.source.name}
+                  size="md"
+                />
                 <p className="min-w-0 text-pretty text-[12.5px] leading-snug text-ink-5">
                   <span>{approvalTool.source.name}</span>
                   <span aria-hidden="true"> · </span>

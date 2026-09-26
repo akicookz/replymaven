@@ -24,7 +24,9 @@ const MAX_RENDERED_TEXT = 20_000;
 const MAX_ACTIVITY_LABEL = 240;
 const MAX_TOOL_DISPLAY_NAME = 160;
 const MAX_SOURCE_NAME = 100;
-const SAFE_INTEGRATION_ICON = /^\/integrations\/[a-z0-9-]+\.svg$/u;
+// Bundled logos, or a custom connector's favicon from Google's favicon service.
+const SAFE_INTEGRATION_ICON =
+  /^(?:\/integrations\/[a-z0-9-]+\.svg|https:\/\/www\.google\.com\/s2\/favicons\?domain=[a-z0-9.-]+&sz=64)$/u;
 const GATEWAY_CALL_TOOL_NAME = "call_project_tool";
 const HIDDEN_GATEWAY_TOOL_NAMES = new Set([
   "search_project_tools",

@@ -1,4 +1,5 @@
 import type { SidechatToolSource } from "../../../shared/sidechat-agent";
+import { connectorFaviconUrl } from "../../lib/connector-favicon";
 
 export type McpPresetKey =
   | "posthog"
@@ -92,11 +93,12 @@ export function getMcpPreset(key: string): McpPreset | null {
 export function buildSidechatMcpToolSource(input: {
   name: string;
   presetKey: string | null;
+  url: string | null;
 }): SidechatToolSource {
   const preset = input.presetKey ? getMcpPreset(input.presetKey) : null;
   return {
     kind: "mcp",
     name: input.name,
-    icon: preset?.icon ?? null,
+    icon: preset?.icon ?? connectorFaviconUrl(input.url),
   };
 }

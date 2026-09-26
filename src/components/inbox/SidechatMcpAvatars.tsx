@@ -1,10 +1,5 @@
-import { Plug } from "lucide-react";
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarGroup,
-  AvatarImage,
-} from "@/components/ui/avatar";
+import { Avatar, AvatarGroup } from "@/components/ui/avatar";
+import { Favicon } from "@/components/ui/favicon";
 import { Label } from "@/components/ui/label";
 import {
   Tooltip,
@@ -12,7 +7,22 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { faviconDomainFromUrl } from "@/lib/favicon";
 import type { SidechatMcpAvatar } from "@/lib/inbox/sidechat-mcp-avatars";
+
+function ConnectionIcon({ icon, name }: { icon: string | null; name: string }) {
+  const domain = faviconDomainFromUrl(icon);
+  return (
+    <Favicon
+      name={name}
+      src={domain ? null : icon}
+      domain={domain}
+      className="size-full rounded-full bg-glass-button"
+      imageClassName="p-1"
+      letterClassName="text-[9px]"
+    />
+  );
+}
 
 interface SidechatMcpAvatarsProps {
   connections: SidechatMcpAvatar[];
@@ -45,16 +55,7 @@ export default function SidechatMcpAvatars({
                   aria-label={connection.name}
                   className="border border-hairline-100"
                 >
-                  {connection.icon ? (
-                    <AvatarImage
-                      src={connection.icon}
-                      alt=""
-                      className="object-contain p-1"
-                    />
-                  ) : null}
-                  <AvatarFallback>
-                    <Plug aria-hidden="true" className="size-3 text-ink-5" />
-                  </AvatarFallback>
+                  <ConnectionIcon icon={connection.icon} name={connection.name} />
                 </Avatar>
               </TooltipTrigger>
               <TooltipContent

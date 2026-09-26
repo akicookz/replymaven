@@ -15,6 +15,7 @@ import {
   buildProjectToolArgumentFields,
   type SidechatArgumentField,
 } from "./project-tool-schema";
+import { NATIVE_TOOL_ICON } from "../../lib/connector-favicon";
 
 export const SEARCH_PROJECT_TOOLS_NAME = "search_project_tools";
 export const DESCRIBE_PROJECT_TOOL_NAME = "describe_project_tool";
@@ -481,7 +482,7 @@ export function buildSidechatGatewayTools(
         if (!isRecord(input)) return { error: "invalid_tool_input" };
         const presentation: SidechatToolPresentation = {
           displayName: "Search",
-          source: { kind: "http", name: "Docs", icon: null },
+          source: { kind: "http", name: "Docs", icon: NATIVE_TOOL_ICON },
         };
         options.emitActivity({
           type: "data-safe-activity",

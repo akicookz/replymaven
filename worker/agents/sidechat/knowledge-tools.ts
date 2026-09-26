@@ -2,12 +2,13 @@ import { dynamicTool, jsonSchema } from "ai";
 import type { KnowledgeChangePreview } from "../../../shared/knowledge-change";
 import type { SidechatToolPresentation } from "../../../shared/sidechat-agent";
 import type { ExecuteProjectToolResult } from "../../../shared/sidechat-agent";
+import { NATIVE_TOOL_ICON } from "../../lib/connector-favicon";
 
 export const LIST_KNOWLEDGE_TOOL_NAME = "list_knowledge";
 export const READ_KNOWLEDGE_TOOL_NAME = "read_knowledge";
 export const APPLY_KNOWLEDGE_CHANGE_TOOL_NAME = "apply_knowledge_change";
 
-const DOCS_SOURCE = { kind: "http" as const, name: "Docs", icon: null };
+const DOCS_SOURCE = { kind: "http" as const, name: "Docs", icon: NATIVE_TOOL_ICON };
 
 function docsPresentation(displayName: string): SidechatToolPresentation {
   return { displayName, source: DOCS_SOURCE };

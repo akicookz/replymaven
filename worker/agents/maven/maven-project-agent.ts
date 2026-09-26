@@ -3107,6 +3107,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       source: buildSidechatMcpToolSource({
         name: metadata.name,
         presetKey: metadata.preset_key,
+        url: metadata.url,
       }),
     };
   }

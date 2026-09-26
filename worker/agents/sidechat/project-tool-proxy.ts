@@ -18,6 +18,10 @@ import {
   normalizeProjectToolInputSchema,
   validateProjectToolInput,
 } from "./project-tool-schema";
+import {
+  connectorFaviconUrl,
+  NATIVE_TOOL_ICON,
+} from "../../lib/connector-favicon";
 
 export const INTERNAL_KNOWLEDGE_CONNECTION_ID = "internal:replymaven";
 const INTERNAL_KNOWLEDGE_FINGERPRINT = "internal-search-knowledge-v1";
@@ -85,7 +89,7 @@ export function sidechatToolPresentation(
   if (descriptor.connectionId === INTERNAL_KNOWLEDGE_CONNECTION_ID) {
     return {
       displayName: descriptor.displayName,
-      source: { kind: "http", name: "Docs", icon: null },
+      source: { kind: "http", name: "Docs", icon: NATIVE_TOOL_ICON },
     };
   }
   return {
@@ -103,7 +107,7 @@ export function buildSidechatKnowledgeDescriptor(): SidechatToolDescriptor {
     source: {
       kind: "http",
       name: "Docs",
-      icon: null,
+      icon: NATIVE_TOOL_ICON,
     },
     description:
       "Search the project's knowledge base for documented facts needed to help the human agent.",
@@ -206,7 +210,7 @@ export async function buildSidechatHttpToolDescriptor(
     source: {
       kind: "http",
       name: "Custom tool",
-      icon: null,
+      icon: connectorFaviconUrl(tool.endpoint),
     },
   };
 }

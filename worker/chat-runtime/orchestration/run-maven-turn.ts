@@ -246,6 +246,7 @@ export async function runMavenTurn(options: {
         MAVEN_PROJECT_AGENT: options.dependencies.env.MAVEN_PROJECT_AGENT,
       },
       executionCtx: publicDependencies.executionCtx,
+      modelRuntime: options.dependencies.modelRuntime,
       onTeamRequested: publicDependencies.onTeamRequested,
       }),
     );
