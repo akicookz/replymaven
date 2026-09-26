@@ -256,7 +256,7 @@ function UsageLog() {
 
   if (isError) {
     return (
-      <div className="glass-card rounded-card p-6 text-center space-y-2">
+      <div className="glass-card rounded-lg p-6 text-center space-y-2">
         <AlertTriangle className="w-6 h-6 text-muted-foreground mx-auto" />
         <p className="text-sm text-muted-foreground">Failed to load usage log.</p>
       </div>
@@ -264,7 +264,7 @@ function UsageLog() {
   }
 
   return (
-    <div className="glass-card rounded-card p-6 space-y-4">
+    <div className="glass-card rounded-lg p-6 space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-foreground">Usage Log</h2>
@@ -512,7 +512,7 @@ function Billing() {
           </div>
         </div>
 
-        <div className="glass-card rounded-card p-8 text-center space-y-4">
+        <div className="glass-card rounded-lg p-8 text-center space-y-4">
           <CreditCard className="w-10 h-10 text-muted-foreground mx-auto" />
           <div className="space-y-1">
             <p className="font-medium text-foreground">No active subscription</p>
@@ -611,7 +611,7 @@ function Billing() {
       )}
 
       {/* Current Plan */}
-      <div className="glass-card rounded-card p-6 space-y-4">
+      <div className="glass-card rounded-lg p-6 space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-foreground">
@@ -634,7 +634,7 @@ function Billing() {
 
       {/* Usage */}
       {limits && (
-        <div className="glass-card rounded-card p-6 space-y-4">
+        <div className="glass-card rounded-lg p-6 space-y-4">
           <div className="flex items-baseline justify-between">
             <h2 className="text-lg font-semibold text-foreground">Usage</h2>
             {data?.usagePeriodStart && data?.usagePeriodEnd && (

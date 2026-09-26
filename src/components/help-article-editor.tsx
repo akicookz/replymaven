@@ -390,7 +390,7 @@ function HelpArticleEditor({
 
   return (
     <div
-      className="glass-card rounded-card overflow-hidden"
+      className="glass-card rounded-lg overflow-hidden"
       style={accentStyle}
     >
       <div className="flex items-center gap-1 px-2 py-1.5 bg-glass-card border-b border-border">

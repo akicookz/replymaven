@@ -628,7 +628,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
             </div>
 
             {groups.length === 0 ? (
-              <p className="rounded-xl glass-card px-3 py-4 text-sm text-muted-foreground">
+              <p className="rounded-lg glass-card px-3 py-4 text-sm text-muted-foreground">
                 No tools match your search.
               </p>
             ) : groups.map((group) => {
@@ -638,7 +638,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
               const canAllowAll = group.safety === "read" ||
                 group.tools.every((tool) => tool.alwaysAllowed);
               return (
-                <div key={group.safety} className="space-y-2 rounded-xl glass-card p-2">
+                <div key={group.safety} className="space-y-2 rounded-lg glass-card p-2">
                   <div className="flex min-w-0 items-center gap-2">
                     <button
                       type="button"
@@ -856,7 +856,7 @@ function McpConnections({ projectId }: McpConnectionsProps) {
     <section className="space-y-3" aria-label="MCP connectors">
       {isLoading && <div className="h-24 rounded-2xl bg-glass-button animate-pulse" />}
       {isError && (
-        <div className="flex items-center gap-2 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive">
           <AlertCircle className="size-4 shrink-0" />
           Failed to load connectors.
         </div>

@@ -156,7 +156,7 @@ function FaqGenerateModal({
           )}
 
           {error && (
-            <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-destructive/10 text-destructive text-sm">
+            <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-destructive/10 text-destructive text-sm">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>

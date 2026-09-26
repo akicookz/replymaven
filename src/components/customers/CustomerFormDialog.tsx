@@ -243,7 +243,7 @@ function CustomerFormDialog({
             ) : null}
           </div>
 
-          <DialogFooter className="rounded-b-3xl bg-glass-card px-6 py-4 sm:px-7">
+          <DialogFooter className="rounded-b-2xl bg-glass-card px-6 py-4 sm:px-7">
             <Button
               type="button"
               variant="ghost"

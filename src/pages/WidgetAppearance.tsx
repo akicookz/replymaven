@@ -361,7 +361,7 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
             </div>
           </>
         ) : (
-          <div className="rounded-xl glass-card px-4 py-3 text-sm text-muted-foreground">
+          <div className="rounded-lg glass-card px-4 py-3 text-sm text-muted-foreground">
             Center inline widgets skip the standalone home screen and open
             directly as an inline chat experience.
           </div>

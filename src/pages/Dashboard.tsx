@@ -121,7 +121,7 @@ function StatCard({
   change?: { value: number; positive: boolean };
 }) {
   return (
-    <div className="glass-card rounded-card p-5 flex flex-col gap-3">
+    <div className="glass-card rounded-lg p-5 flex flex-col gap-3">
       <div className="flex items-center gap-3">
         <div className="w-9 h-9 rounded-glass bg-glass-button flex items-center justify-center">
           <Icon className="w-[18px] h-[18px] text-muted-foreground" />
@@ -259,19 +259,19 @@ function Dashboard() {
           {Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}
-              className="glass-card rounded-card h-[104px] animate-pulse"
+              className="glass-card rounded-lg h-[104px] animate-pulse"
             />
           ))}
         </div>
         {/* Chart + actions skeleton */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="glass-card rounded-card h-[340px] animate-pulse" />
-          <div className="glass-card rounded-card h-[340px] animate-pulse" />
+          <div className="glass-card rounded-lg h-[340px] animate-pulse" />
+          <div className="glass-card rounded-lg h-[340px] animate-pulse" />
         </div>
         {/* Table + status skeleton */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="glass-card rounded-card lg:col-span-2 h-[280px] animate-pulse" />
-          <div className="glass-card rounded-card h-[280px] animate-pulse" />
+          <div className="glass-card rounded-lg lg:col-span-2 h-[280px] animate-pulse" />
+          <div className="glass-card rounded-lg h-[280px] animate-pulse" />
         </div>
       </div>
     );
@@ -359,7 +359,7 @@ function Dashboard() {
       {/* Chart + Quick Actions */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Conversations Chart */}
-        <div className="glass-card rounded-card p-6">
+        <div className="glass-card rounded-lg p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-sm font-semibold text-foreground">
               Conversations over time
@@ -415,7 +415,7 @@ function Dashboard() {
         </div>
 
         {/* Needs Review */}
-        <div className="glass-card rounded-card p-6">
+        <div className="glass-card rounded-lg p-6">
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-sm font-semibold text-foreground">
               Needs review
@@ -459,7 +459,7 @@ function Dashboard() {
 
       {/* Recent Conversations */}
       <div>
-        <div className="glass-card rounded-card">
+        <div className="glass-card rounded-lg">
           <div className="flex items-center justify-between px-4 sm:px-6 py-4">
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-semibold text-foreground">

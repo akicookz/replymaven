@@ -287,7 +287,7 @@ function HelpCenterSettings() {
         </p>
       </div>
 
-      <div className="glass-card rounded-card p-6 space-y-5">
+      <div className="glass-card rounded-lg p-6 space-y-5">
         <div>
           <h2 className="text-base font-semibold tracking-tight">
             Custom Domain
@@ -385,7 +385,7 @@ function HelpCenterSettings() {
             className={
               testResult.ok
                 ? "rounded-xl bg-status-active/10 px-4 py-3 text-sm"
-                : "rounded-xl bg-destructive/10 px-4 py-3 text-sm"
+                : "rounded-lg bg-destructive/10 px-4 py-3 text-sm"
             }
           >
             <div className="flex items-start gap-2">
@@ -416,7 +416,7 @@ function HelpCenterSettings() {
         )}
       </div>
 
-      <div className="glass-card rounded-card p-6 space-y-5">
+      <div className="glass-card rounded-lg p-6 space-y-5">
         <div>
           <h2 className="text-base font-semibold tracking-tight">
             Top navigation
@@ -441,7 +441,7 @@ function HelpCenterSettings() {
         )}
       </div>
 
-      <div className="glass-card rounded-card p-6 space-y-5">
+      <div className="glass-card rounded-lg p-6 space-y-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 className="text-base font-semibold tracking-tight">
@@ -538,7 +538,7 @@ function HelpCenterSettings() {
         </Button>
       </div>
 
-      <div className="glass-card rounded-card p-6 space-y-5">
+      <div className="glass-card rounded-lg p-6 space-y-5">
         <div>
           <h2 className="text-base font-semibold tracking-tight">
             Analytics

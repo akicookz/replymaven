@@ -114,7 +114,7 @@ function ProjectAccessPicker({
   return (
     <div className={cn("grid max-h-64 gap-2 overflow-y-auto pr-1", compact ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3")}>
       {projects.length === 0 ? (
-        <p className="rounded-xl glass-card px-3 py-4 text-sm text-muted-foreground">
+        <p className="rounded-lg glass-card px-3 py-4 text-sm text-muted-foreground">
           No projects yet.
         </p>
       ) : (
@@ -124,8 +124,8 @@ function ProjectAccessPicker({
             <label
               key={project.id}
               className={cn(
-                "glass-button flex cursor-pointer items-center justify-between gap-3 rounded-xl px-3 py-2.5",
-                checked && "bg-glass-raised inset-ring inset-ring-hairline-strong",
+                "glass-control flex cursor-pointer items-center justify-between gap-3 rounded-glass px-3 py-2.5",
+                checked && "bg-glass-raised shadow-[inset_0_1px_0_0_var(--hairline-strong)]",
               )}
             >
               <span className="min-w-0">
@@ -205,7 +205,7 @@ function InviteForm({
       <SheetBody className="px-5 py-5">
         <div className="space-y-3">
           {inviteData.map((invite) => (
-            <div key={invite.id} className="rounded-xl glass-card p-3">
+            <div key={invite.id} className="rounded-lg glass-card p-3">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-foreground">{invite.email}</p>
@@ -668,7 +668,7 @@ function Team() {
       </Sheet>
 
       {/* Members Table */}
-      <div className="glass-card rounded-card overflow-x-auto">
+      <div className="glass-card rounded-lg overflow-x-auto">
         <div className="flex items-center justify-between gap-3 px-4 pt-4">
           <div className="flex min-w-0 items-center gap-2">
             <MobileMenuButton />

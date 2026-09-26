@@ -7,7 +7,7 @@ interface HelpEditorSkeletonProps {
 function HelpEditorSkeleton({ variant = "page" }: HelpEditorSkeletonProps) {
   if (variant === "card") {
     return (
-      <div className="glass-card rounded-card min-h-[480px] space-y-4 p-6">
+      <div className="glass-card rounded-lg min-h-[480px] space-y-4 p-6">
         <Skeleton className="h-8 w-2/3" />
         <Skeleton className="h-4 w-full" />
         <Skeleton className="h-4 w-5/6" />

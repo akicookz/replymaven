@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
+import { SwitchCard } from "@/components/ui/switch-card";
 import {
   Dialog,
   DialogContent,
@@ -354,18 +354,12 @@ function GreetingEditor({
             ))}
           </div>
 
-          <div className="flex items-center justify-between rounded-xl glass-card px-4 py-3">
-            <div>
-              <div className="text-sm font-medium">Enabled</div>
-              <div className="text-xs text-muted-foreground">
-                Visitors only see enabled greetings.
-              </div>
-            </div>
-            <Switch
-              checked={form.enabled}
-              onCheckedChange={(v) => update("enabled", v)}
-            />
-          </div>
+          <SwitchCard
+            title="Enabled"
+            description="Visitors only see enabled greetings."
+            checked={form.enabled}
+            onCheckedChange={(v) => update("enabled", v)}
+          />
 
           {kind === "announcement" ? (
           <div className="space-y-2">
@@ -547,7 +541,7 @@ function GreetingEditor({
 
           {kind === "announcement" && isVideo ? (
             <div className="space-y-2">
-              <div className="flex items-center justify-between gap-4 rounded-xl glass-card p-3">
+              <div className="flex items-center justify-between gap-4 rounded-lg glass-card p-3">
                 <div className="min-w-0 space-y-2">
                   <div className="text-sm font-medium text-foreground">
                     Set a thumbnail

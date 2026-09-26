@@ -117,7 +117,7 @@ function Step1({
         </div>
 
         {error && (
-          <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-destructive/10 text-destructive text-sm">
+          <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-destructive/10 text-destructive text-sm">
             <AlertCircle className="w-4 h-4 shrink-0" />
             {error}
           </div>
@@ -321,7 +321,7 @@ function Step2({
         </div>
 
         {/* Skeleton: URL bar with progress */}
-        <div className="rounded-xl glass-card p-4 space-y-4">
+        <div className="rounded-lg glass-card p-4 space-y-4">
           <div className="flex items-center gap-3">
             <Globe className="w-4 h-4 text-muted-foreground animate-pulse" />
             <div className="h-4 w-48 rounded-md bg-glass-button animate-pulse" />
@@ -334,7 +334,7 @@ function Step2({
         </div>
 
         {/* Skeleton: Extracted content lines */}
-        <div className="rounded-xl glass-card p-5 space-y-3">
+        <div className="rounded-lg glass-card p-5 space-y-3">
           <div className="h-3 w-24 rounded bg-glass-button animate-pulse" />
           <div className="space-y-2.5">
             <div className="h-3.5 w-full rounded bg-glass-button animate-pulse" />

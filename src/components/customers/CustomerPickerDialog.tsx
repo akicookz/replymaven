@@ -95,7 +95,7 @@ function CustomerPickerDialog({
               Could not load customers.
             </p>
           ) : customers.length === 0 ? (
-            <div className="rounded-2xl glass-card px-4 py-10 text-center">
+            <div className="rounded-lg glass-card px-4 py-10 text-center">
               <UserRound className="mx-auto size-6 text-muted-foreground" />
               <p className="mt-2 text-sm text-muted-foreground">
                 No matching customers.

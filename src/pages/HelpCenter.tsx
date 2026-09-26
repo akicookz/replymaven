@@ -682,7 +682,7 @@ function HelpCenter() {
               Categories
             </h2>
             {categories.length === 0 ? (
-              <div className="rounded-xl border-2 border-dashed border-muted glass-card px-4 py-6 text-center text-sm text-muted-foreground">
+              <div className="rounded-lg border-2 border-dashed border-muted glass-card px-4 py-6 text-center text-sm text-muted-foreground">
                 No categories yet.
               </div>
             ) : (
@@ -702,7 +702,7 @@ function HelpCenter() {
 
           <section className="min-w-0 space-y-4">
             {categories.length === 0 ? (
-              <div className="glass-card rounded-card space-y-4 px-8 py-16 text-center">
+              <div className="glass-card rounded-lg space-y-4 px-8 py-16 text-center">
                 <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-glass-button">
                   <BookOpen className="h-6 w-6 text-muted-foreground" />
                 </div>

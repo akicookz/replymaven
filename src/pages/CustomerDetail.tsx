@@ -314,7 +314,7 @@ function CustomerDetail() {
               />
             </div>
             {formError ? (
-              <p className="rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              <p className="rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive">
                 {formError}
               </p>
             ) : null}

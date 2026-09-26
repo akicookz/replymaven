@@ -129,7 +129,7 @@ function Customers() {
         </Button>
       </div>
 
-      <div className="glass-card rounded-card overflow-hidden">
+      <div className="glass-card rounded-lg overflow-hidden">
         {customersQuery.isLoading ? (
           <>
             <div className="px-4 py-4 sm:px-6">

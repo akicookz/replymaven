@@ -179,7 +179,7 @@ function HelpArticleList({
 
   if (articles.length === 0) {
     return (
-      <div className="px-4 py-10 rounded-xl glass-card border-2 border-dashed border-muted text-sm text-muted-foreground text-center">
+      <div className="px-4 py-10 rounded-lg glass-card border-2 border-dashed border-muted text-sm text-muted-foreground text-center">
         No articles in this category yet. Click "New Article" to create one.
       </div>
     );

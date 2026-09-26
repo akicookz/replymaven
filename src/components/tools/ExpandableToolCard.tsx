@@ -85,7 +85,7 @@ export function ExpandableToolCard({
   children,
 }: ExpandableToolCardProps) {
   const shell = cn(
-    "box-border overflow-hidden rounded-card",
+    "box-border overflow-hidden rounded-lg",
     configured ? "glass-card" : "border border-dashed border-hairline-strong",
   );
   const row = (

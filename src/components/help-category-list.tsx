@@ -208,7 +208,7 @@ function HelpCategoryList({
 
   if (categories.length === 0) {
     return (
-      <div className="px-4 py-6 rounded-xl glass-card border-2 border-dashed border-muted text-sm text-muted-foreground text-center">
+      <div className="px-4 py-6 rounded-lg glass-card border-2 border-dashed border-muted text-sm text-muted-foreground text-center">
         No categories yet.
       </div>
     );

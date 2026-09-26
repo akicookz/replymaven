@@ -227,7 +227,7 @@ function IconPicker({ value, onChange }: IconPickerProps) {
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
             className={cn(
-              "w-full flex flex-col items-center justify-center gap-2 rounded-xl glass-card px-6 py-10 text-center transition-colors",
+              "w-full flex flex-col items-center justify-center gap-2 rounded-lg glass-card px-6 py-10 text-center transition-colors",
               "hover:bg-glass-button disabled:opacity-60",
             )}
           >

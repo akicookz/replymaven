@@ -151,7 +151,7 @@ export function WidgetInstallationDrawer({
             description="Sign customer data on your server so support threads stay together across devices."
             icon={ShieldCheck}
           >
-            <div className="rounded-2xl glass-card p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.05)]">
+            <div className="rounded-lg glass-card p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-start gap-3">
                   <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand/12 text-brand">
@@ -188,7 +188,7 @@ export function WidgetInstallationDrawer({
               </div>
 
               {identitySecret ? (
-                <div className="mt-4 rounded-xl glass-card p-3">
+                <div className="mt-4 rounded-lg glass-card p-3">
                   <div className="flex items-center justify-between gap-3">
                     <code className="min-w-0 break-all text-xs text-foreground">
                       {identitySecret}
@@ -244,7 +244,7 @@ export function WidgetInstallationDrawer({
               </pre>
             </div>
 
-            <div className="rounded-2xl glass-card p-4">
+            <div className="rounded-lg glass-card p-4">
               <p className="text-sm font-medium">Trust boundary</p>
               <ul className="mt-2 space-y-1.5 text-pretty text-xs text-muted-foreground">
                 <li>The signing secret never belongs in browser code.</li>

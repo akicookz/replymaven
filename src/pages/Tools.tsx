@@ -40,7 +40,8 @@ import {
   SheetHeaderContent,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
+import { SwitchCard } from "@/components/ui/switch-card";
 import { Segmented } from "@/components/ui/segmented";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -546,50 +547,28 @@ function ToolPolicyFields({
     onChange({ ...value, allowedChannels });
   }
 
-  function renderAudienceRow(audience: ToolAudience, label: string) {
-    const checked = value.allowedChannels.includes(audience);
-    const switchId = `${id}-${audience}`;
-    return (
-      <label
-        key={audience}
-        htmlFor={switchId}
-        className="flex min-h-10 cursor-pointer items-center justify-between gap-4 rounded-lg px-1 py-1 select-none"
-      >
-        <span className="text-sm font-medium text-foreground">{label}</span>
-        <Switch
-          id={switchId}
-          aria-label={label}
-          checked={checked}
-          onCheckedChange={(nextChecked) =>
-            updateAudience(audience, nextChecked)
-          }
-          className="shrink-0"
-        />
-      </label>
-    );
-  }
-
   return (
-    <div className={cn("space-y-1", compact && "pt-1")}>
-      {renderAudienceRow("public", "Available to visitors")}
-      {renderAudienceRow("sidechat", "Available in sidechat")}
-      <label
-        htmlFor={`${id}-access`}
-        className="flex min-h-10 cursor-pointer items-center justify-between gap-4 rounded-lg px-1 py-1 select-none"
-      >
-        <span className="text-sm font-medium text-foreground">
-          Can make changes
-        </span>
-        <Switch
-          id={`${id}-access`}
-          aria-label="Can make changes"
-          checked={value.access === "write"}
-          onCheckedChange={(checked) =>
-            onChange({ ...value, access: checked ? "write" : "read" })
-          }
-          className="shrink-0"
-        />
-      </label>
+    <div className={cn("space-y-2", compact && "pt-1")}>
+      <SwitchCard
+        id={`${id}-public`}
+        title="Available to visitors"
+        checked={value.allowedChannels.includes("public")}
+        onCheckedChange={(checked) => updateAudience("public", checked)}
+      />
+      <SwitchCard
+        id={`${id}-sidechat`}
+        title="Available in sidechat"
+        checked={value.allowedChannels.includes("sidechat")}
+        onCheckedChange={(checked) => updateAudience("sidechat", checked)}
+      />
+      <SwitchCard
+        id={`${id}-access`}
+        title="Can make changes"
+        checked={value.access === "write"}
+        onCheckedChange={(checked) =>
+          onChange({ ...value, access: checked ? "write" : "read" })
+        }
+      />
     </div>
   );
 }
@@ -729,40 +708,11 @@ function PresetToolRow({
     >
       <div className="px-4 py-4 space-y-3">
           {configured && (
-            <div className="flex items-center justify-between gap-3">
-              <label className="flex min-h-8 cursor-pointer items-center justify-between gap-4">
-                <span className="text-sm font-medium text-foreground">Enabled</span>
-                <Switch
-                  aria-label={`Enable ${preset.label}`}
-                  checked={tool!.enabled}
-                  onCheckedChange={(checked) => toggle.mutate(checked)}
-                  size="sm"
-                />
-              </label>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="size-8 px-0"
-                    aria-label={`More options for ${preset.label}`}
-                  >
-                    <MoreHorizontal className="size-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="min-w-32">
-                  <DropdownMenuItem
-                    variant="destructive"
-                    disabled={remove.isPending}
-                    onSelect={() => remove.mutate()}
-                  >
-                    <Trash2 />
-                    Remove
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
+            <SwitchCard
+              title="Enabled"
+              checked={tool!.enabled}
+              onCheckedChange={(checked) => toggle.mutate(checked)}
+            />
           )}
           {preset.fields.map((field) => (
             <div key={field.key} className="space-y-1.5">
@@ -815,14 +765,31 @@ function PresetToolRow({
               Saved.
             </div>
           )}
-          <Button
-            size="sm"
-            onClick={() => save.mutate()}
-            disabled={save.isPending || !requiredFilled}
-          >
-            {save.isPending && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
-            {configured ? "Update" : "Save"}
-          </Button>
+          <div className="flex items-center justify-between gap-2 pt-1">
+            {configured ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={remove.isPending}
+                onClick={() => remove.mutate()}
+                className="-ml-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              >
+                {remove.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                Remove
+              </Button>
+            ) : (
+              <span />
+            )}
+            <Button
+              size="sm"
+              onClick={() => save.mutate()}
+              disabled={save.isPending || !requiredFilled}
+            >
+              {save.isPending && <Loader2 className="animate-spin" />}
+              {configured ? "Update" : "Save"}
+            </Button>
+          </div>
         </div>
     </ExpandableToolCard>
   );
@@ -1427,7 +1394,7 @@ export function ToolsPanel({
 
       {/* Tool limit warning */}
       {(tools?.length ?? 0) >= 20 && (
-        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-warning/10 text-warning text-sm">
+        <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-warning/10 text-warning text-sm">
           <AlertCircle className="w-4 h-4 shrink-0" />
           Maximum of 20 connectors reached. Delete an existing connector to add a new one.
         </div>
@@ -1512,15 +1479,27 @@ export function ToolsPanel({
               </p>
             </div>
 
-            <ToolPolicyFields
-              value={{
-                allowedChannels: form.allowedChannels,
-                access: form.access,
-              }}
-              onChange={(policy) =>
-                setForm((current) => ({ ...current, ...policy }))
-              }
-            />
+            <div className="space-y-2">
+              {editingTool && (
+                <SwitchCard
+                  title="Enabled"
+                  checked={form.enabled}
+                  onCheckedChange={(checked) => {
+                    setForm((current) => ({ ...current, enabled: checked }));
+                    toggleTool.mutate({ id: editingTool.id, enabled: checked });
+                  }}
+                />
+              )}
+              <ToolPolicyFields
+                value={{
+                  allowedChannels: form.allowedChannels,
+                  access: form.access,
+                }}
+                onChange={(policy) =>
+                  setForm((current) => ({ ...current, ...policy }))
+                }
+              />
+            </div>
             <EndpointField
               label="Endpoint"
               url={form.endpoint}
@@ -1553,7 +1532,7 @@ export function ToolsPanel({
             />
 
             {/* Parameters */}
-            <div className="space-y-3 rounded-xl glass-card p-4">
+            <div className="space-y-3 rounded-lg glass-card p-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-foreground">Parameters</h3>
                 <Button
@@ -1587,10 +1566,11 @@ export function ToolsPanel({
                         onValueChange={(type) => updateParameter(i, { type })}
                       />
                       <label className="flex items-center gap-1.5 shrink-0 cursor-pointer select-none">
-                        <Switch
+                        <Checkbox
                           checked={param.required}
-                          onCheckedChange={(checked) => updateParameter(i, { required: checked })}
-                          size="sm"
+                          onCheckedChange={(checked) =>
+                            updateParameter(i, { required: checked === true })
+                          }
                         />
                         <span className="text-xs text-muted-foreground">Required</span>
                       </label>
@@ -1614,7 +1594,7 @@ export function ToolsPanel({
             </div>
 
             {/* Response Mapping */}
-            <div className="space-y-3 rounded-xl glass-card p-4">
+            <div className="space-y-3 rounded-lg glass-card p-4">
               <h3 className="text-sm font-semibold text-foreground">Response Mapping</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
@@ -1653,29 +1633,8 @@ export function ToolsPanel({
 
             {drawerKind === "http" && editingTool && (
               <div className="space-y-4">
-                <label className="flex min-h-8 cursor-pointer items-center justify-between gap-3">
-                  <span className="text-sm font-medium text-foreground">Enabled</span>
-                  <Switch
-                    aria-label={`Enable ${editingTool.displayName}`}
-                    checked={form.enabled}
-                    onCheckedChange={(checked) => {
-                      setForm((current) => ({ ...current, enabled: checked }));
-                      toggleTool.mutate({ id: editingTool.id, enabled: checked });
-                    }}
-                    size="sm"
-                  />
-                </label>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => startTest(editingTool)}
-                >
-                  <Play className="mr-1.5 size-3.5" />
-                  Test
-                </Button>
                 {testingId === editingTool.id && (
-                  <div className="space-y-3 rounded-xl glass-card p-3">
+                  <div className="space-y-3 rounded-lg glass-card p-3">
                     {editingTool.parameters.length > 0 ? (
                       <div className="space-y-2">
                         {editingTool.parameters.map((param) => (
@@ -1818,7 +1777,34 @@ export function ToolsPanel({
             )}
           </SheetBody>
 
-          <SheetFooter>
+          <SheetFooter className="justify-between">
+            {drawerKind === "http" && editingTool ? (
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={deleteTool.isPending}
+                onClick={() =>
+                  deleteTool.mutate(editingTool.id, { onSuccess: resetForm })
+                }
+                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              >
+                {deleteTool.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                Delete
+              </Button>
+            ) : (
+              <span />
+            )}
+            <div className="flex items-center gap-2">
+            {drawerKind === "http" && editingTool && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => startTest(editingTool)}
+              >
+                <Play />
+                Test
+              </Button>
+            )}
             <Button
               type="button"
               disabled={
@@ -1836,6 +1822,7 @@ export function ToolsPanel({
               )}
               {drawerKind === "mcp" ? "Connect" : editingId ? "Update" : "Create"}
             </Button>
+            </div>
           </SheetFooter>
         </SheetContent>
       </Sheet>
@@ -1852,7 +1839,7 @@ export function ToolsPanel({
 
           {/* Error */}
           {isError && (
-            <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-destructive/10 text-destructive text-sm">
+            <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-destructive/10 text-destructive text-sm">
               <AlertCircle className="w-4 h-4 shrink-0" />
               Failed to load connectors. Please try refreshing the page.
             </div>
@@ -2233,29 +2220,6 @@ export function ToolsPanel({
                     configured
                     mode="action"
                     onActivate={() => startEdit(tool)}
-                    trailing={
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            type="button"
-                            aria-label={`More options for ${tool.displayName}`}
-                            className="flex size-10 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
-                          >
-                            <MoreHorizontal className="size-4" />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="min-w-32">
-                          <DropdownMenuItem
-                            variant="destructive"
-                            disabled={deleteTool.isPending}
-                            onSelect={() => deleteTool.mutate(tool.id)}
-                          >
-                            <Trash2 />
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    }
                   />
                 );
               })}

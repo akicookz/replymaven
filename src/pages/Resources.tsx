@@ -325,7 +325,7 @@ function Resources() {
         />
 
         {showForm && (
-          <div className="glass-card rounded-card p-6 space-y-4">
+          <div className="glass-card rounded-lg p-6 space-y-4">
             <div className="flex gap-2">
               <Button
                 variant={formType === "webpage" ? "default" : "outline"}
@@ -482,7 +482,7 @@ function Resources() {
               return (
                 <div
                   key={resource.id}
-                  className="glass-card rounded-card overflow-hidden"
+                  className="glass-card rounded-lg overflow-hidden"
                 >
                   <div
                     className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-glass-card transition-colors"

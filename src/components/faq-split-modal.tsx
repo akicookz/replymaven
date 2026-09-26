@@ -200,7 +200,7 @@ function FaqSplitModal({
             )}
 
             {error && (
-              <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-destructive/10 text-destructive text-sm mb-4">
+              <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-destructive/10 text-destructive text-sm mb-4">
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                 <span>{error}</span>
               </div>
@@ -214,7 +214,7 @@ function FaqSplitModal({
                 return (
                   <div
                     key={bIdx}
-                    className="space-y-3 p-4 rounded-2xl glass-card"
+                    className="space-y-3 p-4 rounded-lg glass-card"
                   >
                     <div className="space-y-2">
                       <Input
@@ -262,7 +262,7 @@ function FaqSplitModal({
                       {bucket.pairs.map((pair, pIdx) => (
                         <div
                           key={pIdx}
-                          className="flex items-start gap-2 p-2.5 rounded-xl glass-card"
+                          className="flex items-start gap-2 p-2.5 rounded-lg glass-card"
                         >
                           <div className="flex-1 min-w-0 text-sm">
                             <div className="font-medium line-clamp-2">
@@ -307,7 +307,7 @@ function FaqSplitModal({
             )}
           </div>
 
-          <DialogFooter className="px-6 py-4 bg-glass-card shrink-0 rounded-b-lg">
+          <DialogFooter className="px-6 py-4 bg-glass-card shrink-0 rounded-b-2xl">
             <Button
               variant="outline"
               onClick={() => handleClose(false)}

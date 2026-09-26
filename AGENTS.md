@@ -550,6 +550,20 @@ When a description is genuinely required, one short line. Never two lines.
 Applies to `CardDescription`, `SheetDescription`, `DialogDescription`, form helper
 text, and section subtitles.
 
+### Switches live in a card
+
+A `Switch` is always rendered in a card: title top left, optional one-line
+description under it, switch on the right aligned to the title. Use
+`SwitchCard` (`src/components/ui/switch-card.tsx`); never place a bare switch
+beside a label. A small inline yes/no inside a repeated row (a parameter's
+"Required") is a `Checkbox`, not a switch.
+
+### Destructive and secondary actions sit in the footer
+
+In a drawer or edit panel, Delete/Remove goes bottom left of the footer. The
+primary action sits bottom right, with secondary actions such as Test to its
+left. Do not hide Delete behind a `…` menu on the list row.
+
 ### No accordions
 
 Do not use `Accordion`, and do not build one. Use a `Popover` instead.
@@ -567,13 +581,16 @@ comment saying why.
 
 ### Radius tracks height
 
-Control radius is proportional to control height -- roughly 0.3 of it -- so every
-control reads with the same corner. That is why `Button` has a per-size radius
-(`sm` is `rounded-md`, the rest `rounded-lg`). Do not "normalise" those onto one
-value; a single radius makes short controls look like pills and tall ones look square.
+Radius is proportional to height -- roughly 0.25 of it -- so everything reads with
+the same corner. Use this scale and nothing else:
 
-Rule of thumb: controls up to ~34px use `rounded-md`, 36-46px use `rounded-lg`.
-Panels and popovers are surfaces, not controls, and sit a rung higher.
+- Controls and single-row cards (inputs, selects, buttons, tabs, `SwitchCard`,
+  selectable option cards): `rounded-glass` (9px); `sm` buttons 8px.
+- Cards and panels (`Card`, `glass-card` sections, list cards): `rounded-lg` (12px).
+- Floating surfaces (popovers, menus): `rounded-xl`; dialogs and drawers `rounded-2xl`.
+
+Do not put a larger one-off radius on a card; that is what makes it look overridden
+next to the inputs inside it.
 
 Prefer `inset-ring-*` over `border-*` for control and card edges. It is 1px, it takes
 theme colours and opacity, it composes with `shadow-*`, and it does not affect layout.

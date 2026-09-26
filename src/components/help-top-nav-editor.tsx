@@ -133,7 +133,7 @@ function TopNavItemRow({
   }
 
   return (
-    <li className="rounded-xl glass-card p-4 space-y-3">
+    <li className="rounded-lg glass-card p-4 space-y-3">
       <div className="grid gap-3 sm:grid-cols-[1fr_1.5fr_10rem_auto] sm:items-end">
         <div className="space-y-1.5">
           <Label htmlFor={`help-topnav-label-${index}`} className="text-xs">

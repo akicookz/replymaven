@@ -169,7 +169,7 @@ function GreetingsList({
           <div className="h-16 rounded-xl bg-glass-card animate-pulse" />
         </div>
       ) : sorted.length === 0 ? (
-        <div className="px-4 py-6 rounded-xl glass-card border-2 border-dashed border-muted text-sm text-muted-foreground text-center">
+        <div className="px-4 py-6 rounded-lg glass-card border-2 border-dashed border-muted text-sm text-muted-foreground text-center">
           No greetings yet. Add one to welcome visitors or announce something
           new.
         </div>

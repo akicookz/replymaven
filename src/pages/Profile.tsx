@@ -116,7 +116,7 @@ function EmailChangeSection({ currentEmail }: { currentEmail: string }) {
     return (
       <div className="space-y-2">
         <label className="text-sm font-medium text-foreground">Email</label>
-        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-brand/5">
+        <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-brand/5">
           <CheckCircle2 className="w-4 h-4 text-brand shrink-0" />
           <p className="text-sm text-foreground">Email updated successfully</p>
         </div>
@@ -366,7 +366,7 @@ function Profile() {
         </div>
       </div>
 
-      <div className="glass-card rounded-card p-6 space-y-6">
+      <div className="glass-card rounded-lg p-6 space-y-6">
         {/* Avatar */}
         <div className="flex items-center gap-5">
           <button

@@ -646,7 +646,7 @@ function FaqEditor({
           rows={2}
         />
         {descriptionSuggestion && (
-          <div className="flex items-start gap-2 p-2.5 rounded-xl bg-primary/5">
+          <div className="flex items-start gap-2 p-2.5 rounded-lg bg-primary/5">
             <Wand2 className="w-3.5 h-3.5 shrink-0 mt-0.5 text-primary" />
             <div className="flex-1 text-xs">
               <div className="text-muted-foreground mb-1.5">Suggested:</div>

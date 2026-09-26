@@ -105,13 +105,13 @@ export function WidgetPageShell({
       ) : null}
 
       {save?.isSuccess && (
-        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-success/10 text-success text-sm">
+        <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-success/10 text-success text-sm">
           <CheckCircle2 className="w-4 h-4 shrink-0" />
           Widget settings saved successfully
         </div>
       )}
       {save?.isError && (
-        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-destructive/10 text-destructive text-sm">
+        <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-destructive/10 text-destructive text-sm">
           <AlertCircle className="w-4 h-4 shrink-0" />
           {save.error?.message ??
             "Failed to save widget settings. Please try again."}

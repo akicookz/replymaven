@@ -25,6 +25,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { SwitchCard } from "@/components/ui/switch-card";
+import { Checkbox } from "@/components/ui/checkbox";
 
 import { Badge } from "@/components/ui/badge";
 import {
@@ -362,7 +364,7 @@ function ActionsTab({
     <div className="space-y-6">
       {/* Add Action Form */}
       {showAddForm && (
-      <div className="glass-card rounded-card p-5 space-y-4">
+      <div className="glass-card rounded-lg p-5 space-y-4">
         <h3 className="text-sm font-semibold text-foreground">Add action</h3>
 
         <form
@@ -451,19 +453,13 @@ function ActionsTab({
 
           {/* Row 3: Show on home + submit */}
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-2">
-              <Switch
-                id="show-on-home"
-                checked={newShowOnHome}
-                onCheckedChange={(checked) => setNewShowOnHome(checked)}
-              />
-              <Label
-                htmlFor="show-on-home"
-                className="text-sm text-muted-foreground font-normal cursor-pointer"
-              >
-                Show on home screen
-              </Label>
-            </div>
+            <SwitchCard
+              id="show-on-home"
+              title="Show on home screen"
+              checked={newShowOnHome}
+              onCheckedChange={(checked) => setNewShowOnHome(checked)}
+              className="sm:min-w-64"
+            />
             <Button type="submit" size="sm" disabled={addAction.isPending}>
               <Plus className="w-4 h-4 mr-1" />
               Add
@@ -502,7 +498,7 @@ function ActionsTab({
             return (
               <div
                 key={action.id}
-                className="glass-card rounded-card overflow-hidden group"
+                className="glass-card rounded-lg overflow-hidden group"
               >
                 {/* Collapsed Row */}
                 <div
@@ -623,40 +619,25 @@ function ActionsTab({
                     </div>
 
                     {/* Show on home */}
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        checked={editForm.showOnHome}
-                        onCheckedChange={(checked) =>
-                          setEditForm((prev) => ({ ...prev, showOnHome: checked }))
-                        }
-                      />
-                      <Label className="text-sm text-muted-foreground font-normal">
-                        Show on home screen
-                      </Label>
-                    </div>
+                    <SwitchCard
+                      title="Show on home screen"
+                      checked={editForm.showOnHome}
+                      onCheckedChange={(checked) =>
+                        setEditForm((prev) => ({ ...prev, showOnHome: checked }))
+                      }
+                    />
 
                     {/* ─── Ticket Form Config (only for ticket-form type) ─── */}
                     {action.type === "inquiry" && (
                       <>
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pt-2">
-                          <div>
-                            <p className="text-sm font-semibold text-foreground">Contact form</p>
-                            <p className="text-xs text-muted-foreground mt-0.5">
-                              Configure the form visitors see when they tap this action.
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <Badge variant={editForm.ticketEnabled ? "secondary" : "outline"}>
-                              {editForm.ticketEnabled ? "Enabled" : "Disabled"}
-                            </Badge>
-                            <Switch
-                              checked={editForm.ticketEnabled}
-                              onCheckedChange={(checked) =>
-                                setEditForm((prev) => ({ ...prev, ticketEnabled: checked }))
-                              }
-                            />
-                          </div>
-                        </div>
+                        <SwitchCard
+                          title="Contact form"
+                          description="The form visitors see when they tap this action."
+                          checked={editForm.ticketEnabled}
+                          onCheckedChange={(checked) =>
+                            setEditForm((prev) => ({ ...prev, ticketEnabled: checked }))
+                          }
+                        />
 
                         {editForm.ticketEnabled && (
                           <>
@@ -745,7 +726,7 @@ function ActionsTab({
                               )}
 
                               {editForm.ticketFields.length < 10 && (
-                                <div className="space-y-3 p-3 glass-card rounded-xl border-2 border-dashed border-muted">
+                                <div className="space-y-3 p-3 glass-card rounded-lg border-2 border-dashed border-muted">
                                   <div className="flex flex-col sm:flex-row gap-2">
                                     <Input
                                       type="text"
@@ -776,15 +757,13 @@ function ActionsTab({
                                     </Select>
                                   </div>
                                   <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                      <Switch
+                                    <label className="flex cursor-pointer items-center gap-2 select-none">
+                                      <Checkbox
                                         checked={newFieldRequired}
-                                        onCheckedChange={(checked) => setNewFieldRequired(checked)}
+                                        onCheckedChange={(checked) => setNewFieldRequired(checked === true)}
                                       />
-                                      <Label className="text-sm text-muted-foreground font-normal cursor-pointer">
-                                        Required field
-                                      </Label>
-                                    </div>
+                                      <span className="text-sm text-muted-foreground">Required field</span>
+                                    </label>
                                     <Button
                                       type="button"
                                       size="sm"

@@ -240,7 +240,7 @@ function Sops() {
       {showForm && (
         <form
           onSubmit={handleSubmit}
-          className="glass-card rounded-card p-6 space-y-4"
+          className="glass-card rounded-lg p-6 space-y-4"
         >
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-foreground">
@@ -326,7 +326,7 @@ function Sops() {
 
       {/* Error */}
       {isError && (
-        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-destructive/10 text-destructive text-sm">
+        <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-destructive/10 text-destructive text-sm">
           <AlertCircle className="w-4 h-4 shrink-0" />
           Failed to load guidelines. Please try refreshing the page.
         </div>
@@ -338,7 +338,7 @@ function Sops() {
           {guidelines?.map((guideline) => (
             <div
               key={guideline.id}
-              className="glass-card rounded-card overflow-hidden"
+              className="glass-card rounded-lg overflow-hidden"
             >
               {/* Row */}
               <div
