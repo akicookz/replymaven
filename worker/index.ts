@@ -56,7 +56,7 @@ import {
   publicUploadUrlForRequest,
 } from "./lib/public-upload-url";
 import { AiService } from "./services/ai-service";
-import { executeChannelBotNameCommand } from "./services/run-bot-name-command";
+import { handleTeammateComposerText } from "./services/teammate-composer";
 import { ingestTeammateMessage } from "./services/ingest-teammate-message";
 import { startSidechatTurn } from "./services/start-sidechat-turn";
 import { TEAM_HELP_TRIGGER } from "./chat-runtime/tools/internal/request-team-help";
@@ -7358,28 +7358,16 @@ const app = new Hono<HonoAppContext>()
     const replyContent = parsed.data.content?.trim() ?? "";
     if (replyContent && replyImageUrls.length === 0) {
       const projectSettings = await projectService.getSettings(project.id);
-      const command = await executeChannelBotNameCommand({
+      const command = await handleTeammateComposerText({
         text: replyContent,
         botName: projectSettings?.botName,
-        actorName: user.name,
-        commandId: `dashboard:${project.id}:${user.id}:${
-          c.req.header("idempotency-key") ?? crypto.randomUUID()
-        }`,
-        now: Date.now(),
-        projectId: project.id,
-        conversation: {
-          id: conversation.id,
-          visitorId: conversation.visitorId,
-          visitorEmail: conversation.visitorEmail,
-          metadata: conversation.metadata,
-        },
-        chatService,
-        db,
-        env: c.env,
-        projectSettings,
-        projectName: project.name,
-        actorUserId: user.id,
         origin: "dashboard",
+        projectId: project.id,
+        conversationId: conversation.id,
+        user: { id: user.id, name: user.name },
+        db,
+        chatService,
+        env: c.env,
       });
       if (command.handled) {
         return c.json({

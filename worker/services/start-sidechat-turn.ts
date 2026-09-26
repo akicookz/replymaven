@@ -7,7 +7,6 @@ import type { AppEnv } from "../types";
 // Origins whose reply goes back over a channel. Dashboard and MCP read the
 // Sidechat directly, so nothing is mirrored for them.
 export type SidechatTurnOrigin = Exclude<SidechatMessageOrigin, "dashboard">;
-export type BotNameCommandOrigin = SidechatMessageOrigin;
 export type SidechatClaimResult = "claimed" | "busy" | "failed";
 
 export type StartSidechatTurnResult =

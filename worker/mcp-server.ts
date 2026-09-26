@@ -45,7 +45,7 @@ import {
 import { registerHelpdeskTools } from "./mcp-helpdesk-tools";
 import { registerSidechatTools } from "./mcp-sidechat-tools";
 import { registerWidgetTools } from "./mcp-widget-tools";
-import { executeChannelBotNameCommand } from "./services/run-bot-name-command";
+import { handleTeammateComposerText } from "./services/teammate-composer";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -527,31 +527,19 @@ function registerSendAgentReplyTool(
       );
       if (!conversation) throw new Error("Conversation not found");
 
-      const projectService = new ProjectService(context.db);
-      const [project, projectSettings] = await Promise.all([
-        projectService.getProjectById(projectId),
-        projectService.getSettings(projectId),
-      ]);
-      const command = await executeChannelBotNameCommand({
+      const projectSettings = await new ProjectService(context.db).getSettings(
+        projectId,
+      );
+      const command = await handleTeammateComposerText({
         text: content.trim(),
         botName: projectSettings?.botName,
-        actorName: context.userName,
-        commandId: `mcp:${projectId}:${context.userId}:${conversation.id}:${crypto.randomUUID()}`,
-        now: Date.now(),
-        projectId,
-        conversation: {
-          id: conversation.id,
-          visitorId: conversation.visitorId,
-          visitorEmail: conversation.visitorEmail,
-          metadata: conversation.metadata,
-        },
-        chatService: context.conversationStore,
-        db: context.db,
-        env: context.env,
-        projectSettings,
-        projectName: project?.name ?? "Support",
-        actorUserId: context.userId,
         origin: "mcp",
+        projectId,
+        conversationId: conversation.id,
+        user: { id: context.userId, name: context.userName },
+        db: context.db,
+        chatService: context.conversationStore,
+        env: context.env,
       });
       if (command.handled) {
         return textResult({

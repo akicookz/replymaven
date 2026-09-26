@@ -48,7 +48,7 @@ function registerAskMavenTool(
     {
       title: "Ask Maven",
       description:
-        "Start a private Sidechat investigate turn. Maven may look up billing or product data. The result stays in the dashboard until a human sends it.",
+        "Send Maven a message in the private team thread for this conversation. Maven may look things up, reply to the customer, assign, close, or block, and answers in the thread.",
       inputSchema: {
         projectId: z.string().min(1).describe("ReplyMaven project ID."),
         conversationId: z

@@ -71,7 +71,7 @@ import { canAutoCloseConversationStatus } from "../../conversations/conversation
 import {
   clearHumanCommandClock,
   preserveReservedPublicMetadata,
-} from "../../services/bot-name-decision";
+} from "../../services/public-metadata";
 import {
   activeHumanRouteFromMessage,
   applyChatOwnershipEvent,

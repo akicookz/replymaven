@@ -1,18 +1,12 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateText } from "ai";
-import { type ProjectSettingsRow } from "../db";
 import { INDUSTRIES } from "../../shared/industries";
 import {
   buildExtractContactInfoPrompt,
   buildReformulateQueryPrompt,
   buildSummarizeConversationPrompt,
 } from "../chat-runtime/llm/support-prompt-builders";
-import { buildSupportSystemPrompt } from "../chat-runtime/prompt/build-support-system-prompt";
-import {
-  parseBotNameDecision,
-  type BotNameDecision,
-} from "./bot-name-decision";
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
@@ -171,109 +165,6 @@ export class AiService {
     }
 
     return { name: extractedName, email: extractedEmail };
-  }
-
-  // ─── Interpret @BotName Command ─────────────────────────────────────────────
-
-  async interpretBotNameCommand(
-    agentText: string,
-  ): Promise<BotNameDecision | null> {
-    const parsed = await this.generateJsonObject({
-      prompt: `A human support agent wrote this message to their website chatbot. Read the words in whatever language they used. Decide what the worker should do.
-
-Agent text:
-${agentText}
-
-Return only this JSON object:
-{
-  "ownership": "human" | "ai",
-  "instructions": "set" | "clear" | "keep",
-  "speak": "now" | "silent",
-  "effect": "none" | "close" | "ban",
-  "investigate": "now" | "none",
-  "email": "now" | "none",
-  "reason": string | null
-}
-
-Meaning:
-- ownership: who should own the thread after this command. human keeps or takes the human. ai hands the thread to the bot.
-- instructions: set stores the agent text for later turns. clear removes stored instructions. keep leaves them unchanged.
-- speak: now means reply to the visitor now. silent means do not send a visitor-visible reply.
-- effect: close ends the conversation. ban blocks the visitor and closes as spam. none means no close or ban.
-- investigate: now starts a private Sidechat turn (billing, Stripe, PostHog, or similar research). none does not.
-- email: now emails the human agent's last visitor-visible reply. none does not.
-- reason: required when effect is ban. Otherwise null.
-
-When investigate is now, set speak to silent. The worker will not send a visitor-visible reply. Close and ban ignore investigate.
-When email is now, set speak to silent and investigate to none. Close and ban ignore email.
-
-Examples:
-- "check his billing" or a Stripe/PostHog lookup → investigate now, speak silent, email none
-- "explain pricing now" → investigate none, speak now, email none
-- "email my last reply" or "email this to them" → email now, speak silent, investigate none
-
-The worker applies this object. Do not match English keywords. A request to stay quiet, take over, remember a private note, look something up, email the last reply, close, or ban may be written in any language.
-
-JSON:`,
-      maxOutputTokens: 256,
-    });
-    return parseBotNameDecision(parsed);
-  }
-
-  // ─── Generate Directed Response ─────────────────────────────────────────────
-
-  async generateDirectedResponse(
-    settings: Pick<
-      ProjectSettingsRow,
-      | "toneOfVoice"
-      | "customTonePrompt"
-      | "companyContext"
-      | "botName"
-      | "agentName"
-      | "workingHours"
-      | "avgResponseTime"
-    >,
-    projectName: string,
-    conversationHistory: Array<{ role: string; content: string }>,
-    agentInstruction: string,
-  ): Promise<string | null> {
-    const systemPrompt = buildSupportSystemPrompt(
-      settings,
-      projectName,
-      "", // no RAG context for directed responses
-      null,
-      { agentHandbackInstructions: agentInstruction },
-    );
-
-    const messages: Array<{ role: "user" | "assistant"; content: string }> =
-      conversationHistory.slice(-20).map((m) => ({
-        role: (m.role === "visitor" ? "user" : "assistant") as
-          | "user"
-          | "assistant",
-        content: m.content,
-      }));
-
-    // Add a synthetic user message to trigger the bot to respond
-    messages.push({
-      role: "user",
-      content:
-        "[The human agent has asked you to respond to the visitor now. Follow the agent instructions and generate your response.]",
-    });
-
-    try {
-      const { text } = await generateText({
-        model: this.model,
-        system: systemPrompt,
-        messages,
-        temperature: 0.7,
-        maxOutputTokens: 1024,
-      });
-
-      const trimmed = text.trim();
-      return trimmed || null;
-    } catch {
-      return null;
-    }
   }
 
   async generateJsonObject(options: {
