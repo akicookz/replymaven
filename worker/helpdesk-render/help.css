@@ -239,7 +239,7 @@ html.help-nav-open .help-menu-icon-close { display: inline-flex; }
   border: 0;
   border-radius: var(--help-search-trigger-radius);
   background: color-mix(in oklch, var(--muted), transparent 50%);
-  box-shadow: inset 0 0 0 1px var(--border);
+  box-shadow: inset 0 0 0 1px var(--help-search-border);
   color: var(--muted-foreground);
   font: inherit;
   font-size: 0.875rem;
@@ -268,7 +268,7 @@ html.help-nav-open .help-menu-icon-close { display: inline-flex; }
   padding: 0 0.3125rem;
   border-radius: var(--help-radius-xs);
   background: var(--background);
-  box-shadow: inset 0 0 0 1px var(--border);
+  box-shadow: inset 0 0 0 1px var(--help-search-border);
   font-family: inherit;
   font-size: 0.6875rem;
   font-weight: 500;
@@ -316,12 +316,12 @@ html.help-nav-open .help-menu-icon-close { display: inline-flex; }
 .help-search-dialog .help-hero-search {
   margin: 0;
   box-shadow:
-    inset 0 0 0 1px var(--border),
+    inset 0 0 0 1px var(--help-search-border),
     0 24px 60px -20px oklch(0 0 0 / 0.45);
 }
 .help-search-dialog .help-hero-search:focus-within {
   box-shadow:
-    inset 0 0 0 1px var(--border),
+    inset 0 0 0 1px var(--help-search-border),
     0 0 0 3px color-mix(in oklch, var(--ring), transparent 80%),
     0 24px 60px -20px oklch(0 0 0 / 0.45);
 }
@@ -1340,13 +1340,13 @@ html.help-page-home .help-shell {
   width: 100%;
   padding: 0.5rem 0.5rem 0.5rem 1rem;
   background: color-mix(in oklch, var(--muted) 50%, var(--background));
-  box-shadow: inset 0 0 0 1px var(--border);
+  box-shadow: inset 0 0 0 1px var(--help-search-border);
   border-radius: var(--help-search-radius);
   transition: box-shadow 150ms ease;
 }
 .help-hero-search:focus-within {
   box-shadow:
-    inset 0 0 0 1px var(--border),
+    inset 0 0 0 1px var(--help-search-border),
     0 0 0 3px color-mix(in oklch, var(--ring), transparent 80%);
 }
 .help-hero-search-icon {

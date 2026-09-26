@@ -11,6 +11,7 @@
   --help-radius-lg: var(--radius);
   --help-radius-xl: calc(var(--radius) * 1.33);
   --help-radius-2xl: calc(var(--radius) * 1.67);
+  --help-search-border: color-mix(in oklch, var(--border), var(--foreground) 10%);
 }
 .help-editor-live svg[stroke] {
   stroke-width: var(--help-icon-stroke-width);
@@ -69,7 +70,7 @@
   width: 100%;
   padding: 0.5rem 0.5rem 0.5rem 1rem;
   background: color-mix(in oklch, var(--muted) 50%, var(--background));
-  box-shadow: inset 0 0 0 1px var(--border);
+  box-shadow: inset 0 0 0 1px var(--help-search-border);
   border-radius: var(--help-search-radius, var(--help-radius-2xl));
 }
 .help-editor-live .help-hero-search-icon {

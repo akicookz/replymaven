@@ -69,10 +69,11 @@ function searchPreviewStyle(borderRadius: number | null | undefined): CSSPropert
       "--help-search-button-radius": "50%",
     } as CSSProperties;
   }
-  const roundedMd = "max(0px, calc(var(--radius) - 2px))";
+  const roundedBox = "calc(var(--radius) * 1.1667)";
+  const roundedButton = "calc(var(--radius) * 0.75)";
   return {
-    "--help-search-radius": roundedMd,
-    "--help-search-button-radius": roundedMd,
+    "--help-search-radius": roundedBox,
+    "--help-search-button-radius": roundedButton,
   } as CSSProperties;
 }
 

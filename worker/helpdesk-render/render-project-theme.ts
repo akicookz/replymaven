@@ -48,6 +48,7 @@ function palette(o: PaletteOpts): string {
   --accent-foreground: ${o.fg};
   --destructive: oklch(60% 0.2 25);
   --border: color-mix(in oklch, ${o.fg}, transparent ${o.border}%);
+  --help-search-border: color-mix(in oklch, var(--border), var(--foreground) 10%);
   --input: color-mix(in oklch, ${o.fg}, transparent ${o.border}%);
   --ring-shadow-color: color-mix(in oklch, ${o.fg}, transparent 92%);
   --ring: ${o.primary};
@@ -123,11 +124,12 @@ function normalizeSearchRadii(value: number | null | undefined): SearchRadii {
   if (preset === "pill") {
     return { box: "999px", trigger: "999px", button: "50%" };
   }
-  const roundedMd = "max(0px, calc(var(--radius) - 2px))";
+  // Match the visible corner to each control's height: the 32px sidebar
+  // trigger uses about 2/3 of the theme radius, while the 56px hero uses 7/6.
   return {
-    box: roundedMd,
-    trigger: roundedMd,
-    button: roundedMd,
+    box: "calc(var(--radius) * 1.1667)",
+    trigger: "calc(var(--radius) * 0.6667)",
+    button: "calc(var(--radius) * 0.75)",
   };
 }
 
