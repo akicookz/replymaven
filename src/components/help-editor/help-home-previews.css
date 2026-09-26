@@ -11,7 +11,7 @@
   --help-radius-lg: var(--radius);
   --help-radius-xl: calc(var(--radius) * 1.33);
   --help-radius-2xl: calc(var(--radius) * 1.67);
-  --help-search-border: color-mix(in oklch, var(--border), var(--foreground) 10%);
+  --help-search-border: var(--border);
 }
 .help-editor-live svg[stroke] {
   stroke-width: var(--help-icon-stroke-width);
@@ -139,7 +139,7 @@
   padding: 1.5rem;
   border-radius: var(--help-radius-xl);
   background: var(--background);
-  box-shadow: var(--help-ring-shadow);
+  box-shadow: var(--help-category-ring-shadow);
   color: inherit;
   isolation: isolate;
 }

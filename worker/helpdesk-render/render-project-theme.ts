@@ -48,7 +48,7 @@ function palette(o: PaletteOpts): string {
   --accent-foreground: ${o.fg};
   --destructive: oklch(60% 0.2 25);
   --border: color-mix(in oklch, ${o.fg}, transparent ${o.border}%);
-  --help-search-border: color-mix(in oklch, var(--border), var(--foreground) 10%);
+  --help-search-border: var(--border);
   --input: color-mix(in oklch, ${o.fg}, transparent ${o.border}%);
   --ring-shadow-color: color-mix(in oklch, ${o.fg}, transparent 92%);
   --ring: ${o.primary};

@@ -800,7 +800,7 @@ html.help-page-home .help-shell {
   padding: 1.5rem;
   border-radius: var(--help-radius-xl);
   background: var(--background);
-  box-shadow: var(--help-ring-shadow);
+  box-shadow: var(--help-category-ring-shadow);
   text-decoration: none;
   color: inherit;
   isolation: isolate;

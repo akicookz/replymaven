@@ -13,6 +13,9 @@
   --help-ring-shadow:
     0 0 0 1px color-mix(in oklch, var(--foreground) 4%, transparent),
     0 0 12px -4px color-mix(in oklch, var(--foreground) 5%, transparent);
+  --help-category-ring-shadow:
+    0 0 0 1px var(--border),
+    0 0 12px -4px color-mix(in oklch, var(--foreground) 5%, transparent);
   /* From tenant --radius. Multiples keep a 0 brand square. */
   --help-radius-xs: calc(var(--radius) * 0.33);
   --help-radius-sm: calc(var(--radius) * 0.5);
