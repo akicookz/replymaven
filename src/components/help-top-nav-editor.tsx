@@ -26,7 +26,11 @@ interface HelpTopNavEditorProps {
 
 const MAX_ITEMS = 3;
 export const DEFAULT_BUTTON_CLASSES =
+  "inline-flex h-8 items-center justify-center rounded-md bg-secondary px-3 text-sm font-medium text-secondary-foreground transition-colors hover:bg-secondary/80";
+const LEGACY_DEFAULT_BUTTON_CLASSES =
   "inline-flex h-9 items-center justify-center rounded-md bg-primary px-5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors";
+const LEGACY_COMPACT_DEFAULT_BUTTON_CLASSES =
+  "inline-flex h-8 items-center justify-center rounded-md bg-primary px-5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors";
 
 type ItemStyle = "link" | "button" | "custom";
 
@@ -35,7 +39,11 @@ function styleOf(item: HelpTopNavItem): ItemStyle {
   // string means "custom, user just hasn't typed anything yet" so we don't
   // bounce them back to "link" while the textarea is open.
   if (item.classes == null) return "link";
-  if (item.classes.trim() === DEFAULT_BUTTON_CLASSES.trim()) return "button";
+  if (
+    item.classes.trim() === DEFAULT_BUTTON_CLASSES.trim() ||
+    item.classes.trim() === LEGACY_DEFAULT_BUTTON_CLASSES.trim() ||
+    item.classes.trim() === LEGACY_COMPACT_DEFAULT_BUTTON_CLASSES.trim()
+  ) return "button";
   return "custom";
 }
 
