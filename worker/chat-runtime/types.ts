@@ -243,7 +243,7 @@ export interface SupportTurnContext {
 export interface ContactAcceptedPayload {
   conversationId: string;
   visitorMessageId: string;
-  conversationStatus: "waiting_agent" | "agent_replied";
+  conversationStatus: string;
   aiWillRespond: boolean;
   visitorName: string | null;
   visitorEmail: string | null;

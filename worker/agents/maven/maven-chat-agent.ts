@@ -196,7 +196,10 @@ import {
   SET_CUSTOMER_CONTACT_TOOL_NAME,
   type SidechatContactResult,
   type SidechatDecideResult,
+  type SidechatEmailInput,
+  type SidechatEmailResult,
   type SidechatReplyResult,
+  EMAIL_CUSTOMER_TOOL_NAME,
 } from "../sidechat/action-tools";
 
 type SidechatDataParts = Record<string, unknown> & {
@@ -274,6 +277,12 @@ interface SidechatTurnParent extends SidechatStatusUpdater {
       text: string;
     },
   ): Promise<SidechatReplyResult>;
+  emailCustomerFromSidechat(
+    input: SidechatGatewayContext & SidechatEmailInput & {
+      authorUserId: string;
+      toolCallId: string;
+    },
+  ): Promise<SidechatEmailResult>;
   assignConversationFromSidechat(
     input: SidechatGatewayContext & {
       authorUserId: string;
@@ -438,6 +447,13 @@ async function executeSidechatTurn(input: {
             authorUserId: turnMeta.authorUserId,
             toolCallId,
             text,
+          }),
+        emailCustomer: (email, toolCallId) =>
+          input.parent.emailCustomerFromSidechat({
+            ...gatewayContext,
+            ...email,
+            authorUserId: turnMeta.authorUserId,
+            toolCallId,
           }),
         assignConversation: (assigneeId, instructions) =>
           input.parent.assignConversationFromSidechat({
@@ -1064,6 +1080,7 @@ const SIDECHAT_ACTION_TOOL_PRESENTATIONS: Array<
   [string, SidechatToolApprovalContext]
 > = [
   REPLY_TO_CONVERSATION_TOOL_NAME,
+  EMAIL_CUSTOMER_TOOL_NAME,
   ASSIGN_CONVERSATION_TOOL_NAME,
   CLOSE_CONVERSATION_TOOL_NAME,
   BLOCK_CUSTOMER_TOOL_NAME,
@@ -1076,6 +1093,7 @@ const SIDECHAT_ACTION_TOOL_PRESENTATIONS: Array<
     tool: {
       displayName: {
         [REPLY_TO_CONVERSATION_TOOL_NAME]: "Reply",
+        [EMAIL_CUSTOMER_TOOL_NAME]: "Email",
         [ASSIGN_CONVERSATION_TOOL_NAME]: "Assign",
         [CLOSE_CONVERSATION_TOOL_NAME]: "Close",
         [BLOCK_CUSTOMER_TOOL_NAME]: "Block",

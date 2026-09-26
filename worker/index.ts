@@ -64,7 +64,6 @@ import {
   verifyTelegramLinkToken,
 } from "./services/channel-identity-service";
 import { ingestTeammateMessage } from "./services/ingest-teammate-message";
-import { requestTeamNote } from "./services/team-note";
 import {
   buildEmailChannelEnablement,
   buildEmailInbound,
@@ -210,6 +209,7 @@ import {
   assignConversation,
   blockCustomer,
   closeConversation,
+  emailMessageToCustomer,
 } from "./services/conversation-actions";
 import { touchLinkedCustomerAfterVisitorMessage } from "./chat-runtime/customer-last-seen";
 import {
@@ -219,9 +219,12 @@ import {
   extractFormName,
   markContactAiUnavailable,
 } from "./chat-runtime/contact-support/contact-support";
-import { createEscalation } from "./chat-runtime/post-turn/escalation";
 import { buildToolRegistry } from "./chat-runtime/tools/http-tool-executor";
-import { toToolDefinition } from "./chat-runtime/types";
+import {
+  fallbackAiParticipationForStatus,
+  parseChatState,
+  toToolDefinition,
+} from "./chat-runtime/types";
 import { logError, logWarn } from "./observability";
 import { slugify } from "./lib/slugify";
 import { parseHelpTopNav } from "./lib/help-top-nav";
@@ -1441,63 +1444,30 @@ const app = new Hono<HonoAppContext>()
     const isNewConversation = formVisitorResult.isFirstVisitorTurn;
 
     const settings = await projectService.getSettings(project.id);
-    const statusAfterTeamRequest = await chatService.prepareContactSupportOwnership(
-      project.id,
-      conversation.id,
-    );
-    if (!statusAfterTeamRequest) {
-      return c.json({ error: "Conversation ownership changed. Try again." }, 409);
-    }
-    conversation =
-      (await chatService.getOperational(
-        project.id,
-        conversation.id,
-      )) ??
-      conversation;
-
-    const escalation = await createEscalation({
-      chatService,
-      project: { id: project.id, name: project.name, slug: project.slug },
-      conversation: {
-        id: conversation.id,
-        visitorId: conversation.visitorId,
-        visitorName: conversation.visitorName,
-        visitorEmail: conversation.visitorEmail,
-        status: conversation.status,
-        metadata: conversation.metadata,
-      },
-      summary: formMessage,
+    // A form only starts (or continues) a thread. Maven handles it like any
+    // message and escalates through request_team_help if it has to; nothing
+    // is escalated on submit.
+    const chatState = parseChatState(JSON.stringify(conversation.chatState), {
+      fallbackAiParticipation: fallbackAiParticipationForStatus(
+        conversation.status,
+      ),
     });
-    if (escalation.accepted && escalation.created) {
-      // Maven writes the note to the team; its text reaches every channel.
-      c.executionCtx.waitUntil(
-        requestTeamNote({
-          projectId: project.id,
-          conversationId: conversation.id,
-          actorUserId: project.userId,
-          noteKey: escalation.summaryMessageId ?? conversation.id,
-          env: c.env,
-        }),
-      );
-    }
+    const humanOwned = chatState.aiParticipation === "human_only";
 
     const contactAccepted = buildContactAcceptedPayload({
       conversationId: conversation.id,
       visitorMessageId: formVisitorMessage.id,
-      conversationStatus: statusAfterTeamRequest,
+      conversationStatus: humanOwned ? "agent_replied" : conversation.status,
       visitorName: conversation.visitorName,
       visitorEmail: conversation.visitorEmail,
       botName: settings?.botName ?? null,
     });
 
-    // team_requested leaves the AI in assist_until_agent, so Maven answers in
-    // the background while the team review is pending. agent_replied means a
-    // human already owns the conversation; the AI stays out.
     const billingService = new BillingService(db, c.env);
     const subscription = await billingService.getSubscriptionByUserId(
       project.userId,
     );
-    const aiAllowed = statusAfterTeamRequest === "waiting_agent" &&
+    const aiAllowed = !humanOwned &&
       Boolean(subscription && billingService.isSubscriptionActive(subscription)) &&
       (await billingService.checkMessageLimit(project.userId, subscription))
         .allowed;
@@ -1517,7 +1487,7 @@ const app = new Hono<HonoAppContext>()
         conversation,
         currentMessage: formMessage,
         isNewConversation,
-        aiParticipation: "assist_until_agent",
+        aiParticipation: chatState.aiParticipation,
         turnKind: "contact_support",
       }));
     }
@@ -2817,6 +2787,8 @@ const app = new Hono<HonoAppContext>()
             referencesRfcIds,
             subject: channelMeta.subject ?? subject,
             autoSubmitted: true,
+            authorName: botMessage.senderName ?? "Maven",
+            customerName: inboundConversation.visitorName,
           });
           await chatService.markEmailed({
             projectId: project.id,
@@ -7710,27 +7682,20 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Rate limit exceeded" }, 429);
     }
 
-    const emailService = new EmailService(c.env.RESEND_API_KEY);
     try {
       const delivery = await runWithConversationExternalAction(
         chatService,
         project.id,
         conversation.id,
         async () => {
-          await emailService.sendAgentMessageEmail({
-            to: conversation.visitorEmail!,
-            projectSlug: project.slug,
-            projectName: project.name,
-            conversationId: conversation.id,
-            messageId: message.id,
-            messageContent: message.content,
-            imageUrls: message.imageUrls,
+          const result = await emailMessageToCustomer({
+            env: c.env,
+            chatService,
+            project: { id: project.id, slug: project.slug, name: project.name },
+            conversation,
+            message,
           });
-          await chatService.markEmailed({
-            projectId: project.id,
-            conversationId: conversation.id,
-            messageId: message.id,
-          });
+          if (!result.delivered) throw new Error("Email not delivered");
         },
       );
       if (!delivery.executed) {

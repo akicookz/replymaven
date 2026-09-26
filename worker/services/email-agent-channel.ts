@@ -6,7 +6,7 @@ import type {
   AgentChannelInbound,
   AgentChannelResolve,
 } from "./agent-channel";
-import { EmailService, markdownToPlainText } from "./email-service";
+import { composeEmail, EmailService, firstName } from "./email-service";
 import type { ProjectService } from "./project-service";
 import { readConversationIdFromReplyText } from "./telegram-agent-channel";
 
@@ -76,19 +76,27 @@ export function createEmailAgentChannel(
         ? fields.text.replace(firstLine(fields.text), "").trim() || fields.text
         : fields.text;
 
+      const botName = input.botName?.trim() || "Maven";
       let lastRfcId: string | null = null;
       for (const recipient of recipients) {
         const inReplyTo = fields.recipient
           ? fields.threadId ?? threads?.byUser[recipient.userId] ?? null
           : threads?.byUser[recipient.userId] ?? null;
+        // Replies route by the reply-to address; only the link is shown.
+        const composed = composeEmail({
+          bodyMarkdown: body,
+          recipientName: firstName(recipient.name),
+          links: [{ label: "Open the conversation", url: fields.conversationLink }],
+          signature: [botName],
+        });
         try {
           const sent = await input.service.sendTeammateEmail({
-            from: `${input.botName?.trim() || "Maven"} <${input.project.slug}@${EMAIL_DOMAIN}>`,
+            from: `${botName} <${input.project.slug}@${EMAIL_DOMAIN}>`,
             replyTo: `${input.project.slug}+c${fields.conversationId}@${EMAIL_DOMAIN}`,
             to: recipient.email,
             subject: inReplyTo ? `Re: ${subject}` : subject,
-            // Replies route by the reply-to address; only the link is shown.
-            text: `${markdownToPlainText(body)}\n\n${fields.conversationLink}`,
+            text: composed.text,
+            html: composed.html,
             inReplyTo,
           });
           const rfcId = await input.service.resolveRfcMessageId(sent.id);

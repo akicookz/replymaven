@@ -63,7 +63,7 @@ export function extractFormName(
 export function buildContactAcceptedPayload(options: {
   conversationId: string;
   visitorMessageId: string;
-  conversationStatus: "waiting_agent" | "agent_replied";
+  conversationStatus: string;
   visitorName: string | null;
   visitorEmail: string | null;
   botName: string | null;

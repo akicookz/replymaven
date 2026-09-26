@@ -1,4 +1,4 @@
-import { Lexer, type Token, type Tokens } from "marked";
+import { Lexer, Marked, type Token, type Tokens } from "marked";
 import { Resend } from "resend";
 
 // ─── Email Design Tokens ──────────────────────────────────────────────────────
@@ -79,6 +79,77 @@ export function htmlToText(html: string): string {
 export function markdownToPlainText(markdown: string): string {
   const tokens = Lexer.lex(markdown, { gfm: true });
   return renderBlocks(tokens).replace(/\n{3,}/g, "\n\n").trim();
+}
+
+// Same markdown as HTML for the email's HTML part: raw HTML is escaped and
+// only http(s) and mailto links become anchors.
+const emailMarked = new Marked({
+  gfm: true,
+  async: false,
+  renderer: {
+    html({ text }) {
+      return escapeHtml(text);
+    },
+    link({ href, tokens }) {
+      const label = this.parser.parseInline(tokens);
+      if (!/^(?:https?:|mailto:)/i.test(href)) return label;
+      return `<a href="${escapeHtml(href)}">${label}</a>`;
+    },
+    image({ href, text }) {
+      if (!/^https?:/i.test(href)) return escapeHtml(text);
+      return `<a href="${escapeHtml(href)}">${escapeHtml(text || href)}</a>`;
+    },
+  },
+});
+
+export function markdownToEmailHtml(markdown: string): string {
+  return (emailMarked.parse(markdown, { async: false }) as string).trim();
+}
+
+export function firstName(name: string | null | undefined): string | null {
+  return name?.trim().split(/\s+/)[0] || null;
+}
+
+// "Hi Dana," unless the message already opens by naming them.
+function greetingFor(body: string, name: string | null): string | null {
+  if (!name) return "Hi there,";
+  const opening = body.split("\n").find((line) => line.trim()) ?? "";
+  return opening.toLowerCase().includes(name.toLowerCase()) ? null : `Hi ${name},`;
+}
+
+export interface ComposedEmail {
+  text: string;
+  html: string;
+}
+
+// Greeting, markdown body, extra links, and sign-off, as plain text and as
+// minimal HTML (no styling, so it reads like a plain email).
+export function composeEmail(input: {
+  bodyMarkdown: string;
+  recipientName: string | null;
+  links?: Array<{ label: string; url: string }>;
+  signature: string[];
+}): ComposedEmail {
+  const bodyText = markdownToPlainText(input.bodyMarkdown);
+  const greeting = bodyText ? greetingFor(bodyText, input.recipientName) : null;
+  const links = input.links ?? [];
+  const text = [
+    greeting,
+    bodyText,
+    ...links.map((link) => `${link.label}: ${link.url}`),
+    input.signature.join("\n"),
+  ].filter(Boolean).join("\n\n");
+  const html = [
+    greeting ? `<p>${escapeHtml(greeting)}</p>` : "",
+    bodyText ? markdownToEmailHtml(input.bodyMarkdown) : "",
+    ...links.map((link) =>
+      `<p><a href="${escapeHtml(link.url)}">${escapeHtml(link.label)}</a></p>`
+    ),
+    input.signature.length > 0
+      ? `<p>${input.signature.map(escapeHtml).join("<br>")}</p>`
+      : "",
+  ].filter(Boolean).join("\n");
+  return { text, html: `<div>${html}</div>` };
 }
 
 function renderBlocks(tokens: Token[], indent = ""): string {
@@ -238,7 +309,9 @@ export class EmailService {
     headers?: Record<string, string>;
   }): Promise<{ id: string | null }> {
     let body: { html?: string; text: string } | { text: string };
-    if (email.text !== undefined) {
+    if (email.text !== undefined && email.html !== undefined) {
+      body = { html: email.html, text: email.text };
+    } else if (email.text !== undefined) {
       body = { text: email.text };
     } else if (email.html !== undefined) {
       body = { html: email.html, text: htmlToText(email.html) };
@@ -280,6 +353,7 @@ export class EmailService {
     to: string;
     subject: string;
     text: string;
+    html?: string;
     inReplyTo: string | null;
   }): Promise<{ id: string | null }> {
     // Keeps out-of-office responders from answering Maven.
@@ -297,6 +371,7 @@ export class EmailService {
       to: input.to,
       subject: input.subject,
       text: input.text,
+      ...(input.html ? { html: input.html } : {}),
       headers,
     });
   }
@@ -440,7 +515,12 @@ ${msg.body}
     inReplyToRfcId?: string | null;
     referencesRfcIds?: string[];
     subject?: string | null;
+    // Chat conversations have no email thread yet: the first email is not a reply.
+    subjectIsReply?: boolean;
     autoSubmitted?: boolean;
+    // Who wrote the message (a teammate or the bot) and who receives it.
+    authorName?: string | null;
+    customerName?: string | null;
   }): Promise<{ id: string | null }> {
     const {
       to,
@@ -463,11 +543,19 @@ ${msg.body}
     const isPlaceholderOnly =
       imageUrls.length > 0 &&
       (messageContent === "Sent an image" || messageContent === "Sent images");
-    const bodyText = isPlaceholderOnly ? "" : markdownToPlainText(messageContent);
-
     const imageLinks = imageUrls.map((url) =>
       url.startsWith("/") ? `${APP_ORIGIN}${url}` : url
     );
+    const author = firstName(details.authorName);
+    const composed = composeEmail({
+      bodyMarkdown: isPlaceholderOnly ? "" : messageContent,
+      recipientName: firstName(details.customerName),
+      links: imageLinks.map((url, index) => ({
+        label: imageLinks.length > 1 ? `Image ${index + 1}` : "Image",
+        url,
+      })),
+      signature: author ? [author, projectName] : [projectName],
+    });
 
     const headers: Record<string, string> = {
       "X-Conversation-Id": conversationId,
@@ -494,15 +582,15 @@ ${msg.body}
     }
 
     return this.send({
-      from: `${projectName} <${projectSlug}@${EMAIL_DOMAIN}>`,
+      from: `${senderDisplayName(author ? `${author} from ${projectName}` : projectName)} <${projectSlug}@${EMAIL_DOMAIN}>`,
       replyTo: `${projectSlug}+c${conversationId}@${EMAIL_DOMAIN}`,
       to,
-      subject: replySubject(subject),
+      subject: details.subjectIsReply === false && subject?.trim()
+        ? subject.trim()
+        : replySubject(subject),
       headers,
-      text: [
-        bodyText,
-        ...imageLinks.map((url) => `Image: ${url}`),
-      ].filter(Boolean).join("\n\n"),
+      text: composed.text,
+      html: composed.html,
     });
   }
 
@@ -529,6 +617,12 @@ ${msg.body}
 }
 
 // ─── HTML Helpers ─────────────────────────────────────────────────────────────
+
+// Quoted so a comma or parenthesis in a name cannot break the From header.
+function senderDisplayName(name: string): string {
+  const clean = name.replace(/["\\\r\n]/g, "").trim();
+  return /[^\w .-]/.test(clean) ? `"${clean}"` : clean;
+}
 
 function escapeHtml(str: string): string {
   return str

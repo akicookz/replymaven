@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { MAVEN_ASSIGNEE_ID, isMavenAssignee } from "../../shared/maven-assignee";
+import { isMavenAssignee } from "../../shared/maven-assignee";
 import {
   readConversationChannelMetadata,
   type PublicConversationRecord,
@@ -188,23 +188,25 @@ export async function blockCustomer(input: {
   return { ok: true, closedIds: [...closedIds], ban };
 }
 
-// Delivery follows the conversation's channel: an email thread gets the
-// message (bot or human) by email, everything else is already in the widget.
-export async function deliverMessageToCustomerChannel(input: {
+// Emails a message that is in the conversation to the customer's address.
+// Email conversations reply in their thread; chat conversations get a first
+// email with its own subject.
+export async function emailMessageToCustomer(input: {
   env: { RESEND_API_KEY?: string };
   chatService: PublicConversationStore;
   project: { id: string; slug: string; name: string };
   conversation: Pick<
     PublicConversationRecord,
-    "id" | "visitorEmail" | "metadata"
+    "id" | "visitorEmail" | "visitorName" | "metadata"
   >;
-  message: Pick<PublicMessageRecord, "id" | "content" | "imageUrls">;
+  message: Pick<
+    PublicMessageRecord,
+    "id" | "content" | "imageUrls" | "author" | "senderName"
+  >;
 }): Promise<{ delivered: boolean }> {
   const channelMeta = readConversationChannelMetadata(input.conversation.metadata);
   const to = input.conversation.visitorEmail?.trim();
-  if (channelMeta.channel !== "email" || !to || !input.env.RESEND_API_KEY) {
-    return { delivered: false };
-  }
+  if (!to || !input.env.RESEND_API_KEY) return { delivered: false };
   const threadMessages = await input.chatService.getMessages(
     input.project.id,
     input.conversation.id,
@@ -216,6 +218,7 @@ export async function deliverMessageToCustomerChannel(input: {
     .reverse()
     .find((message) => message.author === "visitor" && message.rfcMessageId)
     ?.rfcMessageId ?? null;
+  const isEmailThread = channelMeta.channel === "email" || referencesRfcIds.length > 0;
   const emailService = new EmailService(input.env.RESEND_API_KEY);
   const sent = await emailService.sendAgentMessageEmail({
     to,
@@ -227,8 +230,13 @@ export async function deliverMessageToCustomerChannel(input: {
     imageUrls: input.message.imageUrls,
     inReplyToRfcId,
     referencesRfcIds,
-    subject: channelMeta.subject ?? null,
+    // A chat conversation keeps this subject for every mail it gets.
+    subject: channelMeta.subject ?? `Your conversation with ${input.project.name}`,
+    subjectIsReply: isEmailThread,
     autoSubmitted: true,
+    authorName: input.message.senderName ??
+      (input.message.author === "bot" ? "Maven" : null),
+    customerName: input.conversation.visitorName,
   });
   await input.chatService.markEmailed({
     projectId: input.project.id,
@@ -239,4 +247,23 @@ export async function deliverMessageToCustomerChannel(input: {
   return { delivered: true };
 }
 
-export { MAVEN_ASSIGNEE_ID };
+// Delivery follows the conversation's channel: an email thread gets the
+// message by email, everything else is already in the widget.
+export async function deliverMessageToCustomerChannel(input: {
+  env: { RESEND_API_KEY?: string };
+  chatService: PublicConversationStore;
+  project: { id: string; slug: string; name: string };
+  conversation: Pick<
+    PublicConversationRecord,
+    "id" | "visitorEmail" | "visitorName" | "metadata"
+  >;
+  message: Pick<
+    PublicMessageRecord,
+    "id" | "content" | "imageUrls" | "author" | "senderName"
+  >;
+}): Promise<{ delivered: boolean }> {
+  if (readConversationChannelMetadata(input.conversation.metadata).channel !== "email") {
+    return { delivered: false };
+  }
+  return emailMessageToCustomer(input);
+}

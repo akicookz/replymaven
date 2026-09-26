@@ -5,10 +5,36 @@ import { z } from "zod";
 // parent agent, which reuses the same functions as the dashboard routes.
 
 export type SidechatReplyResult =
-  | { sent: true; messageId: string }
+  | {
+    sent: true;
+    messageId: string;
+    // Facts for deciding whether to offer an email; the reply itself stays
+    // in the chat.
+    customerOnline: boolean;
+    customerWroteByEmail: boolean;
+    customerEmailOnFile: boolean;
+  }
   | { blocked: "assigned_to"; assigneeName: string }
   | { blocked: "unknown_author" }
   | { error: "conversation_unavailable" };
+
+export type SidechatEmailResult =
+  | { emailed: true; to: string; messageId: string }
+  | { blocked: "assigned_to"; assigneeName: string }
+  | { blocked: "unknown_author" }
+  | {
+    error:
+      | "no_email"
+      | "conversation_unavailable"
+      | "failed"
+      | "message_not_found"
+      | "already_emailed";
+  };
+
+// Exactly one: an existing chat message to email as it is, or new text.
+export type SidechatEmailInput =
+  | { messageId: string; text: null }
+  | { messageId: null; text: string };
 
 export type SidechatActionResult =
   | { ok: true }
@@ -30,6 +56,10 @@ export type SidechatContactResult =
 
 export interface SidechatActionDeps {
   replyToConversation(text: string, toolCallId: string): Promise<SidechatReplyResult>;
+  emailCustomer(
+    input: SidechatEmailInput,
+    toolCallId: string,
+  ): Promise<SidechatEmailResult>;
   setCustomerContact(input: {
     name: string | null;
     email: string | null;
@@ -46,6 +76,7 @@ export interface SidechatActionDeps {
 }
 
 export const REPLY_TO_CONVERSATION_TOOL_NAME = "reply_to_conversation";
+export const EMAIL_CUSTOMER_TOOL_NAME = "email_customer";
 export const ASSIGN_CONVERSATION_TOOL_NAME = "assign_conversation";
 export const CLOSE_CONVERSATION_TOOL_NAME = "close_conversation";
 export const BLOCK_CUSTOMER_TOOL_NAME = "block_customer";
@@ -54,6 +85,7 @@ export const SET_CUSTOMER_CONTACT_TOOL_NAME = "set_customer_contact";
 
 export const SIDECHAT_ACTION_TOOL_NAMES: ReadonlySet<string> = new Set([
   REPLY_TO_CONVERSATION_TOOL_NAME,
+  EMAIL_CUSTOMER_TOOL_NAME,
   ASSIGN_CONVERSATION_TOOL_NAME,
   CLOSE_CONVERSATION_TOOL_NAME,
   BLOCK_CUSTOMER_TOOL_NAME,
@@ -65,12 +97,29 @@ export function buildSidechatActionTools(deps: SidechatActionDeps): ToolSet {
   const tools: ToolSet = {
     [REPLY_TO_CONVERSATION_TOOL_NAME]: tool({
       description:
-        "Send this text to the customer in the conversation now. Use when the teammate asked you to answer, or the conversation is assigned to you.",
+        "Post this text to the customer in the conversation's chat now. Use when the teammate asked you to answer, or the conversation is assigned to you. It does not send an email.",
       inputSchema: z.object({
         text: z.string().trim().min(1).max(5_000),
       }),
       async execute({ text }, context) {
         return deps.replyToConversation(text, context.toolCallId);
+      },
+    }),
+    [EMAIL_CUSTOMER_TOOL_NAME]: tool({
+      description:
+        "Email the customer. Give messageId to email a message already in the chat as it is (no new chat message), or text to post a new message in the chat and email it. Give exactly one. It cannot be taken back.",
+      inputSchema: z.object({
+        messageId: z.string().trim().min(1).max(200).nullable().optional(),
+        text: z.string().trim().min(1).max(5_000).nullable().optional(),
+      }).refine(
+        (value) => Boolean(value.messageId) !== Boolean(value.text),
+        "Give exactly one of messageId or text.",
+      ),
+      async execute({ messageId, text }, context) {
+        const input: SidechatEmailInput = messageId
+          ? { messageId, text: null }
+          : { messageId: null, text: text ?? "" };
+        return deps.emailCustomer(input, context.toolCallId);
       },
     }),
     [ASSIGN_CONVERSATION_TOOL_NAME]: tool({
@@ -96,7 +145,10 @@ export function buildSidechatActionTools(deps: SidechatActionDeps): ToolSet {
         "Record who the customer is when the conversation has no customer email yet, for example from the From line of a forwarded email. Refused once an email is set.",
       inputSchema: z.object({
         name: z.string().trim().min(1).max(100).nullable().optional(),
-        email: z.string().trim().email().max(320).nullable().optional(),
+        // Plain pattern: .email() emits a lookaround regex OpenAI rejects.
+        email: z.string().trim().regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/).max(320)
+          .nullable()
+          .optional(),
       }),
       async execute({ name, email }) {
         return deps.setCustomerContact({ name: name ?? null, email: email ?? null });

@@ -8,10 +8,8 @@ import { type PublicConversationStore } from "../conversations/public-conversati
 import { buildConversationDeepLink } from "../lib/deep-links";
 import { logError, logWarn } from "../observability";
 import type { AgentChannelAdapter, AgentChannelInbound } from "./agent-channel";
-import {
-  assignConversation,
-  deliverMessageToCustomerChannel,
-} from "./conversation-actions";
+import { readConversationChannelMetadata } from "../../shared/maven-conversation";
+import { assignConversation } from "./conversation-actions";
 import {
   startSidechatTurn,
   type StartSidechatTurnResult,
@@ -27,6 +25,15 @@ function replyThreadFor(inbound: AgentChannelInbound): string | null {
   }
   if (inbound.channel === "email") return inbound.replyToExternalId;
   return inbound.externalMessageId;
+}
+
+// Same window the dashboard uses to show a customer as online.
+const CUSTOMER_ONLINE_WINDOW_MS = 2 * 60 * 1_000;
+
+// Starts the Maven turn after a teammate's direct reply; the prompt says
+// what it means. Never shown to the customer.
+function replyPostedTrigger(messageId: string): string {
+  return `Teammate reply posted to the customer's chat (messageId ${messageId}).`;
 }
 
 const FAILED_DELIVERY =
@@ -128,25 +135,37 @@ export async function ingestTeammateMessage(input: {
       await reply(FAILED_DELIVERY);
       return;
     }
-    // Email conversations: the reply goes to the customer's inbox now, and
-    // the sender sees that it went out as an email.
-    const delivery = await deliverMessageToCustomerChannel({
-      env: input.env,
-      chatService: input.chatService,
-      project: input.project,
-      conversation,
-      message: appended,
-    }).catch((error: unknown) => {
-      logError(`${inbound.channel}.customer_email_failed`, error, {
+    // The reply lands in the chat. When the customer may not see it there
+    // (they wrote in by email, or are offline) and has an email, Maven gets a
+    // turn to offer emailing it, or to email it if told to earlier.
+    const lastSeen = conversation.visitorLastSeenAt;
+    const customerOnline = lastSeen !== null &&
+      Date.now() - lastSeen < CUSTOMER_ONLINE_WINDOW_MS &&
+      conversation.visitorPresence !== "background";
+    const wroteByEmail =
+      readConversationChannelMetadata(conversation.metadata).channel === "email";
+    if (
+      inbound.author.userId &&
+      conversation.visitorEmail?.trim() &&
+      (wroteByEmail || !customerOnline)
+    ) {
+      await (input.startTurn ?? startSidechatTurn)({
+        projectId: input.projectId,
+        env: input.env,
         conversationId: conversation.id,
+        text: replyPostedTrigger(appended.id),
+        origin: inbound.channel,
+        actorUserId: input.actorUserId,
+        authorUserId: inbound.author.userId,
+        authorDisplayName: inbound.author.displayName,
+        channelMessageId: `${inbound.channel}:${inbound.externalMessageId}:posted`,
+        replyThreadId: replyThreadFor(inbound),
+        replyRecipient: inbound.author.email,
+      }).catch((error: unknown) => {
+        logError(`${inbound.channel}.email_offer_turn_failed`, error, {
+          conversationId: conversation.id,
+        });
       });
-      return { delivered: false, failed: true } as const;
-    });
-    if (delivery.delivered) {
-      const who = conversation.visitorName?.trim() || "the customer";
-      await reply(`Emailed to ${who} (${conversation.visitorEmail}).`);
-    } else if ("failed" in delivery) {
-      await reply(`That reply is saved but the email to the customer failed. Send it from the conversation: ${conversationLink}`);
     }
     return;
   }

@@ -46,13 +46,11 @@ const GREETING_RULES = `Greeting:
 
 function buildContactSupportRules(timingMessage: string | null): string {
   const timingRule = timingMessage?.trim()
-    ? `- Give this reply expectation once, restated in your own words and the visitor's language: "${timingMessage.trim()}" Keep its meaning and any times intact. Do not add a time it does not state.`
-    : "- Do not promise a reply time. No expectation is configured for today.";
-  return `This turn answers a contact form submission:
-- The submission is already with the team. Say so once, in your own words. Never ask whether the visitor wants it forwarded, passed along, escalated, or investigated.
-${timingRule}
-- Treat the submission as unresolved unless the visitor says it is solved. Never say that no further details are needed.
-- Then move into the diagnosis, the concrete next step, or the one question you need to continue.`;
+    ? `Base the reply time on this, restated in your own words and the visitor's language: "${timingMessage.trim()}" Keep its meaning and any times intact. Do not add a time it does not state.`
+    : "Do not give a reply time. None is configured for today.";
+  return `This turn answers a contact form submission. Handle it like any other message, with one addition:
+- Open with one short line, in your own words, that their message reached the team and when the team usually replies if they still need them. ${timingRule}
+- Then help as you would in chat. If the request needs something you cannot do, or you are not sure, use request_team_help as usual.`;
 }
 
 export function buildSupportTurnSection(

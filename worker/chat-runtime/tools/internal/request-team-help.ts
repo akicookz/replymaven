@@ -33,10 +33,14 @@ export type RequestTeamHelpResult =
 // Maven writes the note to the team itself (system-origin Sidechat turn), so
 // the tool takes no summary. It does take what the customer already said
 // about themselves; the runtime only asks for what is still missing.
+const SIMPLE_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 const requestTeamHelpInputSchema = z
   .object({
     customerName: z.string().trim().min(1).max(100).optional(),
-    customerEmail: z.string().trim().email().max(320).optional(),
+    // Plain pattern: zod's .email() emits a lookaround regex that OpenAI's
+    // tool schema rejects, which fails the whole turn on the fallback model.
+    customerEmail: z.string().trim().regex(SIMPLE_EMAIL_PATTERN).max(320).optional(),
   })
   .strict();
 
