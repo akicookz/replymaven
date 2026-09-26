@@ -761,7 +761,7 @@ deploy.
   contact parser accepts one to three capitalised words. Before this, two-word names looped.
 - `visitor_bans.banned_from_conversation_id` had a FK to the frozen `conversations` table, so
   bans on any post-migration conversation failed (dashboard too). Migration `0075` drops it.
-- Migration `0076` adds `channel_identities`. Both must run on prod before deploy.
+- Migration `0075` also adds `channel_identities`. It must run on prod before deploy.
 - Not verified locally: real Telegram delivery (stored token answers 401 from local dev),
   Slack `users.info` lookup, inbound teammate email including forwards (Resend webhook
   targets production). 3.6 is built: a teammate's mail with no conversation creates a
