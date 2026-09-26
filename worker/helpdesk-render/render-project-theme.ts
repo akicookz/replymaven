@@ -114,17 +114,20 @@ interface SearchRadii {
 }
 
 function normalizeSearchRadii(value: number | null | undefined): SearchRadii {
-  const preset = widgetRadiusPreset(value ?? 16);
+  const preset = value === null || value === undefined
+    ? "rounded"
+    : widgetRadiusPreset(value);
   if (preset === "sharp") {
     return { box: "0px", trigger: "0px", button: "0px" };
   }
   if (preset === "pill") {
     return { box: "999px", trigger: "999px", button: "50%" };
   }
+  const roundedMd = "max(0px, calc(var(--radius) - 2px))";
   return {
-    box: "10px",
-    trigger: "10px",
-    button: "10px",
+    box: roundedMd,
+    trigger: roundedMd,
+    button: roundedMd,
   };
 }
 

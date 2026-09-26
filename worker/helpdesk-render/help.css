@@ -316,7 +316,13 @@ html.help-nav-open .help-menu-icon-close { display: inline-flex; }
 .help-search-dialog .help-hero-search {
   margin: 0;
   box-shadow:
-    var(--help-ring-shadow),
+    inset 0 0 0 1px var(--border),
+    0 24px 60px -20px oklch(0 0 0 / 0.45);
+}
+.help-search-dialog .help-hero-search:focus-within {
+  box-shadow:
+    inset 0 0 0 1px var(--border),
+    0 0 0 3px color-mix(in oklch, var(--ring), transparent 80%),
     0 24px 60px -20px oklch(0 0 0 / 0.45);
 }
 
@@ -1334,14 +1340,14 @@ html.help-page-home .help-shell {
   width: 100%;
   padding: 0.5rem 0.5rem 0.5rem 1rem;
   background: color-mix(in oklch, var(--muted) 50%, var(--background));
-  box-shadow: var(--help-ring-shadow);
+  box-shadow: inset 0 0 0 1px var(--border);
   border-radius: var(--help-search-radius);
   transition: box-shadow 150ms ease;
 }
 .help-hero-search:focus-within {
   box-shadow:
-    var(--help-ring-shadow),
-    0 0 0 3px color-mix(in oklch, var(--brand), transparent 80%);
+    inset 0 0 0 1px var(--border),
+    0 0 0 3px color-mix(in oklch, var(--ring), transparent 80%);
 }
 .help-hero-search-icon {
   display: inline-flex;

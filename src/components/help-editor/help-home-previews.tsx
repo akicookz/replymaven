@@ -53,8 +53,10 @@ const SEARCH_ARROW = (
   </svg>
 );
 
-function searchPreviewStyle(borderRadius: number): CSSProperties {
-  const preset = widgetRadiusPreset(borderRadius);
+function searchPreviewStyle(borderRadius: number | null | undefined): CSSProperties {
+  const preset = borderRadius === null || borderRadius === undefined
+    ? "rounded"
+    : widgetRadiusPreset(borderRadius);
   if (preset === "sharp") {
     return {
       "--help-search-radius": "0px",
@@ -67,13 +69,14 @@ function searchPreviewStyle(borderRadius: number): CSSProperties {
       "--help-search-button-radius": "50%",
     } as CSSProperties;
   }
+  const roundedMd = "max(0px, calc(var(--radius) - 2px))";
   return {
-    "--help-search-radius": "10px",
-    "--help-search-button-radius": "10px",
+    "--help-search-radius": roundedMd,
+    "--help-search-button-radius": roundedMd,
   } as CSSProperties;
 }
 
-function SearchPreview(props: { borderRadius: number }) {
+function SearchPreview(props: { borderRadius: number | null | undefined }) {
   return (
     <div
       className="help-hero-search"
@@ -271,7 +274,7 @@ export function HelpHomeBlockPreview(props: {
 }) {
   const { projectId } = useParams<{ projectId: string }>();
 
-  const widgetConfigQuery = useQuery<{ borderRadius?: number }>({
+  const widgetConfigQuery = useQuery<{ borderRadius?: number | null }>({
     queryKey: ["widget-config", projectId],
     queryFn: async () => {
       const res = await fetch(`/api/projects/${projectId}/widget-config`);
@@ -316,7 +319,7 @@ export function HelpHomeBlockPreview(props: {
 
   if (props.kind === "search") {
     return (
-      <SearchPreview borderRadius={widgetConfigQuery.data?.borderRadius ?? 16} />
+      <SearchPreview borderRadius={widgetConfigQuery.data?.borderRadius} />
     );
   }
   if (props.kind === "categories") {
