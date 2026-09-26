@@ -62,6 +62,34 @@ export class SlackService {
     return ts !== null;
   }
 
+  // Needs the users:read.email scope on the bot token; without it Slack
+  // answers missing_scope and the author stays unknown.
+  async lookupUserEmail(
+    storedBotToken: string,
+    userId: string,
+  ): Promise<{ email: string; name: string | null } | { error: string }> {
+    const token = await this.botToken(storedBotToken);
+    const response = await fetch(
+      `https://slack.com/api/users.info?user=${encodeURIComponent(userId)}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(15_000),
+      },
+    );
+    const result = (await response.json()) as {
+      ok?: boolean;
+      error?: string;
+      user?: { real_name?: string; profile?: { email?: string; real_name?: string } };
+    };
+    if (!result.ok) return { error: result.error ?? "users_info_failed" };
+    const email = result.user?.profile?.email?.trim();
+    if (!email) return { error: "no_email" };
+    return {
+      email,
+      name: result.user?.real_name ?? result.user?.profile?.real_name ?? null,
+    };
+  }
+
   async getSlackSettings(projectId: string) {
     const rows = await this.db
       .select({

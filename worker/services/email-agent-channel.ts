@@ -136,7 +136,7 @@ export function buildEmailInbound(input: {
     externalMessageId: input.emailId,
     replyToExternalId: input.rfcMessageId,
     replyToText: `Conversation: ${input.conversationId}`,
-    author: input.author,
+    author: { ...input.author, externalId: null },
   };
 }
 

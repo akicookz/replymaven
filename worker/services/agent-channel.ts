@@ -14,6 +14,8 @@ export interface AgentChannelAuthor {
   userId: string;
   displayName: string | null;
   email: string | null;
+  // The channel's own account id (Slack user id, Telegram user id).
+  externalId: string | null;
 }
 
 export interface AgentChannelInbound {

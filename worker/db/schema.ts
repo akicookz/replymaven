@@ -836,6 +836,40 @@ export const teamMembers = sqliteTable(
 export type TeamMemberRow = typeof teamMembers.$inferSelect;
 export type NewTeamMemberRow = typeof teamMembers.$inferInsert;
 
+// ─── Channel Identities ───────────────────────────────────────────────────────
+// Which ReplyMaven user is behind a Slack or Telegram account, per team owner.
+// Slack rows come from a users.info email match; Telegram rows from the
+// one-time link a teammate opens from the group.
+
+export const channelIdentities = sqliteTable(
+  "channel_identities",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => authSchema.users.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => authSchema.users.id, { onDelete: "cascade" }),
+    channel: text("channel", { enum: ["slack", "telegram"] }).notNull(),
+    externalId: text("external_id").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("uq_channel_identities_owner_channel_external").on(
+      table.ownerId,
+      table.channel,
+      table.externalId,
+    ),
+    index("idx_channel_identities_user").on(table.userId),
+  ],
+);
+
+export type ChannelIdentityRow = typeof channelIdentities.$inferSelect;
+export type NewChannelIdentityRow = typeof channelIdentities.$inferInsert;
+
 // ─── Team Member Project Access ─────────────────────────────────────────────────
 // Maps a scoped team member (accessAllProjects = false) to the specific projects
 // they're allowed to access. Rows are cascade-deleted with the member or project.

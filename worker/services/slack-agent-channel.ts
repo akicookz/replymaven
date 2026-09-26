@@ -143,6 +143,7 @@ export function readSlackMessageInbound(
         userId: "",
         displayName: typeof message.user === "string" ? message.user : null,
         email: null,
+        externalId: typeof message.user === "string" ? message.user : null,
       },
     },
   };

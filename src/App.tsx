@@ -39,6 +39,7 @@ import Settings from "./pages/Settings";
 import WidgetGreetings from "./pages/WidgetGreetings";
 import AuthCallback from "./pages/AuthCallback";
 import TeamAccept from "./pages/TeamAccept";
+import LinkTelegram from "./pages/LinkTelegram";
 import HelpCenterSettings from "./pages/HelpCenterSettings";
 import HelpArticleEditor from "./pages/HelpArticleEditor";
 import HelpHomeEditor from "./pages/HelpHomeEditor";
@@ -316,6 +317,16 @@ function App() {
         element={
           <ErrorBoundary>
             <TeamAccept />
+          </ErrorBoundary>
+        }
+      />
+
+      {/* Telegram account link -- standalone page */}
+      <Route
+        path="/app/link/telegram"
+        element={
+          <ErrorBoundary>
+            <LinkTelegram />
           </ErrorBoundary>
         }
       />

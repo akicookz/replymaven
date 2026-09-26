@@ -57,6 +57,12 @@ import {
 } from "./lib/public-upload-url";
 import { AiService } from "./services/ai-service";
 import { handleTeammateComposerText } from "./services/teammate-composer";
+import { parseAgentBotNameCommand } from "./chat-runtime/routing/public-turn-gates";
+import {
+  ChannelIdentityService,
+  mintTelegramLinkToken,
+  verifyTelegramLinkToken,
+} from "./services/channel-identity-service";
 import { ingestTeammateMessage } from "./services/ingest-teammate-message";
 import { startSidechatTurn } from "./services/start-sidechat-turn";
 import { TEAM_HELP_TRIGGER } from "./chat-runtime/tools/internal/request-team-help";
@@ -1613,6 +1619,42 @@ const app = new Hono<HonoAppContext>()
       chatId: tgSettings.telegramChatId,
       service: telegramService,
     });
+    const telegramUserId = message.from?.id === undefined
+      ? null
+      : String(message.from.id);
+    const identities = new ChannelIdentityService(db);
+    const teammate = project && telegramUserId
+      ? await identities.resolveAuthor({
+        projectId,
+        ownerId: project.userId,
+        channel: "telegram",
+        externalId: telegramUserId,
+      })
+      : null;
+
+    // `@BotName link`: mint a one-time URL that binds this Telegram account
+    // to whoever opens it while signed in.
+    const linkRequest = parseAgentBotNameCommand(message.text, botName);
+    if (
+      linkRequest.isCommand &&
+      /^link$/i.test(linkRequest.commandText) &&
+      project && telegramUserId
+    ) {
+      const token = await mintTelegramLinkToken(
+        { ownerId: project.userId, telegramUserId },
+        c.env.ENCRYPTION_KEY,
+      );
+      await adapter.post({
+        conversationId: "",
+        text: teammate
+          ? `Already linked to ${teammate.name}. Open this to relink: ${c.env.BETTER_AUTH_URL}/app/link/telegram?token=${token}`
+          : `Open this while signed in to ReplyMaven to link your Telegram account: ${c.env.BETTER_AUTH_URL}/app/link/telegram?token=${token}`,
+        threadId: String(message.message_id),
+        conversationLink: "",
+      }).catch(() => null);
+      return c.json({ ok: true });
+    }
+
     await ingestTeammateMessage({
       adapter,
       inbound: {
@@ -1624,9 +1666,10 @@ const app = new Hono<HonoAppContext>()
           : String(message.reply_to_message.message_id),
         replyToText: message.reply_to_message?.text ?? null,
         author: {
-          userId: "",
-          displayName: message.from?.first_name ?? null,
-          email: null,
+          userId: teammate?.userId ?? "",
+          displayName: teammate?.name ?? message.from?.first_name ?? null,
+          email: teammate?.email ?? null,
+          externalId: telegramUserId,
         },
       },
       botName,
@@ -1728,9 +1771,60 @@ const app = new Hono<HonoAppContext>()
       c.env.MAVEN_PROJECT_AGENT,
       projectId,
     );
+    // Slack authors resolve by email: linked once, then remembered.
+    let slackInbound = inbound.inbound;
+    const slackUserId = inbound.inbound.author.externalId;
+    if (project && slackUserId) {
+      const identities = new ChannelIdentityService(db);
+      let teammate = await identities.resolveAuthor({
+        projectId,
+        ownerId: project.userId,
+        channel: "slack",
+        externalId: slackUserId,
+      });
+      if (!teammate) {
+        const lookup = await slackService.lookupUserEmail(
+          slackSettings.slackBotToken,
+          slackUserId,
+        ).catch((error: unknown) => ({
+          error: error instanceof Error ? error.message : String(error),
+        }));
+        if ("email" in lookup) {
+          teammate = await identities.resolveByEmail({
+            projectId,
+            ownerId: project.userId,
+            email: lookup.email,
+          });
+          if (teammate) {
+            await identities.link({
+              ownerId: project.userId,
+              userId: teammate.userId,
+              channel: "slack",
+              externalId: slackUserId,
+            });
+          }
+        } else {
+          logWarn("slack.author_lookup_failed", {
+            projectId,
+            error: lookup.error,
+          });
+        }
+      }
+      if (teammate) {
+        slackInbound = {
+          ...inbound.inbound,
+          author: {
+            userId: teammate.userId,
+            displayName: teammate.name,
+            email: teammate.email,
+            externalId: slackUserId,
+          },
+        };
+      }
+    }
     await ingestTeammateMessage({
       adapter,
-      inbound: inbound.inbound,
+      inbound: slackInbound,
       botName,
       projectId,
       actorUserId: project?.userId ?? "",
@@ -4038,6 +4132,28 @@ const app = new Hono<HonoAppContext>()
   })
 
   // ─── Accept Team Invite ─────────────────────────────────────────────────────
+  // ─── Link a Telegram account to the signed-in user ─────────────────────────
+  .post("/api/team/link/telegram", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const token = c.req.query("token") ?? "";
+    const payload = await verifyTelegramLinkToken(token, c.env.ENCRYPTION_KEY);
+    if (!payload) {
+      return c.json({ error: "This link is invalid or has expired. Send @Maven link again." }, 400);
+    }
+    const identities = new ChannelIdentityService(c.get("db"));
+    if (!await identities.canJoinOwner(user.id, payload.ownerId)) {
+      return c.json({ error: "You are not a member of this team." }, 403);
+    }
+    await identities.link({
+      ownerId: payload.ownerId,
+      userId: user.id,
+      channel: "telegram",
+      externalId: payload.telegramUserId,
+    });
+    return c.json({ ok: true });
+  })
+
   .post("/api/team/accept/:inviteId", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
