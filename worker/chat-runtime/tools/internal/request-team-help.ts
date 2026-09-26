@@ -238,6 +238,7 @@ export async function repairAcceptedTeamRequest(
         );
       },
       persistChannelThread(channel, threadId) {
+        if (channel === "email") return Promise.resolve(false);
         return dependencies.chatService.updateChannelThread(
           dependencies.context.projectId,
           dependencies.context.conversationId,
@@ -487,6 +488,7 @@ export function createRequestTeamHelpTool(dependencies: {
             );
           },
           persistChannelThread(channel, threadId) {
+            if (channel === "email") return Promise.resolve(false);
             return dependencies.chatService.updateChannelThread(
               dependencies.context.projectId,
               dependencies.context.conversationId,

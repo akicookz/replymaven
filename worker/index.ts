@@ -57,7 +57,7 @@ import {
 } from "./lib/public-upload-url";
 import { AiService } from "./services/ai-service";
 import { executeChannelBotNameCommand } from "./services/run-bot-name-command";
-import { runAgentChannelInbound } from "./services/run-agent-channel-inbound";
+import { ingestTeammateMessage } from "./services/ingest-teammate-message";
 import { createTelegramAgentChannel } from "./services/telegram-agent-channel";
 import { listEnabledAgentChannels } from "./services/enabled-agent-channels";
 import {
@@ -1492,6 +1492,7 @@ const app = new Hono<HonoAppContext>()
         ).then(() => true);
       },
       persistChannelThread(channel, threadId) {
+        if (channel === "email") return Promise.resolve(false);
         return chatService.updateChannelThread(
           project.id,
           conversation.id,
@@ -1642,71 +1643,31 @@ const app = new Hono<HonoAppContext>()
       chatId: tgSettings.telegramChatId,
       service: telegramService,
     });
-    await runAgentChannelInbound({
+    await ingestTeammateMessage({
       adapter,
       inbound: {
         channel: "telegram",
         text: message.text,
-        actorName: message.from?.first_name ?? null,
-        commandId:
-          `telegram:${projectId}:${String(message.chat?.id ?? "unknown")}:${String(message.message_id)}`,
         externalMessageId: String(message.message_id),
         replyToExternalId: message.reply_to_message?.message_id === undefined
           ? null
           : String(message.reply_to_message.message_id),
         replyToText: message.reply_to_message?.text ?? null,
+        author: {
+          userId: "",
+          displayName: message.from?.first_name ?? null,
+          email: null,
+        },
       },
       botName,
+      projectId,
+      actorUserId: project?.userId ?? "",
+      db,
+      chatService,
+      env: c.env,
       getAgentModeConversations: () =>
         chatService.listAgentMode(projectId),
       findByChannelThread: async () => null,
-      getOperationalConversation: async (conversationId) => {
-        const conversation = await chatService.getOperational(
-          projectId,
-          conversationId,
-        );
-        return conversation
-          ? {
-              id: conversation.id,
-              visitorId: conversation.visitorId,
-              visitorEmail: conversation.visitorEmail,
-              metadata: conversation.metadata,
-            }
-          : null;
-      },
-      executeCommand: async (fields) =>
-        executeChannelBotNameCommand({
-          text: fields.text,
-          botName,
-          actorName: fields.actorName,
-          commandId: fields.commandId,
-          now: Date.now(),
-          projectId,
-          conversation: fields.conversation,
-          chatService,
-          db,
-          env: c.env,
-          projectSettings,
-          projectName: project?.name ?? "Support",
-          actorUserId: project?.userId ?? "",
-          origin: "telegram",
-        }),
-      appendHuman: async (fields) =>
-        chatService.appendHuman({
-          projectId,
-          conversationId: fields.conversationId,
-          content: fields.content,
-          senderName: fields.senderName,
-          idempotencyKey: fields.idempotencyKey,
-          origin: "telegram",
-          externalReplyTo: fields.externalReplyTo,
-        }).catch((error: unknown) => {
-          logError("telegram.reply_append_failed", error, {
-            projectId,
-            conversationId: fields.conversationId,
-          });
-          return null;
-        }),
     });
 
     return c.json({ ok: true });
@@ -1756,7 +1717,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ challenge });
     }
 
-    const inbound = readSlackMessageInbound(payload, projectId);
+    const inbound = readSlackMessageInbound(payload);
     if (!inbound) {
       return c.json({ ok: true });
     }
@@ -1797,10 +1758,15 @@ const app = new Hono<HonoAppContext>()
       c.env.MAVEN_PROJECT_AGENT,
       projectId,
     );
-    await runAgentChannelInbound({
+    await ingestTeammateMessage({
       adapter,
       inbound: inbound.inbound,
       botName,
+      projectId,
+      actorUserId: project?.userId ?? "",
+      db,
+      chatService,
+      env: c.env,
       getAgentModeConversations: () =>
         chatService.listAgentMode(projectId),
       findByChannelThread: async (threadId) => {
@@ -1810,53 +1776,6 @@ const app = new Hono<HonoAppContext>()
         ) as { conversationId?: string } | null;
         return found?.conversationId ?? null;
       },
-      getOperationalConversation: async (conversationId) => {
-        const conversation = await chatService.getOperational(
-          projectId,
-          conversationId,
-        );
-        return conversation
-          ? {
-              id: conversation.id,
-              visitorId: conversation.visitorId,
-              visitorEmail: conversation.visitorEmail,
-              metadata: conversation.metadata,
-            }
-          : null;
-      },
-      executeCommand: async (fields) =>
-        executeChannelBotNameCommand({
-          text: fields.text,
-          botName,
-          actorName: fields.actorName,
-          commandId: fields.commandId,
-          now: Date.now(),
-          projectId,
-          conversation: fields.conversation,
-          chatService,
-          db,
-          env: c.env,
-          projectSettings,
-          projectName: project?.name ?? "Support",
-          actorUserId: project?.userId ?? "",
-          origin: "slack",
-        }),
-      appendHuman: async (fields) =>
-        chatService.appendHuman({
-          projectId,
-          conversationId: fields.conversationId,
-          content: fields.content,
-          senderName: fields.senderName,
-          idempotencyKey: fields.idempotencyKey,
-          origin: "slack",
-          externalReplyTo: fields.externalReplyTo,
-        }).catch((error: unknown) => {
-          logError("slack.reply_append_failed", error, {
-            projectId,
-            conversationId: fields.conversationId,
-          });
-          return null;
-        }),
     });
 
     return c.json({ ok: true });
@@ -2697,6 +2616,8 @@ const app = new Hono<HonoAppContext>()
             channels,
             activeHumanRoutes: chatState.activeHumanRoutes,
             conversationId: inboundConversation.id,
+            conversationLink:
+              `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations?filter=needs-you&id=${inboundConversation.id}`,
             visitorName: inboundConversation.visitorName ?? senderEmail,
             content: `[via email] ${cleanedText}`,
             channelThreads: inboundConversation.channelThreads,

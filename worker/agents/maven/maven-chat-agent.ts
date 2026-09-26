@@ -285,6 +285,13 @@ interface SidechatTurnParent extends SidechatStatusUpdater {
       decision: "approve" | "reject";
     },
   ): Promise<SidechatDecideResult>;
+  mirrorSidechatReply(input: {
+    conversationId: string;
+    text: string;
+    origin: SidechatCustomerContext["origin"];
+    replyThreadId: string | null;
+    replyRecipient: string | null;
+  }): Promise<void>;
   searchSidechatProjectTools(
     input: SidechatGatewayContext & {
       query: string;
@@ -1061,6 +1068,28 @@ function findRespondedApprovalMessageIndex(messages: UIMessage[]): number {
   return -1;
 }
 
+// Visible text of a turn. A continuation resumes an earlier message, so only
+// the text after the answered approval is new.
+function extractMirrorText(message: UIMessage, continuation: boolean): string {
+  let from = 0;
+  if (continuation) {
+    for (let index = message.parts.length - 1; index >= 0; index -= 1) {
+      const part = message.parts[index];
+      if (isToolUIPart(part) && part.state !== "approval-requested") {
+        from = index + 1;
+        break;
+      }
+    }
+  }
+  return message.parts
+    .slice(from)
+    .flatMap((part) =>
+      part.type === "text" && typeof part.text === "string" ? [part.text] : []
+    )
+    .join("\n")
+    .trim();
+}
+
 function readDecidedApproval(message: UIMessage): "approve" | "reject" | null {
   for (const part of message.parts) {
     if (!isToolUIPart(part)) continue;
@@ -1451,6 +1480,32 @@ export class MavenChatAgent extends AIChatAgent<
     return true;
   }
 
+  private async mirrorAssistantMessage(
+    message: UIMessage,
+    continuation: boolean,
+  ): Promise<void> {
+    const meta = readTriggeringUserMeta(this.messages);
+    if (meta.origin === "dashboard" || meta.origin === "mcp") return;
+    const text = extractMirrorText(message, continuation);
+    if (!text) return;
+    const trigger = [...this.messages].reverse().find((m) => m.role === "user");
+    const triggerMeta = trigger ? readSidechatUserMeta(trigger) : null;
+    try {
+      const parent = await this.parentAgent(MavenProjectAgent);
+      await parent.mirrorSidechatReply({
+        conversationId: conversationIdFromChildName(this.name),
+        text,
+        origin: meta.origin,
+        replyThreadId: triggerMeta?.replyThreadId ?? null,
+        replyRecipient: triggerMeta?.replyRecipient ?? null,
+      });
+    } catch (error) {
+      logError("sidechat_mirror.call_failed", error, {
+        childName: this.name,
+      });
+    }
+  }
+
   async hasSettledReplyDraft(): Promise<boolean> {
     return hasSettledReplyDraft(this.messages);
   }
@@ -1832,6 +1887,8 @@ export class MavenChatAgent extends AIChatAgent<
             channels,
             activeHumanRoutes: currentChatState.activeHumanRoutes,
             conversationId: currentState.id,
+            conversationLink:
+              `${this.env.BETTER_AUTH_URL}/app/projects/${projectId}/conversations?filter=needs-you&id=${currentState.id}`,
             visitorName: currentState.visitorName,
             content: submitted.content,
             channelThreads: currentState.channelThreads,
@@ -2050,6 +2107,7 @@ export class MavenChatAgent extends AIChatAgent<
         status: "waiting_approval",
       });
       await parent.updateSidechatSummary(conversationId, "waiting_approval");
+      await this.mirrorAssistantMessage(result.message, result.continuation);
       return;
     }
 
@@ -2080,12 +2138,15 @@ export class MavenChatAgent extends AIChatAgent<
         logInfo("sidechat_turn.completed", turnContext);
       }
       await parent.updateSidechatSummary(conversationId, status);
+      const decided = readDecidedApproval(result.message);
+      // The turn that records a decision is not mirrored; the continuation
+      // that runs the tool carries the real answer.
+      if (decided === null) {
+        await this.mirrorAssistantMessage(result.message, result.continuation);
+      }
       // Both decisions run a continuation: approve executes the tool, reject
       // lets the SDK record the denial so the call does not dangle.
-      if (
-        !result.continuation &&
-        readDecidedApproval(result.message) !== null
-      ) {
+      if (!result.continuation && decided !== null) {
         const meta = readTriggeringUserMeta(this.messages);
         this.ctx.waitUntil(this.runServerSidechatTurn({
           actorUserId: meta.actorUserId,

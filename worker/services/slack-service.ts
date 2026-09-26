@@ -3,36 +3,11 @@ import { eq } from "drizzle-orm";
 import { projectSettings } from "../db";
 import { resolveSlackSecret } from "./slack-secrets";
 
-function escapeMrkdwn(text: string): string {
+export function escapeMrkdwn(text: string): string {
   return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
-}
-
-export function buildSlackEscalationText(params: {
-  visitorName: string | null;
-  visitorEmail: string | null;
-  summary: string;
-  conversationUrl: string;
-  conversationId: string;
-  isUpdate: boolean;
-}): string {
-  const headline = params.isUpdate
-    ? "*Conversation updated, needs human review*"
-    : "*Needs human review*";
-  const who =
-    [params.visitorName, params.visitorEmail].filter(Boolean).join(" · ") ||
-    "Visitor";
-  return [
-    headline,
-    "",
-    `*${escapeMrkdwn(who)}*`,
-    escapeMrkdwn(params.summary),
-    "",
-    `*Conversation:* \`${escapeMrkdwn(params.conversationId)}\``,
-    `<${params.conversationUrl}|Open conversation>`,
-  ].join("\n");
 }
 
 export class SlackService {
@@ -75,47 +50,6 @@ export class SlackService {
     return result.ts;
   }
 
-  async notifyEscalation(
-    storedBotToken: string,
-    channelId: string,
-    params: {
-      visitorName: string | null;
-      visitorEmail: string | null;
-      summary: string;
-      conversationUrl: string;
-      conversationId: string;
-      isUpdate: boolean;
-      threadTs?: string | null;
-    },
-  ): Promise<string | null> {
-    return this.postMessage(storedBotToken, {
-      channelId,
-      text: buildSlackEscalationText(params),
-      threadTs: params.threadTs,
-    });
-  }
-
-  async forwardVisitorMessage(
-    storedBotToken: string,
-    channelId: string,
-    visitorName: string | null,
-    content: string,
-    conversationId: string,
-    threadTs?: string | null,
-  ): Promise<void> {
-    const name = escapeMrkdwn(visitorName ?? "Visitor");
-    const truncated =
-      content.length > 1000 ? content.slice(0, 1000) + "..." : content;
-    await this.postMessage(storedBotToken, {
-      channelId,
-      threadTs,
-      text: [
-        `*${name}:* ${escapeMrkdwn(truncated)}`,
-        "",
-        `*Conversation:* \`${conversationId}\``,
-      ].join("\n"),
-    });
-  }
 
   async testConnection(
     storedBotToken: string,

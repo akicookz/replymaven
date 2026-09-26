@@ -4,15 +4,10 @@ import type { AppEnv } from "../types";
 import type { SidechatTurnOrigin } from "./start-sidechat-turn";
 import { readSettledReplyDraft } from "../agents/sidechat/reply-draft-tool";
 
+// Only the start of a turn is a status ping; every other outcome is Maven's
+// own text, mirrored to the channel it came from.
 export function sidechatPingText(status: SidechatStatus): string | null {
   if (status === "working") return "Maven is looking into that.";
-  if (status === "waiting_approval") {
-    return "Maven needs approval in the dashboard.";
-  }
-  if (status === "ready") return "Maven has a draft in the dashboard.";
-  if (status === "failed") {
-    return "Maven could not finish. Open Sidechat in the dashboard.";
-  }
   return null;
 }
 

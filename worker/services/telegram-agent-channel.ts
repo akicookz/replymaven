@@ -4,7 +4,7 @@ import type {
   AgentChannelInbound,
   AgentChannelResolve,
 } from "./agent-channel";
-import type { TelegramService } from "./telegram-service";
+import { escapeHtml, type TelegramService } from "./telegram-service";
 
 const CONVERSATION_ID_IN_TEXT = /Conversation:\s*(\S+)/;
 
@@ -61,6 +61,24 @@ function parseTelegramReplyId(value: string): number | undefined {
   return parsed;
 }
 
+// The first post for a conversation carries the id line because
+// resolveTelegramConversation reads it back from the replied-to message.
+export function buildTelegramPostText(input: {
+  text: string;
+  conversationId: string;
+  conversationLink: string;
+  newThread: boolean;
+}): string {
+  const body = escapeHtml(input.text);
+  if (!input.newThread) return body;
+  return [
+    body,
+    "",
+    `<b>Conversation:</b> <code>${escapeHtml(input.conversationId)}</code>`,
+    `<a href="${input.conversationLink}">Open conversation</a>`,
+  ].join("\n");
+}
+
 export function createTelegramAgentChannel(input: {
   botName: string | null | undefined;
   storedBotToken: string;
@@ -77,41 +95,19 @@ export function createTelegramAgentChannel(input: {
         botName: input.botName,
       });
     },
-    async notifyEscalation(fields) {
-      const messageId = await input.service.notifyEscalation(
+    async post(fields) {
+      const result = await input.service.sendMessage(
         input.storedBotToken,
         input.chatId,
-        {
-          visitorName: fields.visitorName,
-          visitorEmail: fields.visitorEmail,
-          summary: fields.summary,
-          conversationUrl: fields.conversationUrl,
+        buildTelegramPostText({
+          text: fields.text,
           conversationId: fields.conversationId,
-          isUpdate: fields.isUpdate,
-          replyToMessageId: fields.threadId
-            ? parseTelegramReplyId(fields.threadId)
-            : undefined,
-        },
-      );
-      return messageId == null ? null : String(messageId);
-    },
-    async forwardVisitorMessage(fields) {
-      await input.service.forwardVisitorMessage(
-        input.storedBotToken,
-        input.chatId,
-        fields.visitorName,
-        fields.content,
-        fields.conversationId,
+          conversationLink: fields.conversationLink,
+          newThread: fields.threadId === null,
+        }),
         fields.threadId ? parseTelegramReplyId(fields.threadId) : undefined,
       );
-    },
-    async confirm(fields) {
-      await input.service.sendMessage(
-        input.storedBotToken,
-        input.chatId,
-        fields.text,
-        parseTelegramReplyId(fields.replyToExternalId),
-      );
+      return result.message_id == null ? null : String(result.message_id);
     },
   };
 }

@@ -12,10 +12,15 @@ import {
 } from "./assignable-users";
 import type { EmailService } from "./email-service";
 
+const MAX_FORWARD_CHARS = 1000;
+
+// A customer message reaches the channels where a teammate has already
+// written (the joined routes), threaded under that conversation.
 export async function forwardVisitorToJoinedHumans(input: {
   channels: AgentChannelAdapter[];
   activeHumanRoutes: ActiveHumanRoute[];
   conversationId: string;
+  conversationLink: string;
   visitorName: string | null;
   content: string;
   channelThreads?: PublicChannelThreads | null;
@@ -38,7 +43,7 @@ export async function forwardVisitorToJoinedHumans(input: {
     ): Promise<AssignableUser[]>;
   };
 }): Promise<void> {
-  const joinedChannels = new Set(
+  const joinedChannels = new Set<string>(
     input.activeHumanRoutes
       .filter(
         (
@@ -50,13 +55,16 @@ export async function forwardVisitorToJoinedHumans(input: {
       )
       .map((route) => route.channel),
   );
+  const name = input.visitorName?.trim() || "Visitor";
+  const content = input.content.length > MAX_FORWARD_CHARS
+    ? `${input.content.slice(0, MAX_FORWARD_CHARS)}...`
+    : input.content;
   const channelDeliveries = input.channels
     .filter((adapter) => joinedChannels.has(adapter.channel))
     .map((adapter) =>
-      adapter.forwardVisitorMessage({
+      adapter.post({
         conversationId: input.conversationId,
-        visitorName: input.visitorName,
-        content: input.content,
+        text: `${name}: ${content}`,
         threadId: readChannelThreadId(
           {
             channelThreads: input.channelThreads,
@@ -64,11 +72,13 @@ export async function forwardVisitorToJoinedHumans(input: {
           },
           adapter.channel,
         ),
+        conversationLink: input.conversationLink,
       }).catch((error: unknown) => {
         logError("joined_human_route.channel_forward_failed", error, {
           conversationId: input.conversationId,
           channel: adapter.channel,
         });
+        return null;
       })
     );
   const email = input.email;

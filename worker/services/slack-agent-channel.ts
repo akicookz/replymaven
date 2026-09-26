@@ -5,7 +5,7 @@ import type {
   AgentChannelResolve,
 } from "./agent-channel";
 import { readConversationIdFromReplyText } from "./telegram-agent-channel";
-import type { SlackService } from "./slack-service";
+import { escapeMrkdwn, type SlackService } from "./slack-service";
 
 export function resolveSlackConversation(input: {
   inbound: AgentChannelInbound;
@@ -50,6 +50,22 @@ export function resolveSlackConversation(input: {
   return { kind: "none", reason: "not_a_reply" };
 }
 
+export function buildSlackPostText(input: {
+  text: string;
+  conversationId: string;
+  conversationLink: string;
+  newThread: boolean;
+}): string {
+  const body = escapeMrkdwn(input.text);
+  if (!input.newThread) return body;
+  return [
+    body,
+    "",
+    `*Conversation:* \`${escapeMrkdwn(input.conversationId)}\``,
+    `<${input.conversationLink}|Open conversation>`,
+  ].join("\n");
+}
+
 export function createSlackAgentChannel(input: {
   botName: string | null | undefined;
   storedBotToken: string;
@@ -71,36 +87,16 @@ export function createSlackAgentChannel(input: {
         threadConversationId,
       });
     },
-    async notifyEscalation(fields) {
-      return input.service.notifyEscalation(
-        input.storedBotToken,
-        input.channelId,
-        {
-          visitorName: fields.visitorName,
-          visitorEmail: fields.visitorEmail,
-          summary: fields.summary,
-          conversationUrl: fields.conversationUrl,
-          conversationId: fields.conversationId,
-          isUpdate: fields.isUpdate,
-          threadTs: fields.threadId,
-        },
-      );
-    },
-    async forwardVisitorMessage(fields) {
-      await input.service.forwardVisitorMessage(
-        input.storedBotToken,
-        input.channelId,
-        fields.visitorName,
-        fields.content,
-        fields.conversationId,
-        fields.threadId,
-      );
-    },
-    async confirm(fields) {
-      await input.service.postMessage(input.storedBotToken, {
+    async post(fields) {
+      return input.service.postMessage(input.storedBotToken, {
         channelId: input.channelId,
-        text: fields.text,
-        threadTs: fields.replyToExternalId,
+        text: buildSlackPostText({
+          text: fields.text,
+          conversationId: fields.conversationId,
+          conversationLink: fields.conversationLink,
+          newThread: fields.threadId === null,
+        }),
+        threadTs: fields.threadId,
       });
     },
   };
@@ -117,7 +113,6 @@ export function readSlackUrlVerification(payload: unknown): string | null {
 
 export function readSlackMessageInbound(
   payload: unknown,
-  projectId: string,
 ): { inbound: AgentChannelInbound; channelId: string } | null {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return null;
@@ -141,11 +136,14 @@ export function readSlackMessageInbound(
     inbound: {
       channel: "slack",
       text: message.text,
-      actorName: typeof message.user === "string" ? message.user : null,
-      commandId: `slack:${projectId}:${message.ts}`,
       externalMessageId: message.ts,
       replyToExternalId: threadTs && threadTs !== message.ts ? threadTs : null,
       replyToText: null,
+      author: {
+        userId: "",
+        displayName: typeof message.user === "string" ? message.user : null,
+        email: null,
+      },
     },
   };
 }

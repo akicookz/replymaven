@@ -308,17 +308,26 @@ export async function createEscalation(params: {
                 threadId: string;
               }>, failed: false };
             }
+            const who = [
+              params.conversation.visitorName,
+              params.conversation.visitorEmail,
+            ].filter(Boolean).join(" · ") || "Visitor";
+            const noteText = [
+              isUpdate
+                ? "Conversation updated, needs human review"
+                : "Needs human review",
+              "",
+              who,
+              summary,
+            ].join("\n");
             const channelDeliveries = agentChannels.map(async (adapter) => {
-              const threadId = await adapter.notifyEscalation({
+              const threadId = await adapter.post({
                 conversationId: params.conversation.id,
-                visitorName: params.conversation.visitorName,
-                visitorEmail: params.conversation.visitorEmail,
-                summary,
-                conversationUrl,
-                isUpdate,
+                text: noteText,
                 threadId: isUpdate
                   ? readChannelThreadId(params.conversation, adapter.channel)
                   : null,
+                conversationLink: conversationUrl,
               });
               return threadId
                 ? { channel: adapter.channel, threadId }

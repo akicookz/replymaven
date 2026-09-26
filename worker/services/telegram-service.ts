@@ -1,50 +1,14 @@
+import { logWarn } from "../observability";
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import { projectSettings } from "../db";
 import { resolveTelegramToken } from "./telegram-secrets";
 
-function escapeHtml(text: string): string {
+export function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
-}
-
-export function buildEscalationNotificationText(params: {
-  visitorName: string | null;
-  visitorEmail: string | null;
-  summary: string;
-  conversationUrl: string;
-  conversationId: string;
-  isUpdate: boolean;
-}): string {
-  const headline = params.isUpdate
-    ? `<b>Conversation updated, needs human review</b>`
-    : `<b>Needs human review</b>`;
-  const who =
-    [params.visitorName, params.visitorEmail].filter(Boolean).join(" · ") ||
-    "Visitor";
-  return [
-    headline,
-    "",
-    `<b>${escapeHtml(who)}</b>`,
-    escapeHtml(params.summary),
-    "",
-    `<b>Conversation:</b> <code>${escapeHtml(params.conversationId)}</code>`,
-    `<a href="${params.conversationUrl}">Open conversation</a>`,
-  ].join("\n");
-}
-
-export function buildBotResolvedNotificationText(
-  botName: string | null,
-  conversationId: string,
-): string {
-  const resolvedBy = escapeHtml(botName?.trim() || "The AI assistant");
-  return [
-    `<b>${resolvedBy} resolved this before a teammate joined.</b>`,
-    "",
-    `<b>Conversation:</b> <code>${escapeHtml(conversationId)}</code>`,
-  ].join("\n");
 }
 
 export class TelegramService {
@@ -90,72 +54,19 @@ export class TelegramService {
     const result = (await response.json()) as {
       ok: boolean;
       result?: { message_id: number };
+      description?: string;
     };
+    if (!result.ok) {
+      logWarn("telegram.send_failed", {
+        chatId,
+        status: response.status,
+        description: result.description ?? null,
+      });
+    }
     return {
       ok: result.ok,
       message_id: result.result?.message_id,
     };
-  }
-
-  // ─── Notify Escalation with Conversation Deep-Link ──────────────────────────
-
-  async notifyEscalation(
-    storedBotToken: string,
-    chatId: string,
-    params: {
-      visitorName: string | null;
-      visitorEmail: string | null;
-      summary: string;
-      conversationUrl: string;
-      conversationId: string;
-      isUpdate: boolean;
-      replyToMessageId?: number;
-    },
-  ): Promise<number | null> {
-    const text = buildEscalationNotificationText(params);
-    const result = await this.sendMessage(
-      storedBotToken,
-      chatId,
-      text,
-      params.replyToMessageId,
-    );
-    return result.message_id ?? null;
-  }
-
-  async notifyBotResolved(
-    storedBotToken: string,
-    chatId: string,
-    botName: string | null,
-    conversationId: string,
-    replyToMessageId?: number,
-  ): Promise<void> {
-    await this.sendMessage(
-      storedBotToken,
-      chatId,
-      buildBotResolvedNotificationText(botName, conversationId),
-      replyToMessageId,
-    );
-  }
-
-  // ─── Forward Visitor Message to Agent ─────────────────────────────────────
-
-  async forwardVisitorMessage(
-    storedBotToken: string,
-    chatId: string,
-    visitorName: string | null,
-    content: string,
-    conversationId: string,
-    replyToMessageId?: number,
-  ): Promise<void> {
-    const name = escapeHtml(visitorName ?? "Visitor");
-    const truncated =
-      content.length > 1000 ? content.slice(0, 1000) + "..." : content;
-    const text = [
-      `<b>${name}:</b> ${escapeHtml(truncated)}`,
-      ``,
-      `<b>Conversation:</b> <code>${conversationId}</code>`,
-    ].join("\n");
-    await this.sendMessage(storedBotToken, chatId, text, replyToMessageId);
   }
 
   // ─── Set Webhook ────────────────────────────────────────────────────────────

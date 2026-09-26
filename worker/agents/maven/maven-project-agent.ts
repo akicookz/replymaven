@@ -108,6 +108,7 @@ import type {
   SidechatDecideResult,
   SidechatReplyResult,
 } from "../sidechat/action-tools";
+import type { SidechatMessageOrigin } from "../../../shared/sidechat-agent";
 import {
   buildSidechatHttpToolDescriptor,
   buildSidechatKnowledgeDescriptor,
@@ -140,6 +141,7 @@ import {
 import { TelegramService } from "../../services/telegram-service";
 import { SlackService } from "../../services/slack-service";
 import { listEnabledAgentChannels } from "../../services/enabled-agent-channels";
+import type { AgentChannelAdapter } from "../../services/agent-channel";
 import { logError } from "../../observability";
 import {
   readLastSidechatTurnOrigin,
@@ -1254,6 +1256,37 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     return true;
   }
 
+  private async enabledAgentChannels(): Promise<AgentChannelAdapter[]> {
+    const db = drizzle(this.env.DB);
+    const settings = await new ProjectService(db).getSettings(this.name);
+    return listEnabledAgentChannels({
+      telegram: settings?.telegramBotToken && settings.telegramChatId
+        ? {
+            storedBotToken: settings.telegramBotToken,
+            chatId: settings.telegramChatId,
+            botName: settings.botName,
+            service: new TelegramService(db, this.env.ENCRYPTION_KEY),
+          }
+        : null,
+      slack: settings?.slackBotToken && settings.slackChannelId
+        ? {
+            storedBotToken: settings.slackBotToken,
+            channelId: settings.slackChannelId,
+            botName: settings.botName,
+            service: new SlackService(db, this.env.ENCRYPTION_KEY),
+          }
+        : null,
+    });
+  }
+
+  private conversationLink(conversationId: string): string {
+    return buildConversationDeepLink(
+      this.env.BETTER_AUTH_URL,
+      this.name,
+      conversationId,
+    );
+  }
+
   private async pingSidechatStatus(
     conversationId: string,
     status: SidechatStatus,
@@ -1265,34 +1298,17 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     const origin = readLastSidechatTurnOrigin(summary.metadata);
     if (!origin) return;
     try {
-      const db = drizzle(this.env.DB);
-      const settings = await new ProjectService(db).getSettings(this.name);
-      const channels = listEnabledAgentChannels({
-        telegram: settings?.telegramBotToken && settings.telegramChatId
-          ? {
-              storedBotToken: settings.telegramBotToken,
-              chatId: settings.telegramChatId,
-              botName: settings.botName,
-              service: new TelegramService(db, this.env.ENCRYPTION_KEY),
-            }
-          : null,
-        slack: settings?.slackBotToken && settings.slackChannelId
-          ? {
-              storedBotToken: settings.slackBotToken,
-              channelId: settings.slackChannelId,
-              botName: settings.botName,
-              service: new SlackService(db, this.env.ENCRYPTION_KEY),
-            }
-          : null,
-      });
+      const channels = await this.enabledAgentChannels();
       const adapter = channels.find((channel) => channel.channel === origin);
       if (!adapter) return;
       const threadId = origin === "telegram"
         ? summary.telegramThreadId
         : summary.slackThreadId ?? null;
-      await adapter.confirm({
+      await adapter.post({
+        conversationId,
         text,
-        replyToExternalId: threadId ?? "",
+        threadId,
+        conversationLink: this.conversationLink(conversationId),
       });
     } catch (error) {
       logError("sidechat_status.ping_failed", error, {
@@ -1301,6 +1317,71 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
         origin,
       });
     }
+  }
+
+  // Maven's reply goes back over the channel the teammate wrote from.
+  // System-origin notes (escalation) go to every channel and start threads.
+  async mirrorSidechatReply(input: {
+    conversationId: string;
+    text: string;
+    origin: SidechatMessageOrigin;
+    replyThreadId: string | null;
+    replyRecipient: string | null;
+  }): Promise<void> {
+    const text = input.text.trim();
+    if (!text) return;
+    if (input.origin === "dashboard" || input.origin === "mcp") return;
+    const summary = this.conversationDirectory().getConversation(
+      input.conversationId,
+    );
+    if (!summary || summary.visitorId === "") return;
+    const conversationLink = this.conversationLink(input.conversationId);
+    let channels: AgentChannelAdapter[];
+    try {
+      channels = await this.enabledAgentChannels();
+    } catch (error) {
+      logError("sidechat_mirror.channels_failed", error, {
+        conversationId: input.conversationId,
+      });
+      return;
+    }
+    const targets = input.origin === "system"
+      ? channels
+      : channels.filter((channel) => channel.channel === input.origin);
+    await Promise.all(targets.map(async (adapter) => {
+      try {
+        const existing = adapter.channel === "telegram"
+          ? summary.telegramThreadId
+          : adapter.channel === "slack"
+            ? summary.slackThreadId ?? null
+            : null;
+        const threadId = input.origin === "system"
+          ? existing
+          : input.replyThreadId ?? existing;
+        const posted = await adapter.post({
+          conversationId: input.conversationId,
+          text,
+          threadId,
+          conversationLink,
+          recipient: input.replyRecipient,
+        });
+        const channel = adapter.channel;
+        if (posted && threadId === null && channel !== "email") {
+          await this.publicStore().updateChannelThread(
+            this.name,
+            input.conversationId,
+            channel,
+            posted,
+          );
+        }
+      } catch (error) {
+        logError("sidechat_mirror.failed", error, {
+          conversationId: input.conversationId,
+          origin: input.origin,
+          channel: adapter.channel,
+        });
+      }
+    }));
   }
 
   async isSidechatOperational(
