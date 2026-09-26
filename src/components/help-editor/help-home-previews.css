@@ -70,7 +70,7 @@
   padding: 0.5rem 0.5rem 0.5rem 1rem;
   background: var(--background);
   box-shadow: var(--help-ring-shadow);
-  border-radius: var(--help-radius-2xl);
+  border-radius: var(--help-search-radius, var(--help-radius-2xl));
 }
 .help-editor-live .help-hero-search-icon {
   display: inline-flex;
@@ -106,7 +106,7 @@
   justify-content: center;
   width: 2.25rem;
   height: 2.25rem;
-  border-radius: var(--help-radius-lg);
+  border-radius: var(--help-search-button-radius, var(--help-radius-lg));
   background: var(--brand);
   color: var(--primary-foreground);
   border: 0;

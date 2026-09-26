@@ -1,5 +1,6 @@
 import type { WidgetConfigRow } from "../db/schema";
 import { resolveWidgetFont } from "../../shared/widget-fonts";
+import { widgetRadiusPreset } from "../../shared/widget-radius";
 import { helpFontFamily } from "./build-font-link";
 
 const HEX_RE = /^#[0-9a-fA-F]{3,8}$/;
@@ -57,6 +58,7 @@ function palette(o: PaletteOpts): string {
 export function renderProjectTheme(widgetConfig: WidgetConfigRow | null): string {
   const primary = sanitizeColor(widgetConfig?.primaryColor) ?? "#2563eb";
   const radius = normalizeRadius(widgetConfig?.borderRadius);
+  const searchRadii = normalizeSearchRadii(widgetConfig?.borderRadius);
   const fontName = sanitizeFontName(widgetConfig?.fontFamily);
   const fontStack = fontName
     ? `"${helpFontFamily(fontName)}", system-ui, sans-serif`
@@ -68,6 +70,9 @@ export function renderProjectTheme(widgetConfig: WidgetConfigRow | null): string
   return `:root {
 ${palette({ bg: "#ffffff", fg: "#0a0a0a", primary, code: "#f6f8fa", codeFg: "#1f2328", mutedFg: 35, border: 88 })}
   --radius: ${radius};
+  --help-search-radius: ${searchRadii.box};
+  --help-search-trigger-radius: ${searchRadii.trigger};
+  --help-search-button-radius: ${searchRadii.button};
   --font-sans: ${fontStack};
   --font-heading: ${fontStack};
 }
@@ -98,11 +103,30 @@ export function sanitizeFontName(input: string | null | undefined): string | nul
   return font.value;
 }
 
-// The widget's borderRadius is tuned for chat bubbles; on the help pages it
-// drives --radius, which sizes small controls (buttons, inputs). Clamp it so
-// a bubbly widget theme doesn't turn 36px buttons into capsules, while a
-// square brand (0) still renders sharp.
+// The widget's radius controls chat bubbles. Keep general help page radii
+// bounded, and let search controls follow the configured preset explicitly.
 const MAX_HELP_RADIUS_PX = 12;
+
+interface SearchRadii {
+  box: string;
+  trigger: string;
+  button: string;
+}
+
+function normalizeSearchRadii(value: number | null | undefined): SearchRadii {
+  const preset = widgetRadiusPreset(value ?? 16);
+  if (preset === "sharp") {
+    return { box: "0px", trigger: "0px", button: "0px" };
+  }
+  if (preset === "pill") {
+    return { box: "999px", trigger: "999px", button: "50%" };
+  }
+  return {
+    box: "var(--help-radius-2xl)",
+    trigger: "var(--help-radius-md)",
+    button: "var(--help-radius-lg)",
+  };
+}
 
 function normalizeRadius(value: number | string | null | undefined): string {
   if (value === null || value === undefined) return "0.75rem";

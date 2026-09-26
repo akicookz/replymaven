@@ -15,7 +15,11 @@ export interface PopularArticleEntry {
   category: HelpCategoryRow;
 }
 
-export function HelpSearchForm(props: { action: string }) {
+export function HelpSearchForm(props: {
+  action: string;
+  query?: string;
+  autoFocus?: boolean;
+}) {
   return (
     <form
       action={props.action}
@@ -41,8 +45,10 @@ export function HelpSearchForm(props: { action: string }) {
       <input
         type="search"
         name="q"
+        value={props.query}
         placeholder="Search help center"
         autocomplete="off"
+        autofocus={props.autoFocus || undefined}
         aria-label="Search help center"
       />
       <button type="submit" aria-label="Search">

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type CSSProperties } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Search, X } from "lucide-react";
@@ -18,6 +18,7 @@ import {
   MAX_POPULAR_ARTICLES,
   parsePopularArticleIds,
 } from "../../../shared/help-home-markdown";
+import { widgetRadiusPreset } from "../../../shared/widget-radius";
 import "./help-home-previews.css";
 
 interface CategoryRow {
@@ -52,9 +53,33 @@ const SEARCH_ARROW = (
   </svg>
 );
 
-function SearchPreview() {
+function searchPreviewStyle(borderRadius: number): CSSProperties {
+  const preset = widgetRadiusPreset(borderRadius);
+  if (preset === "sharp") {
+    return {
+      "--help-search-radius": "0px",
+      "--help-search-button-radius": "0px",
+    } as CSSProperties;
+  }
+  if (preset === "pill") {
+    return {
+      "--help-search-radius": "999px",
+      "--help-search-button-radius": "50%",
+    } as CSSProperties;
+  }
+  return {
+    "--help-search-radius": "var(--help-radius-2xl)",
+    "--help-search-button-radius": "var(--help-radius-lg)",
+  } as CSSProperties;
+}
+
+function SearchPreview(props: { borderRadius: number }) {
   return (
-    <div className="help-hero-search" aria-hidden="true">
+    <div
+      className="help-hero-search"
+      style={searchPreviewStyle(props.borderRadius)}
+      aria-hidden="true"
+    >
       <span className="help-hero-search-icon">
         <Search size={20} />
       </span>
@@ -246,6 +271,16 @@ export function HelpHomeBlockPreview(props: {
 }) {
   const { projectId } = useParams<{ projectId: string }>();
 
+  const widgetConfigQuery = useQuery<{ borderRadius?: number }>({
+    queryKey: ["widget-config", projectId],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/widget-config`);
+      if (!res.ok) throw new Error("Failed to fetch widget config");
+      return res.json();
+    },
+    enabled: !!projectId && props.kind === "search",
+  });
+
   const categoriesQuery = useQuery<CategoryRow[]>({
     queryKey: ["help-categories", projectId],
     queryFn: async () => {
@@ -279,7 +314,11 @@ export function HelpHomeBlockPreview(props: {
       .sort((a, b) => a.sortOrder - b.sortOrder);
   }, [categoriesQuery.data, tabsQuery.data]);
 
-  if (props.kind === "search") return <SearchPreview />;
+  if (props.kind === "search") {
+    return (
+      <SearchPreview borderRadius={widgetConfigQuery.data?.borderRadius ?? 16} />
+    );
+  }
   if (props.kind === "categories") {
     return <CategoriesPreview categories={categories} />;
   }

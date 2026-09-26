@@ -5,6 +5,7 @@ import type { HelpTopNavItem } from "../lib/help-top-nav";
 import { Layout } from "./layout";
 import { buildHelpUrl } from "./build-help-url";
 import { HelpSidebar } from "./sidebar";
+import { HelpSearchForm } from "./help-home-widgets";
 import { HelpTopBar } from "./top-bar";
 import type { HelpNav } from "./help-tabs";
 import type { HelpThemeDefault } from "./help-theme-default";
@@ -78,52 +79,11 @@ export function renderHelpSearch(props: RenderHelpSearchProps) {
       }
     >
       <div class="help-page">
-        <form
+        <HelpSearchForm
           action={`${homeUrl}/search`}
-          method="get"
-          class="help-hero-search"
-          role="search"
-        >
-          <span class="help-hero-search-icon" aria-hidden="true">
-            <svg
-              viewBox="0 0 24 24"
-              width="20"
-              height="20"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <path d="m21 21-4.3-4.3" />
-            </svg>
-          </span>
-          <input
-            type="search"
-            name="q"
-            value={props.query}
-            placeholder="Search help center"
-            autocomplete="off"
-            autofocus
-            aria-label="Search help center"
-          />
-          <button type="submit" aria-label="Search">
-            <svg
-              viewBox="0 0 24 24"
-              width="18"
-              height="18"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <line x1="5" y1="12" x2="19" y2="12" />
-              <polyline points="12 5 19 12 12 19" />
-            </svg>
-          </button>
-        </form>
+          query={props.query}
+          autoFocus
+        />
 
         {props.query && (
           <p class="help-search-meta">
