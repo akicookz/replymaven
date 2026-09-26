@@ -1,7 +1,8 @@
 # Maven as the agent in the team thread
 
-Status: approved 2026-09-26, not started. Every open question in the earlier draft was
-decided; decisions are listed in "Decisions". Anything not in this file is out of scope.
+Status: implemented 2026-09-26, phases 1 to 6 committed on `main` (not pushed at time of
+writing). Decisions are listed in "Decisions"; what changed during the build is in
+"Build notes" at the end. Anything not in this file is out of scope.
 
 ## Target behaviour
 
@@ -740,3 +741,29 @@ Checked before writing this version; each item is a place the plan could have be
 `bunx tsc -b --force`, and its Verification list, before the next starts. One commit per
 phase; push only on explicit go. D1 migration only in phase 6, applied to prod before that
 deploy.
+
+
+## Build notes (2026-09-26)
+
+- D2 outcome: neither option. A fresh turn with a pending approval in the model view throws
+  `MissingToolResultsError` before the provider is called, and an approved tool only runs
+  when the approval response is the last model message. So: the pending approval stays out of
+  the model history and is described in `context.pendingApproval`; `decide_pending_action`
+  flips the stored part; the continuation resumes the approval-bearing message (like the
+  dashboard button) with the model view cut at the step after the approval. The wrap-up after
+  an approval pause strips unanswered calls and ends with a user turn (Gemini rejects prompts
+  ending in a model turn).
+- `context.author` (verified teammate, id + name) was added back: "assign it to me" needs it.
+- Inside a public turn `chatService` is the child agent, not the store. Anything a tool calls
+  must exist on the child too (`updateChannelThread`, `updateEmailThread`, and
+  `updatePendingTeamRequestContact` are the ones used).
+- `request_team_help` takes `customerName` / `customerEmail` from the model; the regex
+  contact parser accepts one to three capitalised words. Before this, two-word names looped.
+- `visitor_bans.banned_from_conversation_id` had a FK to the frozen `conversations` table, so
+  bans on any post-migration conversation failed (dashboard too). Migration `0075` drops it.
+- Migration `0076` adds `channel_identities`. Both must run on prod before deploy.
+- Not verified locally: real Telegram delivery (stored token answers 401 from local dev),
+  Slack `users.info` lookup, inbound teammate email (Resend webhook targets production),
+  forward-with-no-conversation (3.6 not built: forwards from a teammate still hit the `create`
+  branch and make the teammate the customer).
+- Dashboard shows the system trigger line as a "You" message in the Sidechat. Cosmetic.
