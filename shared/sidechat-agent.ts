@@ -216,11 +216,46 @@ export interface ReplyDraftData {
   };
 }
 
+// Where a Sidechat user message came from. "system" is the internal trigger for
+// turns nobody typed (the escalation note).
+export type SidechatMessageOrigin =
+  | "dashboard"
+  | "mcp"
+  | "telegram"
+  | "slack"
+  | "email"
+  | "system";
+
+// Persisted on every Sidechat user message. `actorUserId` is the access
+// principal for tools (the project owner for channel turns until the author is
+// known); `authorUserId` is the verified human, "" when unknown.
+export interface SidechatUserMeta {
+  createdAt: number;
+  origin: SidechatMessageOrigin;
+  actorUserId: string;
+  authorUserId: string;
+  authorDisplayName: string | null;
+  channelMessageId: string | null;
+  replyThreadId: string | null;
+  replyRecipient: string | null;
+}
+
 export interface SidechatCustomerContext {
   projectId: string;
   conversationId: string;
   conversationStatus: string;
   archivedAt: number | null;
+  origin: SidechatMessageOrigin;
+  // The verified teammate writing this turn; "me" in their message means them.
+  author: { id: string; name: string } | null;
+  assignee: { id: string; name: string } | null;
+  teammates: Array<{ id: string; name: string }>;
+  links: { conversation: string; tools: string };
+  emailSubject: string | null;
+  pendingApproval: {
+    toolCallId: string;
+    description: string;
+  } | null;
   customer: {
     id: string;
     name: string | null;

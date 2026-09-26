@@ -1,6 +1,7 @@
 import type { UIMessage } from "ai";
 import type { SidechatStatus } from "../../shared/sidechat-agent";
 import type { AppEnv } from "../types";
+import type { SidechatTurnOrigin } from "./start-sidechat-turn";
 import { readSettledReplyDraft } from "../agents/sidechat/reply-draft-tool";
 
 export function sidechatPingText(status: SidechatStatus): string | null {
@@ -17,9 +18,12 @@ export function sidechatPingText(status: SidechatStatus): string | null {
 
 export function readLastSidechatTurnOrigin(
   metadata: Record<string, unknown>,
-): "telegram" | "slack" | null {
+): SidechatTurnOrigin | null {
   const value = metadata.lastSidechatTurnOrigin;
-  return value === "telegram" || value === "slack" ? value : null;
+  return value === "telegram" || value === "slack" || value === "mcp" ||
+      value === "email" || value === "system"
+    ? value
+    : null;
 }
 
 export function hasSettledReplyDraft(messages: UIMessage[]): boolean {

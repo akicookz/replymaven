@@ -116,6 +116,9 @@ export interface PublicMessageRecord {
 export interface PublicChannelThreads {
   telegram?: string;
   slack?: string;
+  // Email threads are per teammate: the RFC Message-ID of the last mail sent
+  // to each user, plus the subject every mail in the conversation reuses.
+  email?: { subject: string; byUser: Record<string, string> };
 }
 
 export function publicChannelThreads(

@@ -191,6 +191,11 @@ import {
   invalidateTeamContext,
 } from "./services/team-context";
 import { VisitorBanService } from "./services/visitor-ban-service";
+import {
+  assignConversation,
+  blockCustomer,
+  closeConversation,
+} from "./services/conversation-actions";
 import { touchLinkedCustomerAfterVisitorMessage } from "./chat-runtime/customer-last-seen";
 import {
   buildContactAcceptedPayload,
@@ -7793,15 +7798,6 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const chatService = createPublicConversationStore({ db, env: c.env });
-    const conversation = await chatService.getOperational(
-      project.id,
-      c.req.param("convId"),
-    );
-    if (!conversation) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
     // Parse optional close reason from body
     let closeReason: "resolved" | "ended" | "spam" | undefined;
     try {
@@ -7813,17 +7809,15 @@ const app = new Hono<HonoAppContext>()
         closeReason = body.closeReason;
       }
     } catch {
-      // No body or invalid JSON is fine — defaults to no reason
+      // No body or invalid JSON is fine, defaults to no reason
     }
-
-    // Close the conversation
-    await chatService.setStatus(
-      project.id,
-      conversation.id,
-      "closed",
+    const result = await closeConversation({
+      chatService: createPublicConversationStore({ db, env: c.env }),
+      projectId: project.id,
+      conversationId: c.req.param("convId"),
       closeReason,
-    );
-
+    });
+    if ("error" in result) return c.json({ error: "Not found" }, 404);
     return c.json({ ok: true });
   })
   .post("/api/projects/:id/conversations/:convId/reopen", async (c) => {
@@ -7942,49 +7936,23 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     const parsed = validate(assignSchema, await c.req.json());
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
-    const chatService = createPublicConversationStore({ db, env: c.env });
-    const conversation = await chatService.getOperational(
-      project.id,
-      c.req.param("convId"),
-    );
-    if (!conversation) return c.json({ error: "Not found" }, 404);
-
-    const assignable = await getAssignableUsers(db, project.id);
-    if (!isAllowedAssignee(parsed.data.assigneeId, assignable)) {
+    const result = await assignConversation({
+      db,
+      chatService: createPublicConversationStore({ db, env: c.env }),
+      projectId: project.id,
+      conversationId: c.req.param("convId"),
+      assigneeId: parsed.data.assigneeId,
+      actorName: user.name,
+    });
+    if ("error" in result) {
+      if (result.error === "not_found") {
+        return c.json({ error: "Not found" }, 404);
+      }
       return c.json(
         { error: "Assignee is not a member of this project's team" },
         400,
       );
     }
-
-    if (isMavenAssignee(parsed.data.assigneeId)) {
-      if (isMavenAssignee(conversation.assigneeId)) {
-        return c.json({ ok: true });
-      }
-      if (canHandConversationToMaven(conversation)) {
-        await chatService.transitionOwnership({
-          projectId: project.id,
-          conversationId: conversation.id,
-          event: "ai_handed_back",
-        });
-      }
-      const settings = await projectService.getSettings(project.id);
-      await recordMavenAssignment({
-        chatService,
-        conversationId: conversation.id,
-        projectId: project.id,
-        botName: settings?.botName,
-        actorName: user.name,
-        reason: "manual",
-      });
-      return c.json({ ok: true });
-    }
-
-    await chatService.applyAction({
-      projectId: project.id,
-      conversationId: conversation.id,
-      action: { action: "assign", assigneeId: parsed.data.assigneeId },
-    });
     return c.json({ ok: true });
   })
   .get("/api/projects/:id/inbox-counts", async (c) => {
@@ -8014,59 +7982,26 @@ const app = new Hono<HonoAppContext>()
     const parsed = validate(banVisitorSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
-    const chatService = createPublicConversationStore({ db, env: c.env });
-    if (parsed.data.conversationId) {
-      const conversation = await chatService.getOperational(
-        project.id,
-        parsed.data.conversationId,
-      );
-      if (!conversation) return c.json({ error: "Not found" }, 404);
-    }
-
-    const banService = new VisitorBanService(db);
-    const existing = await banService.isVisitorBanned(
-      project.id,
-      parsed.data.visitorId,
-      parsed.data.visitorEmail,
-    );
-    if (existing) {
-      return c.json({ error: "Visitor is already banned" }, 409);
-    }
-
-    // Close the named conversation as spam (even if it was already closed —
-    // the Flagged tab is where a blocked visitor's thread belongs), then sweep
-    // ALL of the visitor's other open conversations too: the ban 403s the
-    // visitor, so any leftovers would sit in Needs You forever.
-    const closedIds = new Set<string>();
-    if (parsed.data.conversationId) {
-      await chatService.setStatus(
-        project.id,
-        parsed.data.conversationId,
-        "closed",
-        "spam",
-      );
-      closedIds.add(parsed.data.conversationId);
-    }
-    const sweptIds = await chatService.closeOpenAsSpam(
-      project.id,
-      parsed.data.visitorId,
-      parsed.data.visitorEmail ?? null,
-    );
-    for (const id of sweptIds) closedIds.add(id);
-
-    const ban = await banService.banVisitor({
+    const result = await blockCustomer({
+      db,
+      chatService: createPublicConversationStore({ db, env: c.env }),
       projectId: project.id,
+      conversationId: parsed.data.conversationId ?? null,
       visitorId: parsed.data.visitorId,
       visitorEmail: parsed.data.visitorEmail ?? null,
       reason: parsed.data.reason ?? null,
       bannedBy: "dashboard",
-      bannedFromConversationId: parsed.data.conversationId ?? null,
       expiresAt: parsed.data.expiresAt
         ? new Date(parsed.data.expiresAt)
         : null,
     });
-
-    return c.json(ban, 201);
+    if ("error" in result) {
+      if (result.error === "not_found") {
+        return c.json({ error: "Not found" }, 404);
+      }
+      return c.json({ error: "Visitor is already banned" }, 409);
+    }
+    return c.json(result.ban, 201);
   })
   .get("/api/projects/:id/visitors/banned", async (c) => {
     const user = c.get("user");

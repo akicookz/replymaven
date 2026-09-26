@@ -264,19 +264,65 @@ function sanitizeToolPart(part: UIMessage["parts"][number]): UIMessage["parts"][
   return redactToolChunk(part) as UIMessage["parts"][number];
 }
 
+const USER_META_STRING_KEYS = [
+  "origin",
+  "actorUserId",
+  "authorUserId",
+  "authorDisplayName",
+  "channelMessageId",
+  "replyThreadId",
+  "replyRecipient",
+] as const;
+
 export function sanitizePrivateMessageForPersistence(
   message: UIMessage,
 ): UIMessage {
   // Strip provider metadata, but keep a stable persistence timestamp so the
   // dashboard can render real message times instead of the render clock.
-  const existing = isRecord(message.metadata) ? message.metadata.createdAt : null;
+  // User messages also keep the routing fields (see SidechatUserMeta).
+  const meta = isRecord(message.metadata) ? message.metadata : {};
+  const existing = meta.createdAt;
   const createdAt = typeof existing === "number" && Number.isFinite(existing)
     ? existing
     : Date.now();
+  const metadata: Record<string, unknown> = { createdAt };
+  if (message.role === "user") {
+    for (const key of USER_META_STRING_KEYS) {
+      const value = meta[key];
+      if (typeof value === "string") metadata[key] = value;
+      else if (value === null) metadata[key] = null;
+    }
+  }
   return {
     ...message,
-    metadata: { createdAt },
+    metadata,
     parts: message.parts.map(sanitizeToolPart),
+  };
+}
+
+export function readSidechatUserMeta(
+  message: Pick<UIMessage, "role" | "metadata">,
+): {
+  origin: string | null;
+  actorUserId: string;
+  authorUserId: string;
+  authorDisplayName: string | null;
+  channelMessageId: string | null;
+  replyThreadId: string | null;
+  replyRecipient: string | null;
+} | null {
+  if (message.role !== "user" || !isRecord(message.metadata)) return null;
+  const meta = message.metadata;
+  const str = (key: string): string | null =>
+    typeof meta[key] === "string" ? (meta[key] as string) : null;
+  return {
+    origin: str("origin"),
+    actorUserId: str("actorUserId") ?? "",
+    authorUserId: str("authorUserId") ?? "",
+    authorDisplayName: str("authorDisplayName"),
+    channelMessageId: str("channelMessageId"),
+    replyThreadId: str("replyThreadId"),
+    replyRecipient: str("replyRecipient"),
   };
 }
 

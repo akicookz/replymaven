@@ -1,4 +1,7 @@
-import type { SidechatCustomerContext } from "../../../shared/sidechat-agent";
+import type {
+  SidechatCustomerContext,
+  SidechatMessageOrigin,
+} from "../../../shared/sidechat-agent";
 import type {
   PublicConversationRecord,
   PublicMessageRecord,
@@ -21,7 +24,17 @@ type SidechatConversationRow = Pick<
   | "visitorEmail"
   | "status"
   | "archivedAt"
+  | "assigneeId"
 >;
+
+export interface SidechatTurnContextInput {
+  origin: SidechatMessageOrigin;
+  author: { id: string; name: string } | null;
+  teammates: Array<{ id: string; name: string }>;
+  links: { conversation: string; tools: string };
+  emailSubject: string | null;
+  pendingApproval: { toolCallId: string; description: string } | null;
+}
 
 export interface SidechatContextDependencies {
   getConversation(
@@ -42,6 +55,7 @@ export interface SidechatContextDependencies {
 interface BuildSidechatContextOptions {
   projectId: string;
   conversationId: string;
+  turn: SidechatTurnContextInput;
   dependencies: SidechatContextDependencies;
 }
 
@@ -148,11 +162,23 @@ export async function buildSidechatContext(
       };
     });
 
+  const assignee = conversation.assigneeId
+    ? options.turn.teammates.find((member) => member.id === conversation.assigneeId)
+      ?? null
+    : null;
+
   return {
     projectId: options.projectId,
     conversationId: options.conversationId,
     conversationStatus: conversation.status,
     archivedAt: conversation.archivedAt,
+    origin: options.turn.origin,
+    author: options.turn.author,
+    assignee,
+    teammates: options.turn.teammates,
+    links: options.turn.links,
+    emailSubject: options.turn.emailSubject,
+    pendingApproval: options.turn.pendingApproval,
     customer: canonicalCustomer,
     visitor,
     // The public schema currently has no durable bounded conversation summary.

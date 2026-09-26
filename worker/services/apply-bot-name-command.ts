@@ -8,7 +8,10 @@ import {
   type BotNameDecision,
 } from "./bot-name-decision";
 import type { EmailLastReplyResult } from "./email-last-reply";
-import type { BotNameCommandOrigin } from "./start-sidechat-turn";
+import type {
+  BotNameCommandOrigin,
+  StartSidechatTurnResult,
+} from "./start-sidechat-turn";
 
 export interface BotNameOwnershipSnapshot {
   status: PublicConversationStatus
@@ -32,10 +35,7 @@ export interface ApplyBotNameCommandDeps {
   }): Promise<boolean>
   startSidechatTurn(input: {
     text: string
-  }): Promise<
-    | { accepted: true; status: "working" }
-    | { accepted: false; reason: "busy" | "archived" | "failed" }
-  >
+  }): Promise<StartSidechatTurnResult>
   emailLastReply(): Promise<EmailLastReplyResult>
 }
 

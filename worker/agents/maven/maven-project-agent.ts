@@ -91,6 +91,24 @@ import {
 import { ReadOnlyMcpOAuthClientProvider } from "../sidechat/mcp-oauth-provider";
 import { buildSidechatContext } from "../sidechat/sidechat-context";
 import {
+  assignConversation,
+  blockCustomer,
+  closeConversation,
+  deliverBotMessageToCustomerChannel,
+} from "../../services/conversation-actions";
+import { createPublicConversationStore } from "../../conversations/create-public-conversation-store";
+import type { PublicConversationStore } from "../../conversations/public-conversation-store";
+import {
+  getAssignableUsers,
+  mavenAssignableUser,
+} from "../../services/assignable-users";
+import { MAVEN_ASSIGNEE_ID } from "../../../shared/maven-assignee";
+import { buildConversationDeepLink } from "../../lib/deep-links";
+import type {
+  SidechatDecideResult,
+  SidechatReplyResult,
+} from "../sidechat/action-tools";
+import {
   buildSidechatHttpToolDescriptor,
   buildSidechatKnowledgeDescriptor,
   buildSidechatToolDescriptors,
@@ -130,7 +148,7 @@ import {
 } from "../../services/sidechat-status";
 import {
   runStartSidechatTurn,
-  type BotNameCommandOrigin,
+  type StartSidechatTurnInput,
   type SidechatClaimResult,
   type SidechatTurnOrigin,
   type StartSidechatTurnResult,
@@ -318,7 +336,10 @@ function readStoredSidechatTurnOrigin(
   metadata: Record<string, unknown> | undefined,
 ): SidechatTurnOrigin | null {
   const value = metadata?.lastSidechatTurnOrigin;
-  if (value === "mcp" || value === "telegram" || value === "slack") {
+  if (
+    value === "mcp" || value === "telegram" || value === "slack" ||
+    value === "email" || value === "system"
+  ) {
     return value;
   }
   return null;
@@ -715,12 +736,9 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     }
   }
 
-  async startSidechatTurn(input: {
-    conversationId: string;
-    text: string;
-    actorUserId: string;
-    origin: BotNameCommandOrigin;
-  }): Promise<StartSidechatTurnResult> {
+  async startSidechatTurn(
+    input: StartSidechatTurnInput,
+  ): Promise<StartSidechatTurnResult> {
     let statusBeforeClaim: SidechatStatus = "idle";
     let originBeforeClaim: SidechatTurnOrigin | null = null;
     return runStartSidechatTurn(input, {
@@ -749,8 +767,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
           MavenChatAgent,
           toSidechatChildName(input.conversationId),
         );
-        const result = await child.submitServerSidechatTurn(fields);
-        return result.accepted;
+        return child.submitServerSidechatTurn(fields);
       },
       releaseClaim: async () => {
         this.projectSidechatStatus(input.conversationId, statusBeforeClaim);
@@ -833,7 +850,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       MavenChatAgent,
       summary.publicChildName,
     );
-    const sent = await publicChild.appendSidechatDraftAsBot({
+    const sent = await publicChild.appendBotMessageFromSidechat({
       messageId: `sidechat-draft:${messageId}`,
       text: draft,
       senderName: input.senderName,
@@ -1311,6 +1328,11 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
   async getSidechatContext(
     childName: string,
     conversationId: string,
+    turn: {
+      origin: SidechatCustomerContext["origin"];
+      authorUserId: string;
+      pendingApproval: SidechatCustomerContext["pendingApproval"];
+    },
   ): Promise<SidechatCustomerContext> {
     this.assertRegisteredSidechat(childName, conversationId);
     const db = drizzle(this.env.DB);
@@ -1324,12 +1346,37 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       MavenChatAgent,
       summary.publicChildName,
     );
-    const publicSnapshot = await publicChild.getPublicContextSnapshot({
-      newestMessages: 40,
-    });
+    const [publicSnapshot, assignable, settings] = await Promise.all([
+      publicChild.getPublicContextSnapshot({ newestMessages: 40 }),
+      getAssignableUsers(db, this.name),
+      new ProjectService(db).getSettings(this.name),
+    ]);
+    const teammates = [
+      mavenAssignableUser(settings?.botName),
+      ...assignable,
+    ].map((member) => ({ id: member.id, name: member.name }));
+    const emailThreads = publicSnapshot.conversation.channelThreads?.email;
     return buildSidechatContext({
       projectId: this.name,
       conversationId,
+      turn: {
+        origin: turn.origin,
+        author: teammates.find((member) =>
+          member.id !== MAVEN_ASSIGNEE_ID && member.id === turn.authorUserId
+        ) ?? null,
+        teammates,
+        links: {
+          conversation: buildConversationDeepLink(
+            this.env.BETTER_AUTH_URL,
+            this.name,
+            conversationId,
+          ),
+          tools:
+            `${this.env.BETTER_AUTH_URL}/app/projects/${this.name}/support-chat/tools`,
+        },
+        emailSubject: emailThreads?.subject ?? null,
+        pendingApproval: turn.pendingApproval,
+      },
       dependencies: {
         getConversation(id, projectId) {
           return Promise.resolve(
@@ -1355,6 +1402,169 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
           });
         },
       },
+    });
+  }
+
+  // ─── Sidechat action tools ──────────────────────────────────────────────
+
+  private async sidechatActionScope(
+    input: SidechatGatewayContext,
+  ): Promise<
+    | { ok: true; summary: MavenConversationSummary; db: ReturnType<typeof drizzle> }
+    | { ok: false }
+  > {
+    if (!await this.canUseSidechatGateway(input)) return { ok: false };
+    const summary = this.conversationDirectory().getConversation(
+      input.conversationId,
+    );
+    if (!summary || summary.visitorId === "") return { ok: false };
+    return { ok: true, summary, db: drizzle(this.env.DB) };
+  }
+
+  async replyToConversation(
+    input: SidechatGatewayContext & {
+      authorUserId: string;
+      toolCallId: string;
+      text: string;
+    },
+  ): Promise<SidechatReplyResult> {
+    const scope = await this.sidechatActionScope(input);
+    if (!scope.ok) return { error: "conversation_unavailable" };
+    if (!input.authorUserId) return { blocked: "unknown_author" };
+    const assigneeId = scope.summary.assigneeId;
+    if (
+      assigneeId !== null &&
+      assigneeId !== MAVEN_ASSIGNEE_ID &&
+      assigneeId !== input.authorUserId
+    ) {
+      const assignable = await getAssignableUsers(scope.db, this.name);
+      const assignee = assignable.find((member) => member.id === assigneeId);
+      return {
+        blocked: "assigned_to",
+        assigneeName: assignee?.name ?? "a teammate",
+      };
+    }
+    const [project, settings] = await Promise.all([
+      new ProjectService(scope.db).getProjectById(this.name),
+      new ProjectService(scope.db).getSettings(this.name),
+    ]);
+    if (!project) return { error: "conversation_unavailable" };
+    const publicChild = await this.subAgent(
+      MavenChatAgent,
+      scope.summary.publicChildName,
+    );
+    const sent = await publicChild.appendBotMessageFromSidechat({
+      messageId: `sidechat-reply:${input.toolCallId}`,
+      text: input.text,
+      senderName: settings?.botName ?? null,
+      autoCloseMinutes: settings?.autoCloseMinutes ?? null,
+    });
+    if (!sent) return { error: "conversation_unavailable" };
+    const conversation = await publicChild.getPublicSnapshot();
+    try {
+      await deliverBotMessageToCustomerChannel({
+        env: this.env,
+        chatService: this.publicStore(),
+        project: { id: project.id, slug: project.slug, name: project.name },
+        conversation: conversation.conversation,
+        message: sent,
+      });
+    } catch (error) {
+      logError("sidechat_reply.customer_delivery_failed", error, {
+        conversationId: input.conversationId,
+        messageId: sent.id,
+      });
+    }
+    return { sent: true, messageId: sent.id };
+  }
+
+  async assignConversationFromSidechat(
+    input: SidechatGatewayContext & {
+      authorUserId: string;
+      authorDisplayName: string | null;
+      assigneeId: string;
+      instructions: string | null;
+    },
+  ): Promise<{ ok: true } | { error: string }> {
+    const scope = await this.sidechatActionScope(input);
+    if (!scope.ok) return { error: "conversation_unavailable" };
+    const assignable = await getAssignableUsers(scope.db, this.name);
+    const actorName = assignable.find((member) => member.id === input.authorUserId)
+      ?.name ?? input.authorDisplayName;
+    const result = await assignConversation({
+      db: scope.db,
+      chatService: this.publicStore(),
+      projectId: this.name,
+      conversationId: input.conversationId,
+      assigneeId: input.assigneeId,
+      actorName,
+      instructions: input.assigneeId === MAVEN_ASSIGNEE_ID
+        ? input.instructions
+        : undefined,
+    });
+    return "error" in result ? { error: result.error } : { ok: true };
+  }
+
+  async closeConversationFromSidechat(
+    input: SidechatGatewayContext,
+  ): Promise<{ ok: true } | { error: string }> {
+    const scope = await this.sidechatActionScope(input);
+    if (!scope.ok) return { error: "conversation_unavailable" };
+    const result = await closeConversation({
+      chatService: this.publicStore(),
+      projectId: this.name,
+      conversationId: input.conversationId,
+      closeReason: "resolved",
+    });
+    return "error" in result ? { error: result.error } : { ok: true };
+  }
+
+  async blockCustomerFromSidechat(
+    input: SidechatGatewayContext & { reason: string },
+  ): Promise<{ ok: true } | { error: string }> {
+    const scope = await this.sidechatActionScope(input);
+    if (!scope.ok) return { error: "conversation_unavailable" };
+    try {
+      const result = await blockCustomer({
+        db: scope.db,
+        chatService: this.publicStore(),
+        projectId: this.name,
+        conversationId: input.conversationId,
+        visitorId: scope.summary.visitorId,
+        visitorEmail: scope.summary.visitorEmail,
+        reason: input.reason,
+        bannedBy: "agent",
+      });
+      return "error" in result ? { error: result.error } : { ok: true };
+    } catch (error) {
+      logError("sidechat_action.block_customer_failed", error, {
+        conversationId: input.conversationId,
+      });
+      return { error: "failed" };
+    }
+  }
+
+  async decidePendingAction(
+    input: SidechatGatewayContext & {
+      authorUserId: string;
+      decision: "approve" | "reject";
+    },
+  ): Promise<SidechatDecideResult> {
+    const scope = await this.sidechatActionScope(input);
+    if (!scope.ok) return { error: "nothing_pending" };
+    if (!input.authorUserId) return { error: "unknown_author" };
+    const sidechat = await this.subAgent(MavenChatAgent, input.childName);
+    const responded = await sidechat.respondToPendingApproval(
+      input.decision === "approve",
+    );
+    if (!responded) return { error: "nothing_pending" };
+    return { ok: true, willRun: input.decision === "approve" };
+  }
+
+  private publicStore(): PublicConversationStore {
+    return createPublicConversationStore({
+      db: drizzle(this.env.DB),
+      env: this.env,
     });
   }
 

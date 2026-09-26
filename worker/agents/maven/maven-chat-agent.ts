@@ -19,6 +19,7 @@ import {
   stepCountIs,
   streamText,
   type LanguageModel,
+  type ModelMessage,
   type UIMessage,
 } from "ai";
 import type {
@@ -91,6 +92,7 @@ import {
   removeLegacyProjectToolParts,
   removeAbandonedApprovalParts,
   sanitizePrivateMessageForPersistence,
+  readSidechatUserMeta,
 } from "../sidechat/private-tool-payload";
 import {
   createReplyDraftTool,
@@ -173,7 +175,20 @@ import { mavenAssignedSystemContent } from "../../services/maven-assignment";
 import { logError, logInfo, logWarn } from "../../observability";
 import { resolvePendingPublicContactUpdate } from "./public/public-human-mode";
 import { hasSettledReplyDraft } from "../../services/sidechat-status";
-import type { SidechatTurnOrigin } from "../../services/start-sidechat-turn";
+import type {
+  SidechatTurnOrigin,
+  StartSidechatTurnInput,
+} from "../../services/start-sidechat-turn";
+import {
+  buildSidechatActionTools,
+  DECIDE_PENDING_ACTION_TOOL_NAME,
+  REPLY_TO_CONVERSATION_TOOL_NAME,
+  ASSIGN_CONVERSATION_TOOL_NAME,
+  CLOSE_CONVERSATION_TOOL_NAME,
+  BLOCK_CUSTOMER_TOOL_NAME,
+  type SidechatDecideResult,
+  type SidechatReplyResult,
+} from "../sidechat/action-tools";
 
 type SidechatDataParts = Record<string, unknown> & {
   "turn-accepted": { messageId: string };
@@ -237,7 +252,39 @@ interface SidechatTurnParent extends SidechatStatusUpdater {
   getSidechatContext(
     childName: string,
     conversationId: string,
+    turn: {
+      origin: SidechatCustomerContext["origin"];
+      authorUserId: string;
+      pendingApproval: SidechatCustomerContext["pendingApproval"];
+    },
   ): Promise<SidechatCustomerContext>;
+  replyToConversation(
+    input: SidechatGatewayContext & {
+      authorUserId: string;
+      toolCallId: string;
+      text: string;
+    },
+  ): Promise<SidechatReplyResult>;
+  assignConversationFromSidechat(
+    input: SidechatGatewayContext & {
+      authorUserId: string;
+      authorDisplayName: string | null;
+      assigneeId: string;
+      instructions: string | null;
+    },
+  ): Promise<{ ok: true } | { error: string }>;
+  closeConversationFromSidechat(
+    input: SidechatGatewayContext,
+  ): Promise<{ ok: true } | { error: string }>;
+  blockCustomerFromSidechat(
+    input: SidechatGatewayContext & { reason: string },
+  ): Promise<{ ok: true } | { error: string }>;
+  decidePendingAction(
+    input: SidechatGatewayContext & {
+      authorUserId: string;
+      decision: "approve" | "reject";
+    },
+  ): Promise<SidechatDecideResult>;
   searchSidechatProjectTools(
     input: SidechatGatewayContext & {
       query: string;
@@ -331,9 +378,16 @@ async function executeSidechatTurn(input: {
       input.writer.write(buildTurnAcceptedPart(input.submittedMessageId));
     }
     await input.parent.updateSidechatSummary(input.conversationId, "working");
+    const turnMeta = readTriggeringUserMeta(input.agent.messages);
+    const pendingApproval = describePendingApproval(input.agent.messages);
     const context = await input.parent.getSidechatContext(
       input.agent.name,
       input.conversationId,
+      {
+        origin: turnMeta.origin,
+        authorUserId: turnMeta.authorUserId,
+        pendingApproval,
+      },
     );
     if (context.archivedAt !== null) {
       await discardArchivedSubmission(input.agent, input.submittedMessageId);
@@ -353,6 +407,35 @@ async function executeSidechatTurn(input: {
     input.agent.pendingKnowledgeChanges = knowledgeChangePreviews;
     const tools: ToolSet = {
       present_reply_draft: createReplyDraftTool(),
+      ...buildSidechatActionTools({
+        replyToConversation: (text, toolCallId) =>
+          input.parent.replyToConversation({
+            ...gatewayContext,
+            authorUserId: turnMeta.authorUserId,
+            toolCallId,
+            text,
+          }),
+        assignConversation: (assigneeId, instructions) =>
+          input.parent.assignConversationFromSidechat({
+            ...gatewayContext,
+            authorUserId: turnMeta.authorUserId,
+            authorDisplayName: turnMeta.authorDisplayName,
+            assigneeId,
+            instructions,
+          }),
+        closeConversation: () =>
+          input.parent.closeConversationFromSidechat(gatewayContext),
+        blockCustomer: (reason) =>
+          input.parent.blockCustomerFromSidechat({ ...gatewayContext, reason }),
+        decidePendingAction: pendingApproval
+          ? (decision) =>
+            input.parent.decidePendingAction({
+              ...gatewayContext,
+              authorUserId: turnMeta.authorUserId,
+              decision,
+            })
+          : undefined,
+      }),
       ...buildSidechatKnowledgeTools({
         list: (knowledgeInput) =>
           input.parent.listSidechatKnowledge({
@@ -434,6 +517,13 @@ async function executeSidechatTurn(input: {
     const modelMessages = await convertToModelMessages(
       selectSidechatModelMessages(input.agent.messages, input.continuation),
     );
+    logInfo("sidechat_turn.model_view", {
+      childName: input.agent.name,
+      conversationId: input.conversationId,
+      origin: turnMeta.origin,
+      pendingApproval: pendingApproval !== null,
+      modelMessageCount: modelMessages.length,
+    });
     const result = streamText({
       model,
       system: buildSidechatSystemPrompt(context),
@@ -536,6 +626,7 @@ async function executeSidechatTurn(input: {
             },
           },
         ],
+        ...SIDECHAT_ACTION_TOOL_PRESENTATIONS,
       ]),
       Date.now,
       seedToolCalls,
@@ -593,10 +684,21 @@ async function executeSidechatTurn(input: {
       }) &&
       input.abortSignal?.aborted !== true
     ) {
+      const responseMessages = (await result.response).messages;
+      const unanswered = stripUnansweredToolCalls(responseMessages);
+      const wrapUpInstruction = unanswered.pending.length > 0
+        ? `You just paused for approval before running: ${unanswered.pending.map((call) => `${call.toolName} with ${call.input}`).join("; ")}. Write the four-part approval request now. Do not call tools.`
+        : "Write a short chat reply now. Do not call tools.";
       const wrapUp = streamText({
         model,
-        system: `${buildSidechatSystemPrompt(context)}\n\nWrite a short chat reply now. Do not call tools.`,
-        messages: [...modelMessages, ...(await result.response).messages],
+        system: buildSidechatSystemPrompt(context),
+        // Providers reject a prompt that ends with a model turn, so the
+        // instruction rides in as the closing user message.
+        messages: [
+          ...modelMessages,
+          ...unanswered.messages,
+          { role: "user", content: `[${wrapUpInstruction}]` },
+        ],
         toolChoice: "none",
         maxRetries: 4,
         onError({ error }) {
@@ -684,12 +786,39 @@ export function readSubmittedUiMessageId(
   return submittedMessageExists ? submittedMessageId : null;
 }
 
+// A continuation that executes an approved tool must end on the message that
+// holds the approval response (the SDK reads responses from the last message
+// only), so anything the teammate and Maven said after it is left out of the
+// model view. The stored transcript is untouched.
+function cutAfterRespondedApproval(messages: UIMessage[]): UIMessage[] {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "assistant") continue;
+    const approvalPartIndex = message.parts.findIndex((part) =>
+      isToolUIPart(part) && part.state === "approval-responded"
+    );
+    if (approvalPartIndex === -1) continue;
+    // Steps after the approval (the wrap-up text that asked for it) would
+    // become a trailing assistant turn after the approval response, so the
+    // model view of this message stops at the next step boundary.
+    const nextStepIndex = message.parts.findIndex((part, partIndex) =>
+      partIndex > approvalPartIndex && part.type === "step-start"
+    );
+    const trimmed = nextStepIndex === -1
+      ? message
+      : { ...message, parts: message.parts.slice(0, nextStepIndex) };
+    return [...messages.slice(0, index), trimmed];
+  }
+  return messages;
+}
+
 export function selectSidechatModelMessages(
   messages: UIMessage[],
   continuation = false,
 ): UIMessage[] {
+  const scoped = continuation ? cutAfterRespondedApproval(messages) : messages;
   const eligible = removeAbandonedApprovalParts(
-    removeLegacyProjectToolParts(messages),
+    removeLegacyProjectToolParts(scoped),
     continuation,
   );
   if (eligible.length <= MAX_PRIVATE_MODEL_MESSAGES) return eligible;
@@ -785,6 +914,197 @@ export function hasPendingSidechatApproval(messages: UIMessage[]): boolean {
     }
   }
   return false;
+}
+
+function findPendingApprovalPart(
+  messages: UIMessage[],
+): { messageIndex: number; partIndex: number } | null {
+  const seenToolCalls = new Set<string>();
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const message = messages[messageIndex];
+    if (message?.role !== "assistant") continue;
+    for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
+      const part = message.parts[partIndex];
+      if (!part || !isToolUIPart(part)) continue;
+      if (seenToolCalls.has(part.toolCallId)) continue;
+      seenToolCalls.add(part.toolCallId);
+      if (
+        (getToolName(part) === "call_project_tool" ||
+          getToolName(part) === APPLY_KNOWLEDGE_CHANGE_TOOL_NAME) &&
+        part.state === "approval-requested"
+      ) {
+        return { messageIndex, partIndex };
+      }
+    }
+  }
+  return null;
+}
+
+// What Maven may quote when it asks for approval: the tool's presentation and
+// the redacted input already in the transcript, never the encrypted payload.
+function describePendingApproval(
+  messages: UIMessage[],
+): { toolCallId: string; description: string } | null {
+  const found = findPendingApprovalPart(messages);
+  if (!found) return null;
+  const message = messages[found.messageIndex]!;
+  const part = message.parts[found.partIndex]!;
+  if (!isToolUIPart(part)) return null;
+  const toolCallId = part.toolCallId;
+  let label = getToolName(part) === APPLY_KNOWLEDGE_CHANGE_TOOL_NAME
+    ? "Knowledge change"
+    : "Connected tool";
+  for (const candidate of message.parts) {
+    const record = candidate as Record<string, unknown>;
+    if (
+      record.type === "data-tool-approval" &&
+      isRecordValue(record.data) &&
+      record.data.toolCallId === toolCallId &&
+      isRecordValue(record.data.tool) &&
+      typeof record.data.tool.displayName === "string"
+    ) {
+      const source = isRecordValue(record.data.tool.source) &&
+          typeof record.data.tool.source.name === "string"
+        ? ` via ${record.data.tool.source.name}`
+        : "";
+      label = `${record.data.tool.displayName}${source}`;
+    }
+    if (
+      record.type === "data-knowledge-change" &&
+      isRecordValue(record.data) &&
+      record.data.toolCallId === toolCallId &&
+      typeof record.data.action === "string"
+    ) {
+      label = `Knowledge change: ${record.data.action}`;
+    }
+  }
+  const inputText = part.input === undefined
+    ? ""
+    : JSON.stringify(part.input).slice(0, 400);
+  return {
+    toolCallId,
+    description: inputText ? `${label} with ${inputText}` : label,
+  };
+}
+
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// The user message that started the current turn carries where the reply goes
+// and who asked. Dashboard turns are the default when nothing is stamped.
+function readTriggeringUserMeta(messages: UIMessage[]): {
+  origin: SidechatCustomerContext["origin"];
+  actorUserId: string;
+  authorUserId: string;
+  authorDisplayName: string | null;
+} {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "user") continue;
+    const meta = readSidechatUserMeta(message);
+    const origin = meta?.origin;
+    return {
+      origin: origin === "mcp" || origin === "telegram" || origin === "slack" ||
+          origin === "email" || origin === "system"
+        ? origin
+        : "dashboard",
+      actorUserId: meta?.actorUserId ?? "",
+      authorUserId: meta?.authorUserId ?? "",
+      authorDisplayName: meta?.authorDisplayName ?? null,
+    };
+  }
+  return {
+    origin: "dashboard",
+    actorUserId: "",
+    authorUserId: "",
+    authorDisplayName: null,
+  };
+}
+
+const SIDECHAT_ACTION_TOOL_PRESENTATIONS: Array<
+  [string, SidechatToolApprovalContext]
+> = [
+  REPLY_TO_CONVERSATION_TOOL_NAME,
+  ASSIGN_CONVERSATION_TOOL_NAME,
+  CLOSE_CONVERSATION_TOOL_NAME,
+  BLOCK_CUSTOMER_TOOL_NAME,
+  DECIDE_PENDING_ACTION_TOOL_NAME,
+].map((name) => [
+  name,
+  {
+    safety: "write" as const,
+    tool: {
+      displayName: {
+        [REPLY_TO_CONVERSATION_TOOL_NAME]: "Reply",
+        [ASSIGN_CONVERSATION_TOOL_NAME]: "Assign",
+        [CLOSE_CONVERSATION_TOOL_NAME]: "Close",
+        [BLOCK_CUSTOMER_TOOL_NAME]: "Block",
+        [DECIDE_PENDING_ACTION_TOOL_NAME]: "Decide",
+      }[name] ?? name,
+      source: { kind: "http" as const, name: "Conversation", icon: null },
+    },
+  },
+]);
+
+// Newest assistant message whose approval was answered but whose tool call
+// has not produced output yet: the one a continuation must resume.
+function findRespondedApprovalMessageIndex(messages: UIMessage[]): number {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "assistant") continue;
+    const responded = message.parts.some((part) =>
+      isToolUIPart(part) && part.state === "approval-responded"
+    );
+    if (responded) return index;
+  }
+  return -1;
+}
+
+function readDecidedApproval(message: UIMessage): "approve" | "reject" | null {
+  for (const part of message.parts) {
+    if (!isToolUIPart(part)) continue;
+    if (getToolName(part) !== DECIDE_PENDING_ACTION_TOOL_NAME) continue;
+    if (part.state !== "output-available") continue;
+    const output = part.output as Record<string, unknown> | undefined;
+    if (output?.ok !== true) continue;
+    return output.willRun === true ? "approve" : "reject";
+  }
+  return null;
+}
+
+// The wrap-up model call cannot include a tool call that has no result (the
+// provider rejects it), which is exactly the state after an approval pause.
+// Drop those calls from the wrap-up view and hand back what they were.
+function stripUnansweredToolCalls(messages: ModelMessage[]): {
+  messages: ModelMessage[];
+  pending: Array<{ toolName: string; input: string }>;
+} {
+  const answered = new Set<string>();
+  for (const message of messages) {
+    if (message.role !== "tool" || typeof message.content === "string") continue;
+    for (const part of message.content) {
+      if (part.type === "tool-result") answered.add(part.toolCallId);
+    }
+  }
+  const pending: Array<{ toolName: string; input: string }> = [];
+  const stripped = messages.flatMap((message) => {
+    if (message.role !== "assistant" || typeof message.content === "string") {
+      return [message];
+    }
+    const content = message.content.filter((part) => {
+      if (part.type === "tool-call" && !answered.has(part.toolCallId)) {
+        pending.push({
+          toolName: part.toolName,
+          input: JSON.stringify(part.input).slice(0, 400),
+        });
+        return false;
+      }
+      return part.type !== "tool-approval-request";
+    });
+    return content.length > 0 ? [{ ...message, content }] : [];
+  });
+  return { messages: stripped, pending };
 }
 
 function conversationIdFromChildName(childName: string): string {
@@ -1022,6 +1342,26 @@ export class MavenChatAgent extends AIChatAgent<
     ) {
       await parent.setLastSidechatTurnOrigin(conversationId, null);
     }
+    if (submittedMessageId) {
+      // Client metadata is never trusted; the verified claims stamp the turn.
+      await this.persistMessages(this.messages.map((message) =>
+        message.id === submittedMessageId
+          ? {
+            ...message,
+            metadata: {
+              ...(isRecordValue(message.metadata) ? message.metadata : {}),
+              origin: "dashboard",
+              actorUserId: claims.userId,
+              authorUserId: claims.userId,
+              authorDisplayName: null,
+              channelMessageId: null,
+              replyThreadId: null,
+              replyRecipient: null,
+            },
+          }
+          : message
+      ));
+    }
 
     const childName = this.name;
     const stream = createUIMessageStream<SidechatUIMessage>({
@@ -1051,29 +1391,64 @@ export class MavenChatAgent extends AIChatAgent<
     return createUIMessageStreamResponse({ stream });
   }
 
-  async submitServerSidechatTurn(input: {
-    text: string;
-    actorUserId: string;
-  }): Promise<{ accepted: true } | { accepted: false }> {
-    if (parseMavenChildName(this.name).kind !== "sidechat") {
-      return { accepted: false };
-    }
+  async submitServerSidechatTurn(
+    input: StartSidechatTurnInput,
+  ): Promise<"accepted" | "rejected" | "duplicate"> {
+    if (parseMavenChildName(this.name).kind !== "sidechat") return "rejected";
     const conversationId = conversationIdFromChildName(this.name);
     const parent = await this.parentAgent(MavenProjectAgent);
     if (!await parent.isSidechatOperational(this.name, conversationId)) {
-      return { accepted: false };
+      return "rejected";
     }
+    const id = input.channelMessageId ?? crypto.randomUUID();
+    if (this.messages.some((message) => message.id === id)) return "duplicate";
     const userMessage: SidechatUIMessage = {
-      id: crypto.randomUUID(),
+      id,
       role: "user",
       parts: [{ type: "text", text: input.text }],
+      metadata: {
+        createdAt: Date.now(),
+        origin: input.origin,
+        actorUserId: input.actorUserId,
+        authorUserId: input.authorUserId ?? "",
+        authorDisplayName: input.authorDisplayName ?? null,
+        channelMessageId: input.channelMessageId ?? null,
+        replyThreadId: input.replyThreadId ?? null,
+        replyRecipient: input.replyRecipient ?? null,
+      },
     };
     await this.persistMessages([...this.messages, userMessage]);
     this.ctx.waitUntil(this.runServerSidechatTurn({
       actorUserId: input.actorUserId,
       submittedMessageId: userMessage.id,
+      continuation: false,
     }));
-    return { accepted: true };
+    return "accepted";
+  }
+
+  // Flip the newest pending approval to responded. The approved tool runs at
+  // the start of the next continuation turn, same as the dashboard buttons.
+  async respondToPendingApproval(approved: boolean): Promise<boolean> {
+    if (parseMavenChildName(this.name).kind !== "sidechat") return false;
+    const found = findPendingApprovalPart(this.messages);
+    if (!found) return false;
+    const next = this.messages.map((message, messageIndex) => {
+      if (messageIndex !== found.messageIndex) return message;
+      return {
+        ...message,
+        parts: message.parts.map((part, partIndex) => {
+          if (partIndex !== found.partIndex || !isToolUIPart(part)) return part;
+          if (part.state !== "approval-requested") return part;
+          return {
+            ...part,
+            state: "approval-responded" as const,
+            approval: { ...part.approval, approved },
+          };
+        }),
+      };
+    });
+    await this.persistMessages(next as UIMessage[]);
+    return true;
   }
 
   async hasSettledReplyDraft(): Promise<boolean> {
@@ -1118,19 +1493,38 @@ export class MavenChatAgent extends AIChatAgent<
 
   private async runServerSidechatTurn(input: {
     actorUserId: string;
-    submittedMessageId: string;
+    submittedMessageId: string | null;
+    continuation: boolean;
   }): Promise<void> {
     const conversationId = conversationIdFromChildName(this.name);
     const parent = await this.parentAgent(MavenProjectAgent);
     const childName = this.name;
+    // A continuation resumes the assistant message that holds the approved
+    // tool call, exactly like the dashboard's approval button: the tool's
+    // output must land on an existing tool part or the stream processor throws.
+    const resumeIndex = input.continuation
+      ? findRespondedApprovalMessageIndex(this.messages)
+      : -1;
+    if (input.continuation && resumeIndex === -1) {
+      logWarn("sidechat_turn.continuation_without_approval", {
+        childName,
+        conversationId,
+      });
+      return;
+    }
+    const resumeMessage = resumeIndex === -1
+      ? undefined
+      : (this.messages[resumeIndex] as SidechatUIMessage);
     try {
       const stream = createUIMessageStream<SidechatUIMessage>({
-        originalMessages: this.messages as SidechatUIMessage[],
+        originalMessages: (resumeIndex === -1
+          ? this.messages
+          : this.messages.slice(0, resumeIndex + 1)) as SidechatUIMessage[],
         onError(error) {
           logError("sidechat_turn.response_stream_error", error, {
             childName,
             conversationId,
-            continuation: false,
+            continuation: input.continuation,
           });
           return "The Sidechat response failed.";
         },
@@ -1142,14 +1536,16 @@ export class MavenChatAgent extends AIChatAgent<
             conversationId,
             actorUserId: input.actorUserId,
             submittedMessageId: input.submittedMessageId,
-            continuation: false,
+            continuation: input.continuation,
             abortSignal: undefined,
             onFinish: async () => undefined,
           });
         },
       });
       let last: SidechatUIMessage | undefined;
-      for await (const message of readUIMessageStream({ stream })) {
+      for await (
+        const message of readUIMessageStream({ message: resumeMessage, stream })
+      ) {
         last = message;
       }
       if (!last) {
@@ -1166,8 +1562,8 @@ export class MavenChatAgent extends AIChatAgent<
       await this.persistMessages(persisted);
       await this.onChatResponse({
         message: last,
-        requestId: input.submittedMessageId,
-        continuation: false,
+        requestId: input.submittedMessageId ?? last.id,
+        continuation: input.continuation,
         status: "completed",
       });
     } catch (error) {
@@ -1684,6 +2080,19 @@ export class MavenChatAgent extends AIChatAgent<
         logInfo("sidechat_turn.completed", turnContext);
       }
       await parent.updateSidechatSummary(conversationId, status);
+      // Both decisions run a continuation: approve executes the tool, reject
+      // lets the SDK record the denial so the call does not dangle.
+      if (
+        !result.continuation &&
+        readDecidedApproval(result.message) !== null
+      ) {
+        const meta = readTriggeringUserMeta(this.messages);
+        this.ctx.waitUntil(this.runServerSidechatTurn({
+          actorUserId: meta.actorUserId,
+          submittedMessageId: null,
+          continuation: true,
+        }));
+      }
     } catch (error) {
       logError("sidechat_turn.complete_failed", error, {
         childName: this.name,
@@ -2177,7 +2586,7 @@ export class MavenChatAgent extends AIChatAgent<
     return this.appendPublicRecord(message, true);
   }
 
-  async appendSidechatDraftAsBot(input: {
+  async appendBotMessageFromSidechat(input: {
     messageId: string;
     text: string;
     senderName: string | null;
