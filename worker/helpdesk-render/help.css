@@ -1384,7 +1384,7 @@ html.help-page-home .help-shell {
   width: 2.25rem;
   height: 2.25rem;
   border-radius: var(--help-search-button-radius);
-  background: var(--brand);
+  background: var(--primary);
   color: var(--primary-foreground);
   border: 0;
   cursor: pointer;
