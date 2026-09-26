@@ -94,7 +94,7 @@ import {
   assignConversation,
   blockCustomer,
   closeConversation,
-  deliverBotMessageToCustomerChannel,
+  deliverMessageToCustomerChannel,
 } from "../../services/conversation-actions";
 import { createPublicConversationStore } from "../../conversations/create-public-conversation-store";
 import type { PublicConversationStore } from "../../conversations/public-conversation-store";
@@ -104,6 +104,7 @@ import {
 } from "../../services/assignable-users";
 import { MAVEN_ASSIGNEE_ID } from "../../../shared/maven-assignee";
 import { buildConversationDeepLink } from "../../lib/deep-links";
+import { readConversationChannelMetadata } from "../../../shared/maven-conversation";
 import type {
   SidechatContactResult,
   SidechatDecideResult,
@@ -111,6 +112,7 @@ import type {
 } from "../sidechat/action-tools";
 import { CustomerIdentityService } from "../../services/customer-identity-service";
 import type { SidechatMessageOrigin } from "../../../shared/sidechat-agent";
+import type { ActiveHumanRoute } from "../../chat-runtime/types";
 import {
   buildSidechatHttpToolDescriptor,
   buildSidechatKnowledgeDescriptor,
@@ -335,6 +337,19 @@ function parseMcpToolPolicy(row: McpToolPolicyRow): SidechatToolDescriptor | nul
   } catch {
     return null;
   }
+}
+
+// Where a teammate who takes the conversation from a channel keeps hearing
+// from the customer.
+function humanRouteForOrigin(
+  origin: SidechatMessageOrigin,
+  userId: string,
+): ActiveHumanRoute | null {
+  if (origin === "telegram" || origin === "slack") {
+    return { kind: "agent_channel", channel: origin };
+  }
+  if (origin === "email") return { kind: "email", userId };
+  return null;
 }
 
 function readStoredSidechatTurnOrigin(
@@ -659,6 +674,18 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
   ): Promise<MavenConversationSummary | null> {
     return this.conversationDirectory().findByTelegramThreadId(
       telegramThreadId,
+    );
+  }
+
+  recordChannelMessage(
+    channel: "telegram" | "slack",
+    externalId: string,
+    conversationId: string,
+  ): void {
+    this.conversationDirectory().recordChannelMessage(
+      channel,
+      externalId,
+      conversationId,
     );
   }
 
@@ -1225,9 +1252,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     const previousStatus = this.conversationDirectory().getConversation(
       conversationId,
     )?.sidechatStatus ?? null;
-    if (previousStatus === "working" || previousStatus === "waiting_approval") {
-      return "busy";
-    }
+    if (previousStatus === "working") return "busy";
     return this.projectSidechatStatus(conversationId, "working")
       ? "claimed"
       : "failed";
@@ -1282,6 +1307,9 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
             chatId: settings.telegramChatId,
             botName: settings.botName,
             service: new TelegramService(db, this.env.ENCRYPTION_KEY),
+            recordMessage: async (conversationId, messageId) => {
+              this.recordChannelMessage("telegram", messageId, conversationId);
+            },
           }
         : null,
       slack: settings?.slackBotToken && settings.slackChannelId
@@ -1312,7 +1340,8 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     const summary = this.conversationDirectory().getConversation(conversationId);
     if (!summary || summary.sidechatStatus !== status) return;
     const origin = readLastSidechatTurnOrigin(summary.metadata);
-    if (!origin) return;
+    // Email gets one reply, not a status line first.
+    if (!origin || origin === "email") return;
     try {
       const channels = await this.enabledAgentChannels();
       const adapter = channels.find((channel) => channel.channel === origin);
@@ -1335,6 +1364,38 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     }
   }
 
+  // A plain, factual team note for when Maven cannot write one.
+  async postTeamNoteFallback(conversationId: string): Promise<void> {
+    const summary = this.conversationDirectory().getConversation(conversationId);
+    if (!summary || summary.visitorId === "") return;
+    const publicChild = await this.subAgent(
+      MavenChatAgent,
+      summary.publicChildName,
+    );
+    const snapshot = await publicChild.getPublicContextSnapshot({
+      newestMessages: 20,
+    });
+    const name = snapshot.conversation.visitorName?.trim() || "A customer";
+    const who = [
+      snapshot.conversation.visitorName?.trim(),
+      snapshot.conversation.visitorEmail?.trim(),
+    ].filter(Boolean).join(" · ") || "A customer";
+    const last = [...snapshot.messages].reverse().find((message) =>
+      message.author === "visitor"
+    );
+    const quote = last?.content.trim().slice(0, 400) ?? "";
+    await this.mirrorSidechatReply({
+      conversationId,
+      text: [
+        `${name} needs a person`,
+        quote ? `${who} wrote:\n${quote}` : `${who} asked for the team.`,
+      ].join("\n"),
+      origin: "system",
+      replyThreadId: null,
+      replyRecipient: null,
+    });
+  }
+
   // Maven's reply goes back over the channel the teammate wrote from.
   // System-origin notes (escalation) go to every channel and start threads.
   async mirrorSidechatReply(input: {
@@ -1351,6 +1412,22 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       input.conversationId,
     );
     if (!summary || summary.visitorId === "") return;
+    if (input.origin === "system") {
+      // First line is the email subject; the rest is the summary.
+      const lines = text.split("\n");
+      const body = lines.length > 1 ? lines.slice(1).join("\n").trim() : text;
+      try {
+        const publicChild = await this.subAgent(
+          MavenChatAgent,
+          summary.publicChildName,
+        );
+        await publicChild.recordTeamNote(body || text);
+      } catch (error) {
+        logError("sidechat_mirror.record_note_failed", error, {
+          conversationId: input.conversationId,
+        });
+      }
+    }
     const conversationLink = this.conversationLink(input.conversationId);
     let channels: AgentChannelAdapter[];
     try {
@@ -1458,6 +1535,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       conversationId,
       turn: {
         origin: turn.origin,
+        botName: settings?.botName?.trim() || "Maven",
         author: teammates.find((member) =>
           member.id !== MAVEN_ASSIGNEE_ID && member.id === turn.authorUserId
         ) ?? null,
@@ -1471,7 +1549,10 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
           tools:
             `${this.env.BETTER_AUTH_URL}/app/projects/${this.name}/support-chat/tools`,
         },
-        emailSubject: emailThreads?.subject ?? null,
+        emailSubject: emailThreads?.subject ??
+          readConversationChannelMetadata(publicSnapshot.conversation.metadata)
+            .subject ??
+          null,
         pendingApproval: turn.pendingApproval,
       },
       dependencies: {
@@ -1559,7 +1640,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     if (!sent) return { error: "conversation_unavailable" };
     const conversation = await publicChild.getPublicSnapshot();
     try {
-      await deliverBotMessageToCustomerChannel({
+      await deliverMessageToCustomerChannel({
         env: this.env,
         chatService: this.publicStore(),
         project: { id: project.id, slug: project.slug, name: project.name },
@@ -1579,12 +1660,14 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     input: SidechatGatewayContext & {
       authorUserId: string;
       authorDisplayName: string | null;
+      origin: SidechatMessageOrigin;
       assigneeId: string;
       instructions: string | null;
     },
   ): Promise<{ ok: true } | { error: string }> {
     const scope = await this.sidechatActionScope(input);
     if (!scope.ok) return { error: "conversation_unavailable" };
+    if (!input.authorUserId) return { error: "unknown_author" };
     const assignable = await getAssignableUsers(scope.db, this.name);
     const actorName = assignable.find((member) => member.id === input.authorUserId)
       ?.name ?? input.authorDisplayName;
@@ -1598,6 +1681,9 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       instructions: input.assigneeId === MAVEN_ASSIGNEE_ID
         ? input.instructions
         : undefined,
+      route: input.assigneeId === input.authorUserId
+        ? humanRouteForOrigin(input.origin, input.authorUserId)
+        : null,
     });
     return "error" in result ? { error: result.error } : { ok: true };
   }
@@ -1605,10 +1691,15 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
   // Only while the conversation has no customer email: a forwarded mail names
   // the customer in its quoted headers and Maven records that here.
   async setCustomerContactFromSidechat(
-    input: SidechatGatewayContext & { name: string | null; email: string | null },
+    input: SidechatGatewayContext & {
+      authorUserId: string;
+      name: string | null;
+      email: string | null;
+    },
   ): Promise<SidechatContactResult> {
     const scope = await this.sidechatActionScope(input);
     if (!scope.ok) return { error: "conversation_unavailable" };
+    if (!input.authorUserId) return { error: "unknown_author" };
     if (!input.name && !input.email) return { error: "nothing_given" };
     if (scope.summary.visitorEmail?.trim()) return { error: "already_set" };
     const store = this.publicStore();
@@ -1641,10 +1732,11 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
   }
 
   async closeConversationFromSidechat(
-    input: SidechatGatewayContext,
+    input: SidechatGatewayContext & { authorUserId: string },
   ): Promise<{ ok: true } | { error: string }> {
     const scope = await this.sidechatActionScope(input);
     if (!scope.ok) return { error: "conversation_unavailable" };
+    if (!input.authorUserId) return { error: "unknown_author" };
     const result = await closeConversation({
       chatService: this.publicStore(),
       projectId: this.name,
@@ -1655,10 +1747,11 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
   }
 
   async blockCustomerFromSidechat(
-    input: SidechatGatewayContext & { reason: string },
+    input: SidechatGatewayContext & { authorUserId: string; reason: string },
   ): Promise<{ ok: true } | { error: string }> {
     const scope = await this.sidechatActionScope(input);
     if (!scope.ok) return { error: "conversation_unavailable" };
+    if (!input.authorUserId) return { error: "unknown_author" };
     try {
       const result = await blockCustomer({
         db: scope.db,

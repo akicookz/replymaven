@@ -83,6 +83,8 @@ function registerAskMavenTool(
         conversationId: conversation.id,
         text,
         actorUserId: context.userId,
+        authorUserId: context.userId,
+        authorDisplayName: context.userName,
         origin: "mcp",
         env: context.env,
       });

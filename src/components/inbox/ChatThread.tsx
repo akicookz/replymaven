@@ -25,6 +25,7 @@ interface ChatThreadProps {
   loading?: boolean;
   onDeleteMessage?: (messageId: string) => void;
   onSendEmail?: (messageId: string) => void;
+  onUndoEmail?: (messageId: string) => void;
   /** Archived threads are view-only, including historical agent messages. */
   readOnly?: boolean;
   /** Lowercased in-conversation search query (empty when not searching). */
@@ -124,6 +125,7 @@ export default function ChatThread({
   loading,
   onDeleteMessage,
   onSendEmail,
+  onUndoEmail,
   readOnly = false,
   searchQuery,
   activeMatchId,
@@ -347,6 +349,7 @@ export default function ChatThread({
                   conversation={conversation}
                   onDelete={onDeleteMessage}
                   onSendEmail={onSendEmail}
+                  onUndoEmail={onUndoEmail}
                   readOnly={readOnly}
                   isMatch={isMatch}
                   isActiveMatch={isActiveMatch}

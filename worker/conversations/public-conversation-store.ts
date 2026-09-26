@@ -1,3 +1,4 @@
+import type { ActiveHumanRoute } from "../chat-runtime/types";
 import type {
   PublicConversationRecord,
   PublicConversationStatus,
@@ -421,6 +422,22 @@ export interface PublicConversationStore {
     conversationId: string,
     update: PublicEmailThreadUpdate,
   ): Promise<void>;
+  joinHumanRoute(
+    projectId: string,
+    conversationId: string,
+    route: ActiveHumanRoute,
+  ): Promise<void>;
+  scheduleCustomerEmail(
+    projectId: string,
+    conversationId: string,
+    messageId: string,
+    delaySeconds: number,
+  ): Promise<number | null>;
+  cancelCustomerEmail(
+    projectId: string,
+    conversationId: string,
+    messageId: string,
+  ): Promise<{ ok: true; content: string } | { error: "already_sent" | "not_scheduled" | "not_found" }>;
   acquireExternalAction(input: PublicExternalActionLeaseInput): Promise<PublicExternalActionLease | null>;
   releaseExternalAction(input: PublicExternalActionLease): Promise<void>;
   markDelivery(input: PublicDeliveryUpdateInput): Promise<string[]>;

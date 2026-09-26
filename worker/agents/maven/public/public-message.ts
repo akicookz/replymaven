@@ -86,6 +86,8 @@ export function toPublicUiMessage(
     origin: message.origin ?? null,
     externalReplyTo: message.externalReplyTo ?? null,
     rfcMessageId: message.rfcMessageId ?? null,
+    emailScheduledAt: message.emailScheduledAt ?? null,
+    emailScheduleId: message.emailScheduleId ?? null,
   };
   return {
     id: message.id,
@@ -157,6 +159,8 @@ export function fromPublicUiMessage(
     origin: message.metadata.origin ?? null,
     externalReplyTo: message.metadata.externalReplyTo ?? null,
     rfcMessageId: message.metadata.rfcMessageId ?? null,
+    emailScheduledAt: message.metadata.emailScheduledAt ?? null,
+    emailScheduleId: message.metadata.emailScheduleId ?? null,
   };
 }
 

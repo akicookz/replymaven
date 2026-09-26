@@ -116,6 +116,7 @@ function adaptPublicMessage(
     userId: metadata.userId,
     createdAt: new Date(metadata.createdAt).toISOString(),
     emailedAt: optionalIso(metadata.emailedAt),
+    emailScheduledAt: optionalIso(metadata.emailScheduledAt ?? null),
     deliveredAt: optionalIso(metadata.deliveredAt),
     readAt: optionalIso(metadata.readAt),
   };

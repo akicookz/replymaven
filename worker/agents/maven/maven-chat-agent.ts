@@ -80,6 +80,7 @@ import {
   joinActiveHumanRoute,
   mergeChatStateForPersistence,
   parseChatState,
+  type ActiveHumanRoute,
   type ChatOwnershipEvent,
   type ConversationChatState,
 } from "../../chat-runtime/types";
@@ -164,9 +165,14 @@ import { BillingService } from "../../services/billing-service";
 import { CustomerIdentityService } from "../../services/customer-identity-service";
 import { GuidelineService } from "../../services/guideline-service";
 import { ProjectService } from "../../services/project-service";
+import { deliverMessageToCustomerChannel } from "../../services/conversation-actions";
+import { createPublicConversationStore } from "../../conversations/create-public-conversation-store";
 import { TelegramService } from "../../services/telegram-service";
 import { SlackService } from "../../services/slack-service";
-import { listEnabledAgentChannels } from "../../services/enabled-agent-channels";
+import {
+  listEnabledAgentChannels,
+  telegramMessageRecorder,
+} from "../../services/enabled-agent-channels";
 import { forwardVisitorToJoinedHumans } from "../../services/run-agent-channel-outbound";
 import { buildEmailChannelEnablement } from "../../services/email-agent-channel";
 import { ToolService } from "../../services/tool-service";
@@ -272,18 +278,23 @@ interface SidechatTurnParent extends SidechatStatusUpdater {
     input: SidechatGatewayContext & {
       authorUserId: string;
       authorDisplayName: string | null;
+      origin: SidechatCustomerContext["origin"];
       assigneeId: string;
       instructions: string | null;
     },
   ): Promise<{ ok: true } | { error: string }>;
   closeConversationFromSidechat(
-    input: SidechatGatewayContext,
+    input: SidechatGatewayContext & { authorUserId: string },
   ): Promise<{ ok: true } | { error: string }>;
   setCustomerContactFromSidechat(
-    input: SidechatGatewayContext & { name: string | null; email: string | null },
+    input: SidechatGatewayContext & {
+      authorUserId: string;
+      name: string | null;
+      email: string | null;
+    },
   ): Promise<SidechatContactResult>;
   blockCustomerFromSidechat(
-    input: SidechatGatewayContext & { reason: string },
+    input: SidechatGatewayContext & { authorUserId: string; reason: string },
   ): Promise<{ ok: true } | { error: string }>;
   decidePendingAction(
     input: SidechatGatewayContext & {
@@ -433,18 +444,27 @@ async function executeSidechatTurn(input: {
             ...gatewayContext,
             authorUserId: turnMeta.authorUserId,
             authorDisplayName: turnMeta.authorDisplayName,
+            origin: turnMeta.origin,
             assigneeId,
             instructions,
           }),
         closeConversation: () =>
-          input.parent.closeConversationFromSidechat(gatewayContext),
+          input.parent.closeConversationFromSidechat({
+            ...gatewayContext,
+            authorUserId: turnMeta.authorUserId,
+          }),
         setCustomerContact: (contact) =>
           input.parent.setCustomerContactFromSidechat({
             ...gatewayContext,
+            authorUserId: turnMeta.authorUserId,
             ...contact,
           }),
         blockCustomer: (reason) =>
-          input.parent.blockCustomerFromSidechat({ ...gatewayContext, reason }),
+          input.parent.blockCustomerFromSidechat({
+            ...gatewayContext,
+            authorUserId: turnMeta.authorUserId,
+            reason,
+          }),
         decidePendingAction: pendingApproval
           ? (decision) =>
             input.parent.decidePendingAction({
@@ -1083,9 +1103,15 @@ function findRespondedApprovalMessageIndex(messages: UIMessage[]): number {
 
 // Visible text of a turn. A continuation resumes an earlier message, so only
 // the text after the answered approval is new.
-function extractMirrorText(message: UIMessage, continuation: boolean): string {
+function extractMirrorText(
+  message: UIMessage,
+  continuation: boolean,
+  basePartCount?: number,
+): string {
   let from = 0;
-  if (continuation) {
+  if (continuation && basePartCount !== undefined) {
+    from = basePartCount;
+  } else if (continuation) {
     for (let index = message.parts.length - 1; index >= 0; index -= 1) {
       const part = message.parts[index];
       if (isToolUIPart(part) && part.state !== "approval-requested") {
@@ -1160,6 +1186,9 @@ export class MavenChatAgent extends AIChatAgent<
   AppEnv,
   PublicChatChildState | Record<string, never>
 > {
+  // Parts a resumed message already had when its continuation started, so
+  // the mirror only sends what the continuation added.
+  private continuationBase = new Map<string, number>();
   messageConcurrency = "queue" as const;
   chatRecovery = true as const;
   maxPersistedMessages: number | undefined;
@@ -1384,6 +1413,11 @@ export class MavenChatAgent extends AIChatAgent<
     ) {
       await parent.setLastSidechatTurnOrigin(conversationId, null);
     }
+    if (options.continuation === true) {
+      const resumeIndex = findRespondedApprovalMessageIndex(this.messages);
+      const resumed = resumeIndex === -1 ? null : this.messages[resumeIndex];
+      if (resumed) this.continuationBase.set(resumed.id, resumed.parts.length);
+    }
     if (submittedMessageId) {
       // Client metadata is never trusted; the verified claims stamp the turn.
       await this.persistMessages(this.messages.map((message) =>
@@ -1500,13 +1534,7 @@ export class MavenChatAgent extends AIChatAgent<
     if (meta.origin !== "system") return;
     try {
       const parent = await this.parentAgent(MavenProjectAgent);
-      await parent.mirrorSidechatReply({
-        conversationId: conversationIdFromChildName(this.name),
-        text: "Needs human review\n\nA customer asked for the team. Open the conversation for details.",
-        origin: "system",
-        replyThreadId: null,
-        replyRecipient: null,
-      });
+      await parent.postTeamNoteFallback(conversationIdFromChildName(this.name));
     } catch (error) {
       logError("sidechat_mirror.fallback_failed", error, { childName: this.name });
     }
@@ -1517,8 +1545,11 @@ export class MavenChatAgent extends AIChatAgent<
     continuation: boolean,
   ): Promise<void> {
     const meta = readTriggeringUserMeta(this.messages);
+    const basePartCount = this.continuationBase.get(message.id);
+    this.continuationBase.delete(message.id);
     if (meta.origin === "dashboard" || meta.origin === "mcp") return;
-    const text = extractMirrorText(message, continuation);
+    // A continuation resumes a message whose earlier text was already sent.
+    const text = extractMirrorText(message, continuation, basePartCount);
     if (!text) return;
     const trigger = [...this.messages].reverse().find((m) => m.role === "user");
     const triggerMeta = trigger ? readSidechatUserMeta(trigger) : null;
@@ -1602,6 +1633,9 @@ export class MavenChatAgent extends AIChatAgent<
     const resumeMessage = resumeIndex === -1
       ? undefined
       : (this.messages[resumeIndex] as SidechatUIMessage);
+    if (resumeMessage) {
+      this.continuationBase.set(resumeMessage.id, resumeMessage.parts.length);
+    }
     try {
       const stream = createUIMessageStream<SidechatUIMessage>({
         originalMessages: (resumeIndex === -1
@@ -1908,6 +1942,7 @@ export class MavenChatAgent extends AIChatAgent<
               chatId: settings.telegramChatId,
               botName: settings.botName,
               service: new TelegramService(db, this.env.ENCRYPTION_KEY),
+              recordMessage: telegramMessageRecorder(this.env, projectId),
             }
           : null,
         slack: settings?.slackBotToken && settings.slackChannelId
@@ -3252,6 +3287,150 @@ export class MavenChatAgent extends AIChatAgent<
   ): Promise<void> {
     this.assertPublicInput(projectId, conversationId);
     await this.updatePublicEmailThread(update);
+  }
+
+  // A teammate who took the conversation from a channel starts receiving the
+  // customer's messages there without having to reply first.
+  async joinPublicHumanRoute(route: ActiveHumanRoute): Promise<void> {
+    await this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      if (state.archivedAt !== null || state.purgeStartedAt !== null) return;
+      const chatState = this.parseStoredChatState(state);
+      if (chatState.aiParticipation !== "human_only") return;
+      const routes = joinActiveHumanRoute(chatState.activeHumanRoutes, route);
+      if (routes === chatState.activeHumanRoutes) return;
+      const saved = this.saveNextPublicState(state, {
+        chatState: { ...chatState, activeHumanRoutes: routes },
+        updatedAt: Date.now(),
+      });
+      await this.publishPublicProjection(saved, this.readPublicMessages());
+    });
+  }
+
+  // Human replies on an email conversation wait a few seconds before they go
+  // out, so the sender can undo them. Returns when it will be sent.
+  async schedulePublicCustomerEmail(
+    messageId: string,
+    delaySeconds: number,
+  ): Promise<number | null> {
+    return this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      if (state.archivedAt !== null || state.purgeStartedAt !== null) return null;
+      const messages = this.readPublicMessages();
+      const message = messages.find((candidate) => candidate.id === messageId);
+      if (
+        !message ||
+        message.author !== "agent" ||
+        message.emailedAt !== null ||
+        message.emailScheduledAt
+      ) return null;
+      const schedule = await this.schedule(
+        delaySeconds,
+        "sendScheduledCustomerEmail",
+        { messageId },
+      );
+      const scheduledAt = Date.now() + delaySeconds * 1_000;
+      const updated = messages.map((candidate) =>
+        candidate.id === messageId
+          ? { ...candidate, emailScheduledAt: scheduledAt, emailScheduleId: schedule.id }
+          : candidate
+      );
+      await this.persistPublicRecords(updated);
+      const saved = this.saveNextPublicState(state, { updatedAt: Date.now() });
+      await this.publishPublicProjection(saved, updated);
+      return scheduledAt;
+    });
+  }
+
+  // Undo: the message never leaves. It is removed from the transcript and its
+  // text goes back to the sender's composer.
+  async cancelPublicCustomerEmail(
+    messageId: string,
+  ): Promise<
+    | { ok: true; content: string }
+    | { error: "already_sent" | "not_scheduled" | "not_found" }
+  > {
+    return this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      const messages = this.readPublicMessages();
+      const message = messages.find((candidate) => candidate.id === messageId);
+      if (!message) return { error: "not_found" as const };
+      if (message.emailedAt !== null) return { error: "already_sent" as const };
+      if (!message.emailScheduleId) return { error: "not_scheduled" as const };
+      await this.cancelSchedule(message.emailScheduleId);
+      const remaining = messages.filter((candidate) => candidate.id !== messageId);
+      await this.persistPublicRecords(remaining);
+      const saved = this.saveNextPublicState(state, { updatedAt: Date.now() });
+      await this.publishPublicProjection(saved, remaining);
+      return { ok: true as const, content: message.content };
+    });
+  }
+
+  async sendScheduledCustomerEmail(payload: { messageId: string }): Promise<void> {
+    const identity = this.assertPublicChild();
+    const projectId = this.publicProjectId();
+    const message = this.readPublicMessages().find((candidate) =>
+      candidate.id === payload.messageId
+    );
+    if (!message || message.emailedAt !== null || !message.emailScheduleId) return;
+    try {
+      const db = drizzle(this.env.DB);
+      const project = await new ProjectService(db).getProjectById(projectId);
+      if (!project) return;
+      await deliverMessageToCustomerChannel({
+        env: this.env,
+        chatService: createPublicConversationStore({ db, env: this.env }),
+        project: { id: project.id, slug: project.slug, name: project.name },
+        conversation: this.toPublicConversation(this.requirePublicState()),
+        message,
+      });
+    } catch (error) {
+      logError("customer_email.scheduled_send_failed", error, {
+        conversationId: identity.conversationId,
+        messageId: payload.messageId,
+      });
+    }
+    await this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      const messages = this.readPublicMessages();
+      const updated = messages.map((candidate) =>
+        candidate.id === payload.messageId
+          ? { ...candidate, emailScheduledAt: null, emailScheduleId: null }
+          : candidate
+      );
+      await this.persistPublicRecords(updated);
+      const saved = this.saveNextPublicState(state, { updatedAt: Date.now() });
+      await this.publishPublicProjection(saved, updated);
+    });
+  }
+
+  // Maven's note to the team becomes the review summary: the inbox pill and
+  // the needs-review toast show what Maven wrote, not a placeholder.
+  async recordTeamNote(text: string): Promise<void> {
+    await this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      if (state.archivedAt !== null || state.purgeStartedAt !== null) return;
+      const summaryId = typeof state.metadata.reviewSummaryMessageId === "string"
+        ? state.metadata.reviewSummaryMessageId
+        : null;
+      const messages = this.readPublicMessages();
+      const updated = messages.map((message) =>
+        summaryId !== null &&
+          message.id === summaryId &&
+          message.systemKind === "review_summary" &&
+          message.content !== text
+          ? { ...message, content: text }
+          : message
+      );
+      if (updated.some((message, index) => message !== messages[index])) {
+        await this.persistPublicRecords(updated);
+      }
+      const saved = this.saveNextPublicState(state, {
+        metadata: { ...state.metadata, teamRequestSummary: text },
+        updatedAt: Date.now(),
+      });
+      await this.publishPublicProjection(saved, updated);
+    });
   }
 
   async updatePublicEmailThread(update: PublicEmailThreadUpdate): Promise<void> {

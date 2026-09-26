@@ -87,7 +87,8 @@ export function createEmailAgentChannel(
             replyTo: `${input.project.slug}+c${fields.conversationId}@${EMAIL_DOMAIN}`,
             to: recipient.email,
             subject: inReplyTo ? `Re: ${subject}` : subject,
-            text: `${markdownToPlainText(body)}\n\nConversation: ${fields.conversationId}\nOpen: ${fields.conversationLink}`,
+            // Replies route by the reply-to address; only the link is shown.
+            text: `${markdownToPlainText(body)}\n\n${fields.conversationLink}`,
             inReplyTo,
           });
           const rfcId = await input.service.resolveRfcMessageId(sent.id);

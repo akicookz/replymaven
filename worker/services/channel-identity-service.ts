@@ -168,6 +168,9 @@ export class ChannelIdentityService {
 interface TelegramLinkPayload {
   ownerId: string;
   telegramUserId: string;
+  // Shown on the confirm page so the user can see whose account this is.
+  telegramName: string | null;
+  telegramUsername: string | null;
   exp: number;
 }
 
@@ -181,7 +184,7 @@ export async function mintTelegramLinkToken(
       JSON.stringify({ ...payload, exp: now + TELEGRAM_LINK_TTL_MS }),
     ),
   );
-  const signature = encodeBase64Url(await hmac(secret, body));
+  const signature = encodeBase64Url(await hmac(secret, `telegram-link:${body}`));
   return `${body}.${signature}`;
 }
 
@@ -192,7 +195,7 @@ export async function verifyTelegramLinkToken(
 ): Promise<TelegramLinkPayload | null> {
   const [body, signature] = token.split(".");
   if (!body || !signature) return null;
-  const expected = await hmac(secret, body);
+  const expected = await hmac(secret, `telegram-link:${body}`);
   let given: Uint8Array;
   try {
     given = decodeBase64Url(signature);
@@ -215,6 +218,10 @@ export async function verifyTelegramLinkToken(
     return {
       ownerId: parsed.ownerId,
       telegramUserId: parsed.telegramUserId,
+      telegramName: typeof parsed.telegramName === "string" ? parsed.telegramName : null,
+      telegramUsername: typeof parsed.telegramUsername === "string"
+        ? parsed.telegramUsername
+        : null,
       exp: parsed.exp,
     };
   } catch {

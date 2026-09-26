@@ -64,15 +64,17 @@ import {
   verifyTelegramLinkToken,
 } from "./services/channel-identity-service";
 import { ingestTeammateMessage } from "./services/ingest-teammate-message";
-import { startSidechatTurn } from "./services/start-sidechat-turn";
-import { TEAM_HELP_TRIGGER } from "./chat-runtime/tools/internal/request-team-help";
+import { requestTeamNote } from "./services/team-note";
 import {
   buildEmailChannelEnablement,
   buildEmailInbound,
   createEmailAgentChannel,
 } from "./services/email-agent-channel";
 import { createTelegramAgentChannel } from "./services/telegram-agent-channel";
-import { listEnabledAgentChannels } from "./services/enabled-agent-channels";
+import {
+  listEnabledAgentChannels,
+  telegramMessageRecorder,
+} from "./services/enabled-agent-channels";
 import {
   createSlackAgentChannel,
   readSlackMessageInbound,
@@ -702,6 +704,9 @@ function getSidechatRouteActor(
       }
     : null;
 }
+
+// Seconds a human reply on an email conversation waits before it is sent.
+const CUSTOMER_EMAIL_UNDO_SECONDS = 10;
 
 const app = new Hono<HonoAppContext>()
   // ─── Global CORS ────────────────────────────────────────────────────────────
@@ -1466,21 +1471,12 @@ const app = new Hono<HonoAppContext>()
     if (escalation.accepted && escalation.created) {
       // Maven writes the note to the team; its text reaches every channel.
       c.executionCtx.waitUntil(
-        startSidechatTurn({
+        requestTeamNote({
           projectId: project.id,
-          env: c.env,
           conversationId: conversation.id,
-          text: TEAM_HELP_TRIGGER,
-          origin: "system",
           actorUserId: project.userId,
-          authorUserId: "",
-          channelMessageId:
-            `system:team-note:${escalation.summaryMessageId ?? conversation.id}`,
-        }).then(() => undefined).catch((error: unknown) => {
-          logError("team_request.note_turn_failed", error, {
-            projectId: project.id,
-            conversationId: conversation.id,
-          });
+          noteKey: escalation.summaryMessageId ?? conversation.id,
+          env: c.env,
         }),
       );
     }
@@ -1604,6 +1600,11 @@ const app = new Hono<HonoAppContext>()
     if (!tgSettings.telegramChatId) {
       return c.json({ ok: true });
     }
+    // The bot can be added to any chat; only the connected one counts.
+    if (String(message?.chat?.id ?? "") !== tgSettings.telegramChatId) {
+      logWarn("telegram.foreign_chat_ignored", { projectId });
+      return c.json({ ok: true });
+    }
     if (!message?.text) {
       return c.json({ ok: true });
     }
@@ -1618,7 +1619,12 @@ const app = new Hono<HonoAppContext>()
       storedBotToken: tgSettings.telegramBotToken,
       chatId: tgSettings.telegramChatId,
       service: telegramService,
+      recordMessage: telegramMessageRecorder(c.env, projectId),
     });
+    const telegramParent = await getAgentByName(
+      c.env.MAVEN_PROJECT_AGENT,
+      projectId,
+    );
     const telegramUserId = message.from?.id === undefined
       ? null
       : String(message.from.id);
@@ -1641,7 +1647,12 @@ const app = new Hono<HonoAppContext>()
       project && telegramUserId
     ) {
       const token = await mintTelegramLinkToken(
-        { ownerId: project.userId, telegramUserId },
+        {
+          ownerId: project.userId,
+          telegramUserId,
+          telegramName: message.from?.first_name ?? null,
+          telegramUsername: message.from?.username ?? null,
+        },
         c.env.ENCRYPTION_KEY,
       );
       await adapter.post({
@@ -1674,13 +1685,24 @@ const app = new Hono<HonoAppContext>()
       },
       botName,
       projectId,
+      project: {
+        id: projectId,
+        slug: project?.slug ?? "",
+        name: project?.name ?? "Support",
+      },
       actorUserId: project?.userId ?? "",
       db,
       chatService,
       env: c.env,
       getAgentModeConversations: () =>
         chatService.listAgentMode(projectId),
-      findByChannelThread: async () => null,
+      findByChannelThread: async (messageId) => {
+        const found = await telegramParent.findConversationByChannelThread(
+          "telegram",
+          messageId,
+        ) as { conversationId?: string } | null;
+        return found?.conversationId ?? null;
+      },
     });
 
     return c.json({ ok: true });
@@ -1755,6 +1777,10 @@ const app = new Hono<HonoAppContext>()
     if (!slackSettings.slackChannelId) {
       return c.json({ ok: true });
     }
+    if (inbound.channelId !== slackSettings.slackChannelId) {
+      logWarn("slack.foreign_channel_ignored", { projectId });
+      return c.json({ ok: true });
+    }
 
     const chatService = createPublicConversationStore({ db, env: c.env });
     const projectService = new ProjectService(db);
@@ -1804,10 +1830,20 @@ const app = new Hono<HonoAppContext>()
             });
           }
         } else {
-          logWarn("slack.author_lookup_failed", {
-            projectId,
-            error: lookup.error,
-          });
+          // Remembered for an hour: logged once, and the Tools page asks the
+          // owner to reinstall the app with users:read.email.
+          const flagKey = `slack-scope-missing:${projectId}`;
+          if (
+            lookup.error === "missing_scope" &&
+            !await c.env.CONVERSATIONS_CACHE.get(flagKey)
+          ) {
+            await c.env.CONVERSATIONS_CACHE.put(flagKey, "1", {
+              expirationTtl: 60 * 60,
+            });
+            logWarn("slack.author_lookup_failed", { projectId, error: lookup.error });
+          } else if (lookup.error !== "missing_scope") {
+            logWarn("slack.author_lookup_failed", { projectId, error: lookup.error });
+          }
         }
       }
       if (teammate) {
@@ -1827,6 +1863,11 @@ const app = new Hono<HonoAppContext>()
       inbound: slackInbound,
       botName,
       projectId,
+      project: {
+        id: projectId,
+        slug: project?.slug ?? "",
+        name: project?.name ?? "Support",
+      },
       actorUserId: project?.userId ?? "",
       db,
       chatService,
@@ -2700,6 +2741,7 @@ const app = new Hono<HonoAppContext>()
                   storedBotToken: tgSettings.telegramBotToken,
                   chatId: tgSettings.telegramChatId,
                   service: telegramService,
+                  recordMessage: telegramMessageRecorder(c.env, project.id),
                 }
               : null,
             slack: slackSettings?.slackBotToken && slackSettings.slackChannelId
@@ -2815,6 +2857,7 @@ const app = new Hono<HonoAppContext>()
         }),
         botName: emailEnablement.botName,
         projectId: project.id,
+        project: { id: project.id, slug: project.slug, name: project.name },
         actorUserId: agentUser.id,
         db,
         chatService,
@@ -4161,13 +4204,35 @@ const app = new Hono<HonoAppContext>()
 
   // ─── Accept Team Invite ─────────────────────────────────────────────────────
   // ─── Link a Telegram account to the signed-in user ─────────────────────────
+  // GET shows which Telegram account the link is for; POST links it. Nothing
+  // is linked until the signed-in user confirms it is their account.
+  .get("/api/team/link/telegram", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const payload = await verifyTelegramLinkToken(
+      c.req.query("token") ?? "",
+      c.env.ENCRYPTION_KEY,
+    );
+    if (!payload) {
+      return c.json({ error: "This link is invalid or has expired. Send the link command again." }, 400);
+    }
+    const identities = new ChannelIdentityService(c.get("db"));
+    if (!await identities.canJoinOwner(user.id, payload.ownerId)) {
+      return c.json({ error: "You are not a member of this team." }, 403);
+    }
+    return c.json({
+      telegramName: payload.telegramName,
+      telegramUsername: payload.telegramUsername,
+      email: user.email,
+    });
+  })
   .post("/api/team/link/telegram", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
     const token = c.req.query("token") ?? "";
     const payload = await verifyTelegramLinkToken(token, c.env.ENCRYPTION_KEY);
     if (!payload) {
-      return c.json({ error: "This link is invalid or has expired. Send @Maven link again." }, 400);
+      return c.json({ error: "This link is invalid or has expired. Send the link command again." }, 400);
     }
     const identities = new ChannelIdentityService(c.get("db"));
     if (!await identities.canJoinOwner(user.id, payload.ownerId)) {
@@ -7552,8 +7617,49 @@ const app = new Hono<HonoAppContext>()
     }).catch(() => null);
     if (!message) return c.json({ error: "Conversation not found" }, 404);
 
+    // Email conversations: the reply goes out by email after a short undo
+    // window instead of only sitting in the transcript.
+    if (
+      readConversationChannelMetadata(conversation.metadata).channel === "email" &&
+      conversation.visitorEmail
+    ) {
+      const scheduledAt = await chatService.scheduleCustomerEmail(
+        project.id,
+        conversation.id,
+        message.id,
+        CUSTOMER_EMAIL_UNDO_SECONDS,
+      );
+      if (scheduledAt !== null) {
+        return c.json(
+          { ...toLegacyMessageDto(message), emailScheduledAt: new Date(scheduledAt) },
+          201,
+        );
+      }
+    }
+
     return c.json(toLegacyMessageDto(message), 201);
   })
+  .post(
+    "/api/projects/:id/conversations/:convId/messages/:messageId/cancel-email",
+    async (c) => {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
+      const db = c.get("db");
+      const project = await new ProjectService(db).getProjectById(c.req.param("id"));
+      if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+        return c.json({ error: "Not found" }, 404);
+      }
+      const result = await createPublicConversationStore({ db, env: c.env })
+        .cancelCustomerEmail(project.id, c.req.param("convId"), c.req.param("messageId"));
+      if ("error" in result) {
+        if (result.error === "already_sent") {
+          return c.json({ error: "Already sent" }, 409);
+        }
+        return c.json({ error: "Not found" }, 404);
+      }
+      return c.json({ ok: true, content: result.content });
+    },
+  )
   .post("/api/projects/:id/conversations/:convId/send-email", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -7661,6 +7767,12 @@ const app = new Hono<HonoAppContext>()
         convId,
       );
       if (!conversation) return c.json({ error: "Not found" }, 404);
+
+      // An email that went out, or is about to, cannot be taken back here.
+      const target = await chatService.getMessage(project.id, convId, messageId);
+      if (target && (target.emailedAt !== null || target.emailScheduledAt)) {
+        return c.json({ error: "Emailed messages cannot be deleted" }, 409);
+      }
 
       const result = await chatService.deleteHumanMessage(
         project.id,
@@ -8245,10 +8357,14 @@ const app = new Hono<HonoAppContext>()
     }
 
     const settings = await projectService.getSettings(project.id);
+    const scopeMissing = Boolean(
+      await c.env.CONVERSATIONS_CACHE.get(`slack-scope-missing:${project.id}`),
+    );
     return c.json({
       slackBotToken: settings?.slackBotToken ? "••••••••" : null,
       slackSigningSecret: settings?.slackSigningSecret ? "••••••••" : null,
       slackChannelId: settings?.slackChannelId ?? null,
+      authorScopeMissing: scopeMissing,
     });
   })
   .put("/api/projects/:id/slack", async (c) => {

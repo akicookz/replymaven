@@ -806,6 +806,7 @@ interface SlackData {
   slackBotToken: string | null;
   slackSigningSecret: string | null;
   slackChannelId: string | null;
+  authorScopeMissing?: boolean;
 }
 
 interface InboundAddress {
@@ -2041,6 +2042,11 @@ export function ToolsPanel({
                         <CheckCircle2 className="w-4 h-4 shrink-0" />
                         Settings saved.
                       </div>
+                    )}
+                    {slackData?.authorScopeMissing && (
+                      <p className="text-sm text-muted-foreground">
+                        Reinstall the Slack app with the users:read.email scope so Maven knows who is writing.
+                      </p>
                     )}
                     <div className="flex items-center gap-2">
                       <Button

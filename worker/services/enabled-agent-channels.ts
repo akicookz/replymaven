@@ -1,4 +1,5 @@
 import type { AgentChannelAdapter } from "./agent-channel";
+import type { AppEnv } from "../types";
 import { createSlackAgentChannel } from "./slack-agent-channel";
 import type { SlackService } from "./slack-service";
 import { createTelegramAgentChannel } from "./telegram-agent-channel";
@@ -13,6 +14,28 @@ export interface TelegramChannelEnablement {
   chatId?: string | null;
   botName?: string | null;
   service: TelegramService;
+  recordMessage?: (conversationId: string, messageId: string) => Promise<void>;
+}
+
+// Records each bot post in the project agent's message index.
+export function telegramMessageRecorder(
+  env: Pick<AppEnv, "MAVEN_PROJECT_AGENT">,
+  projectId: string,
+): (conversationId: string, messageId: string) => Promise<void> {
+  return async (conversationId, messageId) => {
+    const { getAgentByName } = await import("agents");
+    const parent = await getAgentByName(
+      env.MAVEN_PROJECT_AGENT,
+      projectId,
+    ) as unknown as {
+      recordChannelMessage(
+        channel: "telegram",
+        externalId: string,
+        conversationId: string,
+      ): Promise<void>;
+    };
+    await parent.recordChannelMessage("telegram", messageId, conversationId);
+  };
 }
 
 export interface SlackChannelEnablement {
@@ -36,6 +59,7 @@ export function listEnabledAgentChannels(input: {
       storedBotToken: telegram.storedBotToken,
       chatId: telegram.chatId,
       service: telegram.service,
+      recordMessage: telegram.recordMessage,
     }));
   }
   const slack = input.slack;

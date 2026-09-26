@@ -1,40 +1,62 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { CheckCircle2, Loader2, XCircle } from "lucide-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { CheckCircle2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { useSession } from "@/lib/auth-client";
 import AuthModal from "@/components/AuthModal";
 
-// Opened from the one-time link Maven posts after `@Maven link` in Telegram.
-// Binds that Telegram account to the signed-in ReplyMaven user.
+interface LinkPreview {
+  telegramName: string | null;
+  telegramUsername: string | null;
+  email: string;
+}
+
+async function readError(res: Response, fallback: string): Promise<string> {
+  const data = (await res.json().catch(() => null)) as { error?: string } | null;
+  return data?.error ?? fallback;
+}
+
+// Opened from the one-time link the bot posts after the link command in
+// Telegram. Shows whose Telegram account the link is for and links it only
+// when the signed-in user confirms it is theirs.
 function LinkTelegram() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token") ?? "";
   const navigate = useNavigate();
   const { data: session, isPending: sessionLoading } = useSession();
-  const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
-  const [errorMessage, setErrorMessage] = useState("");
   const [authOpen, setAuthOpen] = useState(false);
-  const startedRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    if (!token || sessionLoading || !session?.user) return;
-    if (startedRef.current === token) return;
-    startedRef.current = token;
-    (async () => {
+  const preview = useQuery<LinkPreview>({
+    queryKey: ["telegram-link-preview", token],
+    enabled: Boolean(token && session?.user),
+    retry: false,
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/team/link/telegram?token=${encodeURIComponent(token)}`,
+      );
+      if (!res.ok) throw new Error(await readError(res, "Could not read this link."));
+      return res.json();
+    },
+  });
+
+  const link = useMutation({
+    mutationFn: async () => {
       const res = await fetch(
         `/api/team/link/telegram?token=${encodeURIComponent(token)}`,
         { method: "POST" },
       );
-      if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as { error?: string } | null;
-        setStatus("error");
-        setErrorMessage(data?.error ?? "Could not link Telegram.");
-        return;
-      }
-      setStatus("success");
-    })();
-  }, [token, session, sessionLoading]);
+      if (!res.ok) throw new Error(await readError(res, "Could not link Telegram."));
+    },
+  });
 
   if (sessionLoading) {
     return (
@@ -44,53 +66,100 @@ function LinkTelegram() {
     );
   }
 
-  if (!session?.user) {
-    return (
-      <div className="flex min-h-screen items-center justify-center p-6">
-        <div className="w-full max-w-sm space-y-4 rounded-2xl bg-card/50 p-6 text-center backdrop-blur-xl">
-          <h1 className="font-heading text-xl">Sign in to link Telegram</h1>
-          <Button onClick={() => setAuthOpen(true)}>Sign in</Button>
-          <AuthModal
-            open={authOpen}
-            onOpenChange={setAuthOpen}
-            callbackURL={`/app/link/telegram?token=${encodeURIComponent(token)}`}
-          />
-        </div>
-      </div>
-    );
-  }
+  const account = preview.data
+    ? [preview.data.telegramName, preview.data.telegramUsername && `@${preview.data.telegramUsername}`]
+      .filter(Boolean)
+      .join(" ") || "this Telegram account"
+    : "";
 
   return (
     <div className="flex min-h-screen items-center justify-center p-6">
-      <div className="w-full max-w-sm space-y-4 rounded-2xl bg-card/50 p-6 text-center backdrop-blur-xl">
-        {status === "loading" && (
-          <Loader2 className="mx-auto size-5 animate-spin text-muted-foreground" />
-        )}
-        {status === "success" && (
+      <Card className="w-full max-w-sm">
+        {!session?.user && (
           <>
-            <CheckCircle2 className="mx-auto size-8 text-primary" />
-            <h1 className="font-heading text-xl">Telegram linked</h1>
-            <p className="text-sm text-muted-foreground">
-              Maven now knows it is you when you write in the group.
-            </p>
+            <CardHeader>
+              <CardTitle>Sign in to link Telegram</CardTitle>
+            </CardHeader>
+            <CardFooter>
+              <Button onClick={() => setAuthOpen(true)}>Sign in</Button>
+              <AuthModal
+                open={authOpen}
+                onOpenChange={setAuthOpen}
+                callbackURL={`/app/link/telegram?token=${encodeURIComponent(token)}`}
+              />
+            </CardFooter>
           </>
         )}
-        {status === "error" && (
+
+        {session?.user && !token && (
+          <CardHeader>
+            <CardTitle>This link is incomplete</CardTitle>
+            <CardDescription>Send the link command in Telegram again.</CardDescription>
+          </CardHeader>
+        )}
+
+        {session?.user && token && preview.isPending && (
+          <CardContent className="flex justify-center">
+            <Loader2 className="size-5 animate-spin text-muted-foreground" />
+          </CardContent>
+        )}
+
+        {session?.user && preview.isError && (
           <>
-            <XCircle className="mx-auto size-8 text-destructive" />
-            <h1 className="font-heading text-xl">Link failed</h1>
-            <p className="text-sm text-muted-foreground">{errorMessage}</p>
+            <CardHeader>
+              <CardTitle>Link failed</CardTitle>
+              <CardDescription>{preview.error.message}</CardDescription>
+            </CardHeader>
+            <CardFooter>
+              <Button variant="outline" onClick={() => navigate("/app")}>
+                Back to dashboard
+              </Button>
+            </CardFooter>
           </>
         )}
-        {!token && (
-          <p className="text-sm text-muted-foreground">
-            This link is missing its token. Send @Maven link in Telegram again.
-          </p>
+
+        {preview.data && !link.isSuccess && (
+          <>
+            <CardHeader>
+              <CardTitle>Link {account}?</CardTitle>
+              <CardDescription>
+                Messages from it will count as {preview.data.email}.
+              </CardDescription>
+            </CardHeader>
+            {link.isError && (
+              <CardContent className="text-sm text-destructive">
+                {link.error.message}
+              </CardContent>
+            )}
+            <CardFooter className="gap-2">
+              <Button
+                onClick={() => link.mutate()}
+                disabled={link.isPending}
+              >
+                {link.isPending && <Loader2 className="animate-spin" />}
+                Link this account
+              </Button>
+              <Button variant="outline" onClick={() => navigate("/app")}>
+                Not my account
+              </Button>
+            </CardFooter>
+          </>
         )}
-        <Button variant="outline" onClick={() => navigate("/app")}>
-          Back to dashboard
-        </Button>
-      </div>
+
+        {link.isSuccess && (
+          <>
+            <CardHeader>
+              <CheckCircle2 className="size-6 text-primary" />
+              <CardTitle>Telegram linked</CardTitle>
+            </CardHeader>
+            <CardFooter>
+              <Button variant="outline" onClick={() => navigate("/app")}>
+                Back to dashboard
+              </Button>
+            </CardFooter>
+          </>
+        )}
+      </Card>
     </div>
   );
 }

@@ -123,6 +123,8 @@ export interface Message {
   userId?: string | null;
   createdAt: string;
   emailedAt?: string | null;
+  // Set while a human reply on an email conversation waits to be sent.
+  emailScheduledAt?: string | null;
   deliveredAt?: string | null;
   readAt?: string | null;
 }

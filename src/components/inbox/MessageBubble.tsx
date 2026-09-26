@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Mail, Plug, Trash2 } from "lucide-react";
 import {
   deriveEmailAction,
@@ -26,6 +27,7 @@ interface MessageBubbleProps {
   conversation: Conversation;
   onDelete?: (messageId: string) => void;
   onSendEmail?: (messageId: string) => void;
+  onUndoEmail?: (messageId: string) => void;
   readOnly?: boolean;
   /** This message matches the active in-conversation search query. */
   isMatch?: boolean;
@@ -47,6 +49,19 @@ interface MessageBubbleProps {
   ) => void;
 }
 
+// Whole seconds left until `targetIso`, ticking once a second; null when unset.
+function useSecondsUntil(targetIso: string | null | undefined): number | null {
+  const [now, setNow] = useState(() => Date.now());
+  const target = targetIso ? new Date(targetIso).getTime() : null;
+  useEffect(() => {
+    if (target === null || target <= Date.now()) return;
+    const timer = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [target]);
+  if (target === null) return null;
+  return Math.max(0, Math.ceil((target - now) / 1_000));
+}
+
 function formatTime(isoStr: string): string {
   return new Date(isoStr).toLocaleTimeString([], {
     hour: "2-digit",
@@ -59,6 +74,7 @@ export default function MessageBubble({
   conversation,
   onDelete,
   onSendEmail,
+  onUndoEmail,
   readOnly = false,
   isMatch,
   isActiveMatch,
@@ -139,12 +155,19 @@ export default function MessageBubble({
     ? deriveEmailAction({
         role: message.role,
         emailedAt: message.emailedAt,
+        emailScheduledAt: message.emailScheduledAt,
         visitorEmail: conversation.visitorEmail,
         readOnly,
         optimistic: "_optimistic" in message && message._optimistic === true,
       })
     : "hidden";
   const showSendEmail = emailAction === "send" && Boolean(onSendEmail);
+  // An email that went out, or is about to, cannot be deleted.
+  const emailPending = Boolean(message.emailScheduledAt) && !message.emailedAt;
+  const secondsUntilEmail = useSecondsUntil(
+    emailPending ? message.emailScheduledAt : null,
+  );
+  const emailLocked = Boolean(message.emailedAt) || emailPending;
   const statusTooltip = [
     message.deliveredAt ? `Delivered ${formatTime(message.deliveredAt)}` : null,
     message.readAt ? `Seen ${formatTime(message.readAt)}` : null,
@@ -155,6 +178,31 @@ export default function MessageBubble({
 
   function renderStatus() {
     if (!status) return null;
+    if (emailPending) {
+      return (
+        <span className="flex items-baseline gap-1">
+          <span aria-hidden="true">·</span>
+          <Mail size={11} className="self-center" />
+          {secondsUntilEmail !== null && secondsUntilEmail > 0 ? (
+            <span>Sending by email in {secondsUntilEmail}s</span>
+          ) : (
+            <span>Sending by email</span>
+          )}
+          {onUndoEmail && !readOnly && secondsUntilEmail !== null && secondsUntilEmail > 0 && (
+            <>
+              <span aria-hidden="true">·</span>
+              <button
+                type="button"
+                className="text-[11px] font-medium leading-normal text-ink-3 hover:text-ink-1 motion-safe:transition-colors motion-safe:duration-150"
+                onClick={() => onUndoEmail(message.id)}
+              >
+                Undo
+              </button>
+            </>
+          )}
+        </span>
+      );
+    }
     return (
       <span
         className="flex items-baseline gap-1"
@@ -342,6 +390,7 @@ export default function MessageBubble({
             perspective === "public" &&
             isAgent &&
             !readOnly &&
+            !emailLocked &&
             onDelete && (
             <button
               onClick={() => onDelete(message.id)}

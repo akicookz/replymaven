@@ -42,6 +42,7 @@ interface FocusViewProps {
   onResolve: (convId: string) => void;
   onDeleteMessage: (messageId: string) => void;
   onSendEmail?: (messageId: string) => void;
+  onUndoEmail?: (messageId: string) => void;
   draft: string;
   setDraft: Dispatch<SetStateAction<string>>;
   onStartSidechat: () => void;
@@ -221,6 +222,7 @@ export default function FocusView({
   onResolve,
   onDeleteMessage,
   onSendEmail,
+  onUndoEmail,
   draft,
   setDraft,
   onStartSidechat,
@@ -356,6 +358,7 @@ export default function FocusView({
                       onResolve={onResolve}
                       onDeleteMessage={onDeleteMessage}
                       onSendEmail={onSendEmail}
+                      onUndoEmail={onUndoEmail}
                       draft={draft}
                       setDraft={setDraft}
                       onStartSidechat={onStartSidechat}
@@ -393,6 +396,7 @@ interface FocusConversationCardProps {
   onResolve: (convId: string) => void;
   onDeleteMessage: (messageId: string) => void;
   onSendEmail?: (messageId: string) => void;
+  onUndoEmail?: (messageId: string) => void;
   draft: string;
   setDraft: Dispatch<SetStateAction<string>>;
   onStartSidechat: () => void;
@@ -414,6 +418,7 @@ function FocusConversationCard({
   onResolve,
   onDeleteMessage,
   onSendEmail,
+  onUndoEmail,
   draft,
   setDraft,
   onStartSidechat,
@@ -463,6 +468,7 @@ function FocusConversationCard({
           loading={messagesLoading}
           onDeleteMessage={onDeleteMessage}
           onSendEmail={onSendEmail}
+          onUndoEmail={onUndoEmail}
           readOnly={!interaction.showMessageActions}
           searchQuery={searchQuery}
           activeMatchId={activeMatchId}

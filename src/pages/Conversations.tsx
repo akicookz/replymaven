@@ -2130,6 +2130,35 @@ function Conversations() {
     sendEmail.mutate({ conversationId: activeConversationId, messageId });
   }
 
+  // Undo a reply that is still waiting to go out by email: it leaves the
+  // thread and its text goes back into the composer.
+  async function handleUndoEmail(messageId: string) {
+    if (!activeConversationId) return;
+    const conversationId = activeConversationId;
+    const res = await fetch(
+      `/api/projects/${projectId}/conversations/${conversationId}/messages/${messageId}/cancel-email`,
+      { method: "POST" },
+    );
+    const body = (await res.json().catch(() => null)) as {
+      content?: string;
+      error?: string;
+    } | null;
+    if (!res.ok || typeof body?.content !== "string") {
+      toast.error(res.status === 409 ? "Already sent" : "Could not undo");
+      return;
+    }
+    queryClient.setQueryData<ConversationDetail | undefined>(
+      ["conversation-detail", conversationId],
+      (old) =>
+        old
+          ? { ...old, messages: old.messages.filter((m) => m.id !== messageId) }
+          : old,
+    );
+    const restored = body.content;
+    setDraft((current) => (current.trim() ? `${restored}\n\n${current}` : restored));
+    setPublicComposerFocusRequest((value) => value + 1);
+  }
+
   function setSelectedSidechatDraft(value: SetStateAction<string>): void {
     if (!activeConversationId) return;
     const conversationId = activeConversationId;
@@ -2840,6 +2869,7 @@ function Conversations() {
         onResolve={handleResolve}
         onDeleteMessage={handleDeleteMessage}
         onSendEmail={handleSendEmail}
+        onUndoEmail={handleUndoEmail}
         draft={draft}
         setDraft={setDraft}
         onStartSidechat={handleStartSidechat}
@@ -2950,6 +2980,7 @@ function Conversations() {
           onLinkCustomer={() => setLinkCustomerOpen(true)}
           onDeleteMessage={handleDeleteMessage}
           onSendEmail={handleSendEmail}
+          onUndoEmail={handleUndoEmail}
           onBack={() => setSelectedConvo(null)}
           onStartSidechat={handleStartSidechat}
           sidechatOpen={sidechatOpen}

@@ -282,7 +282,10 @@ export class EmailService {
     text: string;
     inReplyTo: string | null;
   }): Promise<{ id: string | null }> {
-    const headers: Record<string, string> = {};
+    // Keeps out-of-office responders from answering Maven.
+    const headers: Record<string, string> = {
+      "Auto-Submitted": "auto-generated",
+    };
     if (input.inReplyTo) {
       const rfc = formatRfcMessageId(input.inReplyTo);
       headers["In-Reply-To"] = rfc;
@@ -294,7 +297,7 @@ export class EmailService {
       to: input.to,
       subject: input.subject,
       text: input.text,
-      ...(Object.keys(headers).length > 0 ? { headers } : {}),
+      headers,
     });
   }
 

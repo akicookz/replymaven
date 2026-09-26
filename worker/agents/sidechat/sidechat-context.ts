@@ -29,6 +29,7 @@ type SidechatConversationRow = Pick<
 
 export interface SidechatTurnContextInput {
   origin: SidechatMessageOrigin;
+  botName: string;
   author: { id: string; name: string } | null;
   teammates: Array<{ id: string; name: string }>;
   links: { conversation: string; tools: string };
@@ -173,6 +174,7 @@ export async function buildSidechatContext(
     conversationStatus: conversation.status,
     archivedAt: conversation.archivedAt,
     origin: options.turn.origin,
+    botName: options.turn.botName,
     author: options.turn.author,
     assignee,
     teammates: options.turn.teammates,

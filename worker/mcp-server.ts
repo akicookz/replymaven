@@ -46,6 +46,7 @@ import { registerHelpdeskTools } from "./mcp-helpdesk-tools";
 import { registerSidechatTools } from "./mcp-sidechat-tools";
 import { registerWidgetTools } from "./mcp-widget-tools";
 import { handleTeammateComposerText } from "./services/teammate-composer";
+import { deliverMessageToCustomerChannel } from "./services/conversation-actions";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -562,8 +563,21 @@ function registerSendAgentReplyTool(
       });
       if (!message) throw new Error("Conversation not found");
 
+      // Email conversations: an MCP reply goes to the customer's inbox now.
+      const project = await new ProjectService(context.db).getProjectById(projectId);
+      const delivery = project
+        ? await deliverMessageToCustomerChannel({
+          env: context.env,
+          chatService: context.conversationStore,
+          project: { id: project.id, slug: project.slug, name: project.name },
+          conversation,
+          message,
+        })
+        : { delivered: false };
+
       return textResult({
         ok: true,
+        emailed: delivery.delivered,
         message: summarizeMessage(message),
       });
     },

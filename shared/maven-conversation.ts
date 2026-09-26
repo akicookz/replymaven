@@ -89,6 +89,10 @@ export interface PublicMessageMetadata {
   origin?: "widget" | "dashboard" | "telegram" | "slack" | "email" | "mcp" | null;
   externalReplyTo?: string | null;
   rfcMessageId?: string | null;
+  // A human reply on an email conversation waits here before it is emailed,
+  // so the sender can undo it.
+  emailScheduledAt?: number | null;
+  emailScheduleId?: string | null;
 }
 
 export interface PublicMessageRecord {
@@ -111,6 +115,8 @@ export interface PublicMessageRecord {
   origin?: "widget" | "dashboard" | "telegram" | "slack" | "email" | "mcp" | null;
   externalReplyTo?: string | null;
   rfcMessageId?: string | null;
+  emailScheduledAt?: number | null;
+  emailScheduleId?: string | null;
 }
 
 export interface PublicChannelThreads {

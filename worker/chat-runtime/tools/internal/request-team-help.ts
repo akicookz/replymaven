@@ -3,7 +3,7 @@ import { type PublicConversationStore } from "../../../conversations/public-conv
 import { type ProjectService } from "../../../services/project-service";
 import { logError, logInfo, logWarn } from "../../../observability";
 import { createEscalation } from "../../post-turn/escalation";
-import { startSidechatTurn } from "../../../services/start-sidechat-turn";
+import { requestTeamNote } from "../../../services/team-note";
 import type { AppEnv } from "../../../types";
 import {
   fallbackAiParticipationForStatus,
@@ -40,7 +40,6 @@ const requestTeamHelpInputSchema = z
   })
   .strict();
 
-export const TEAM_HELP_TRIGGER = "Team help requested.";
 
 function createCapability(projectId: string): MavenToolDefinition["capability"] {
   return {
@@ -188,40 +187,6 @@ interface TeamRequestOperationDependencies {
   executionCtx: ExecutionContext;
 }
 
-// Nobody typed this turn: Maven reads the thread and writes the note to the
-// team. Its text is mirrored to every channel when the turn completes. The
-// message id doubles as the dedupe key so a repair pass cannot start a
-// second note.
-async function startTeamNoteTurn(
-  dependencies: TeamRequestOperationDependencies,
-  project: { id: string; userId: string },
-  summaryMessageId: string | null,
-): Promise<void> {
-  try {
-    const started = await startSidechatTurn({
-      projectId: project.id,
-      env: dependencies.env,
-      conversationId: dependencies.context.conversationId,
-      text: TEAM_HELP_TRIGGER,
-      origin: "system",
-      actorUserId: project.userId,
-      authorUserId: "",
-      channelMessageId: `system:team-note:${summaryMessageId ?? dependencies.context.conversationId}`,
-    });
-    logInfo("team_request.note_turn", {
-      projectId: project.id,
-      conversationId: dependencies.context.conversationId,
-      accepted: started.accepted,
-      reason: started.accepted ? null : started.reason,
-    });
-  } catch (error) {
-    logError("team_request.note_turn_failed", error, {
-      projectId: project.id,
-      conversationId: dependencies.context.conversationId,
-    });
-  }
-}
-
 export async function repairAcceptedTeamRequest(
   dependencies: TeamRequestOperationDependencies,
 ): Promise<void> {
@@ -255,7 +220,13 @@ export async function repairAcceptedTeamRequest(
       acceptedTeamRequestToken: acceptedRequest.acceptanceToken,
     });
     if (escalation.accepted && escalation.created) {
-      await startTeamNoteTurn(dependencies, project, escalation.summaryMessageId);
+      await requestTeamNote({
+        projectId: project.id,
+        conversationId: dependencies.context.conversationId,
+        actorUserId: project.userId,
+        noteKey: escalation.summaryMessageId ?? dependencies.context.conversationId,
+        env: dependencies.env,
+      });
     }
   } catch (error) {
     logError("team_request.repair_failed", error, {
@@ -519,11 +490,14 @@ export function createRequestTeamHelpTool(dependencies: {
           acceptedTeamRequestToken: acceptedRequest?.acceptanceToken,
         });
         if (escalation.accepted && escalation.created) {
-          await startTeamNoteTurn(
-            dependencies,
-            project,
-            escalation.summaryMessageId,
-          );
+          await requestTeamNote({
+            projectId: project.id,
+            conversationId: dependencies.context.conversationId,
+            actorUserId: project.userId,
+            noteKey: escalation.summaryMessageId ??
+              dependencies.context.conversationId,
+            env: dependencies.env,
+          });
         }
         return createRequestedResult(
           agentLabel,

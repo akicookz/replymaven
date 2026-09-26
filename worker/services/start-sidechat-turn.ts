@@ -55,11 +55,9 @@ export async function runStartSidechatTurn(
 
   const registered = await port.registerSidechat(input.conversationId);
   // Shortcut: skip the claim write when register already shows a live turn.
-  // claimWorking is the atomic guard for overlapping starts.
-  if (
-    registered.status === "working" ||
-    registered.status === "waiting_approval"
-  ) {
+  // claimWorking is the atomic guard for overlapping starts. A pending
+  // approval is not a live turn: the teammate's answer arrives as a new one.
+  if (registered.status === "working") {
     return { accepted: false, reason: "busy" };
   }
   const claimed = port.claimWorking();

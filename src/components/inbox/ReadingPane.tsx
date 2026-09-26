@@ -43,6 +43,7 @@ interface ReadingPaneProps {
   onDeleteMessage: (messageId: string) => void;
   /** Email a sent agent or bot message to the visitor. */
   onSendEmail?: (messageId: string) => void;
+  onUndoEmail?: (messageId: string) => void;
   /** Mobile: return to the conversation list (clears the selection). */
   onBack?: () => void;
   onStartSidechat: () => void;
@@ -88,6 +89,7 @@ export default function ReadingPane({
   onLinkCustomer,
   onDeleteMessage,
   onSendEmail,
+  onUndoEmail,
   onBack,
   onStartSidechat,
   sidechatOpen,
@@ -224,6 +226,7 @@ export default function ReadingPane({
           loading={messagesLoading}
           onDeleteMessage={onDeleteMessage}
           onSendEmail={onSendEmail}
+          onUndoEmail={onUndoEmail}
           readOnly={!interaction.showMessageActions}
           searchQuery={query}
           activeMatchId={activeMatchId}

@@ -75,6 +75,9 @@ export function toLegacyMessageDto(
     userId: message.userId,
     createdAt: new Date(message.createdAt),
     emailedAt: message.emailedAt ? new Date(message.emailedAt) : null,
+    emailScheduledAt: message.emailScheduledAt
+      ? new Date(message.emailScheduledAt)
+      : null,
     deliveredAt: message.deliveredAt ? new Date(message.deliveredAt) : null,
     readAt: message.readAt ? new Date(message.readAt) : null,
   };

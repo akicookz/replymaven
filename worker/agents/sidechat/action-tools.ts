@@ -20,7 +20,13 @@ export type SidechatDecideResult =
 
 export type SidechatContactResult =
   | { ok: true }
-  | { error: "already_set" | "nothing_given" | "conversation_unavailable" };
+  | {
+    error:
+      | "already_set"
+      | "nothing_given"
+      | "conversation_unavailable"
+      | "unknown_author";
+  };
 
 export interface SidechatActionDeps {
   replyToConversation(text: string, toolCallId: string): Promise<SidechatReplyResult>;

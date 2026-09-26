@@ -606,6 +606,10 @@ export class ConversationDirectory {
   }
 
   removeConversation(conversationId: string): boolean {
+    this.sql.execute(
+      "DELETE FROM channel_message_index WHERE conversation_id = ?",
+      [conversationId],
+    );
     const rows = this.sql.execute<{ conversation_id: string }>(
       `DELETE FROM conversation_directory
        WHERE conversation_id = ?
@@ -836,6 +840,15 @@ export class ConversationDirectory {
     channel: "telegram" | "slack",
     threadId: string,
   ): MavenConversationSummary | null {
+    const indexed = this.sql.execute<{ conversation_id: string }>(
+      `SELECT conversation_id FROM channel_message_index
+       WHERE channel = ? AND external_id = ? LIMIT 1`,
+      [channel, threadId],
+    );
+    if (indexed[0]) {
+      const found = this.getConversation(indexed[0].conversation_id);
+      if (found) return found;
+    }
     if (channel === "telegram") return this.findByTelegramThreadId(threadId);
     const rows = this.sql.execute<ConversationDirectoryRow>(
       `SELECT * FROM conversation_directory
@@ -843,6 +856,21 @@ export class ConversationDirectory {
       [threadId],
     );
     return rows[0] ? mapDirectoryRow(rows[0]) : null;
+  }
+
+  // Every message the bot posts in a channel, so a reply to any of them
+  // (not only the thread root) finds its conversation.
+  recordChannelMessage(
+    channel: "telegram" | "slack",
+    externalId: string,
+    conversationId: string,
+  ): void {
+    this.sql.execute(
+      `INSERT OR REPLACE INTO channel_message_index
+       (channel, external_id, conversation_id, created_at)
+       VALUES (?, ?, ?, ?)`,
+      [channel, externalId, conversationId, Date.now()],
+    );
   }
 
   private ensureSchema(): void {
@@ -910,6 +938,14 @@ export class ConversationDirectory {
       "CREATE INDEX IF NOT EXISTS idx_directory_telegram_thread ON conversation_directory(telegram_thread_id)",
       "CREATE INDEX IF NOT EXISTS idx_directory_slack_thread ON conversation_directory(slack_thread_id)",
       "CREATE INDEX IF NOT EXISTS idx_directory_created ON conversation_directory(created_at DESC, conversation_id DESC)",
+      `CREATE TABLE IF NOT EXISTS channel_message_index (
+        channel TEXT NOT NULL,
+        external_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (channel, external_id)
+      )`,
+      "CREATE INDEX IF NOT EXISTS idx_channel_message_conversation ON channel_message_index(conversation_id)",
     ]) {
       this.sql.execute(statement, []);
     }

@@ -3,7 +3,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Paperclip, ArrowUp, X, Loader2, ImagePlus } from "lucide-react";
+import { Paperclip, ArrowUp, X, Loader2, ImagePlus, Mail } from "lucide-react";
 import { CommandActionTooltip } from "@/components/commands/CommandActionTooltip";
 import { CommandKeycap } from "@/components/commands/CommandKeycap";
 import {
@@ -21,6 +21,7 @@ import {
 } from "@/lib/commands/inbox-command-lookup";
 import type { Conversation } from "@/lib/inbox/types";
 import { cn } from "@/lib/utils";
+import { readConversationChannelMetadata } from "../../../shared/maven-conversation";
 import SidechatMcpAvatars from "./SidechatMcpAvatars";
 import SidechatStatusDot from "./SidechatStatusDot";
 
@@ -73,6 +74,41 @@ const ACCEPTED_IMAGE_TYPES = [
   "image/svg+xml",
 ];
 const MAX_IMAGES = 6;
+
+interface EmailTarget {
+  to: string;
+  name: string | null;
+  subject: string | null;
+}
+
+// On an email conversation a public reply is an email: the composer says so.
+function readEmailTarget(conversation: Conversation | undefined): EmailTarget | null {
+  if (!conversation?.visitorEmail || !conversation.metadata) return null;
+  try {
+    const parsed: unknown = JSON.parse(conversation.metadata);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const channel = readConversationChannelMetadata(parsed as Record<string, unknown>);
+    if (channel.channel !== "email") return null;
+    return {
+      to: conversation.visitorEmail,
+      name: conversation.visitorName,
+      subject: channel.subject ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function composerPlaceholder(
+  isPrivate: boolean,
+  emailTarget: EmailTarget | null,
+): string {
+  if (isPrivate) return "Ask Maven…";
+  if (emailTarget) {
+    return `Email to ${emailTarget.name?.trim().split(/\s+/)[0] || emailTarget.to}…`;
+  }
+  return "Reply…";
+}
 
 function resizeComposerTextarea(textarea: HTMLTextAreaElement): void {
   textarea.style.height = "auto";
@@ -338,6 +374,7 @@ export default function Composer(props: ComposerProps) {
     props.mode.kind === "public" && "conversation" in props
       ? props.conversation
       : undefined;
+  const emailTarget = isPrivate ? null : readEmailTarget(publicConversation);
   const composerCommandContext = inboxCommandContext({
     selection: {
       kind: "single",
@@ -429,6 +466,16 @@ export default function Composer(props: ComposerProps) {
           </div>
         )}
 
+        {emailTarget && (
+          <div className="mb-2 flex min-w-0 items-center gap-1.5 text-[12px] text-ink-6">
+            <Mail size={12} className="shrink-0" aria-hidden="true" />
+            <span className="truncate">
+              To {emailTarget.to}
+              {emailTarget.subject && ` · Re: ${emailTarget.subject}`}
+            </span>
+          </div>
+        )}
+
         {/* Reply textarea — auto-grows, capped at 200px */}
         <textarea
           ref={textareaRef}
@@ -437,9 +484,7 @@ export default function Composer(props: ComposerProps) {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={isPrivate
-            ? "Ask Maven…"
-            : "Reply…"}
+          placeholder={composerPlaceholder(isPrivate, emailTarget)}
           rows={1}
           disabled={mode.kind === "sidechat" && mode.disabled}
           className="w-full resize-none bg-transparent outline-none text-ink-2 placeholder:text-ink-7 max-h-[200px] overflow-y-auto disabled:opacity-60"
@@ -527,18 +572,34 @@ export default function Composer(props: ComposerProps) {
             )}
 
             {/* Send button */}
-            <button
-              type="button"
-              className="group flex size-10 shrink-0 items-center justify-center disabled:opacity-40 motion-safe:transition-transform motion-safe:duration-150 motion-safe:active:scale-[0.96]"
-              onClick={send}
-              disabled={!canSend}
-              title={isPrivate ? "Send to Maven (Enter)" : "Send (⌘↵)"}
-              aria-label={isPrivate ? "Send to Maven" : "Send reply"}
-            >
-              <span className="flex size-8 items-center justify-center rounded-full bg-bubble-sent text-white transition-opacity group-hover:opacity-90">
-                <ArrowUp size={15} strokeWidth={2.5} />
-              </span>
-            </button>
+            {emailTarget && (
+              <button
+                type="button"
+                className="group flex min-h-10 shrink-0 items-center justify-center disabled:opacity-40 motion-safe:transition-transform motion-safe:duration-150 motion-safe:active:scale-[0.96]"
+                onClick={send}
+                disabled={!canSend}
+                title="Send email (⌘↵)"
+              >
+                <span className="flex h-8 items-center gap-1.5 rounded-md bg-bubble-sent px-3 text-[13px] font-medium text-white transition-opacity group-hover:opacity-90">
+                  <Mail size={14} aria-hidden="true" />
+                  Send email
+                </span>
+              </button>
+            )}
+            {!emailTarget && (
+              <button
+                type="button"
+                className="group flex size-10 shrink-0 items-center justify-center disabled:opacity-40 motion-safe:transition-transform motion-safe:duration-150 motion-safe:active:scale-[0.96]"
+                onClick={send}
+                disabled={!canSend}
+                title={isPrivate ? "Send to Maven (Enter)" : "Send (⌘↵)"}
+                aria-label={isPrivate ? "Send to Maven" : "Send reply"}
+              >
+                <span className="flex size-8 items-center justify-center rounded-full bg-bubble-sent text-white transition-opacity group-hover:opacity-90">
+                  <ArrowUp size={15} strokeWidth={2.5} />
+                </span>
+              </button>
+            )}
           </div>
         </div>
       </div>

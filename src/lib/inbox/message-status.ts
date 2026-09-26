@@ -11,6 +11,7 @@ export interface MessageStatusInput {
 export interface EmailActionInput {
   role: MessageStatusInput["role"];
   emailedAt?: string | null;
+  emailScheduledAt?: string | null;
   visitorEmail?: string | null;
   readOnly?: boolean;
   optimistic?: boolean;
@@ -48,6 +49,7 @@ export function deriveMessageStatus(
 export function deriveEmailAction(input: EmailActionInput): EmailAction {
   if (input.role !== "agent" && input.role !== "bot") return "hidden";
   if (input.emailedAt) return "sent";
+  if (input.emailScheduledAt) return "hidden";
   if (!input.visitorEmail) return "hidden";
   if (input.readOnly) return "hidden";
   if (input.optimistic) return "hidden";

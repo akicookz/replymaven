@@ -6,6 +6,7 @@ import {
   type PublicMessageRecord,
 } from "../../shared/maven-conversation";
 import { type PublicConversationStore } from "../conversations/public-conversation-store";
+import type { ActiveHumanRoute } from "../chat-runtime/types";
 import { getAssignableUsers, isAllowedAssignee } from "./assignable-users";
 import { EmailService } from "./email-service";
 import { canHandConversationToMaven, recordMavenAssignment } from "./maven-assignment";
@@ -29,6 +30,9 @@ export async function assignConversation(input: {
   assigneeId: string | null;
   actorName: string | null;
   instructions?: string | null;
+  // When a teammate takes the conversation from a channel, customer messages
+  // start reaching them there right away.
+  route?: ActiveHumanRoute | null;
 }): Promise<AssignConversationResult> {
   const conversation = await input.chatService.getOperational(
     input.projectId,
@@ -81,6 +85,18 @@ export async function assignConversation(input: {
     conversationId: conversation.id,
     action: { action: "assign", assigneeId: input.assigneeId },
   });
+  // Assigning a person makes the conversation theirs: Maven stops answering
+  // the customer and their plain replies go straight to the customer.
+  if (input.assigneeId !== null && conversation.status !== "closed") {
+    await input.chatService.takeHumanOwnership(input.projectId, conversation.id);
+    if (input.route) {
+      await input.chatService.joinHumanRoute(
+        input.projectId,
+        conversation.id,
+        input.route,
+      );
+    }
+  }
   return { ok: true };
 }
 
@@ -172,9 +188,9 @@ export async function blockCustomer(input: {
   return { ok: true, closedIds: [...closedIds], ban };
 }
 
-// Delivery follows the conversation's channel: an email thread gets the bot
-// message by email, everything else is already visible in the widget.
-export async function deliverBotMessageToCustomerChannel(input: {
+// Delivery follows the conversation's channel: an email thread gets the
+// message (bot or human) by email, everything else is already in the widget.
+export async function deliverMessageToCustomerChannel(input: {
   env: { RESEND_API_KEY?: string };
   chatService: PublicConversationStore;
   project: { id: string; slug: string; name: string };

@@ -1,3 +1,4 @@
+import type { ActiveHumanRoute } from "../chat-runtime/types";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { parseMessageImageUrls } from "../../shared/message-images";
 import {
@@ -218,6 +219,9 @@ interface PublicChildStub {
     channel: "telegram" | "slack",
     threadId: string,
   ): Promise<void>;
+  joinPublicHumanRoute(route: ActiveHumanRoute): Promise<void>;
+  schedulePublicCustomerEmail(messageId: string, delaySeconds: number): Promise<number | null>;
+  cancelPublicCustomerEmail(messageId: string): Promise<{ ok: true; content: string } | { error: "already_sent" | "not_scheduled" | "not_found" }>;
   updatePublicEmailThread(update: PublicEmailThreadUpdate): Promise<void>;
   acquireExternalAction(
     input: PublicExternalActionLeaseInput,
@@ -1006,6 +1010,36 @@ export class AgentPublicConversationStore implements PublicConversationStore {
   ): Promise<void> {
     const child = await this.resolveChild(projectId, conversationId);
     await child?.updatePublicEmailThread(update);
+  }
+
+  async joinHumanRoute(
+    projectId: string,
+    conversationId: string,
+    route: ActiveHumanRoute,
+  ): Promise<void> {
+    const child = await this.resolveChild(projectId, conversationId);
+    await child?.joinPublicHumanRoute(route);
+  }
+
+  async scheduleCustomerEmail(
+    projectId: string,
+    conversationId: string,
+    messageId: string,
+    delaySeconds: number,
+  ): Promise<number | null> {
+    const child = await this.resolveChild(projectId, conversationId);
+    return child ? child.schedulePublicCustomerEmail(messageId, delaySeconds) : null;
+  }
+
+  async cancelCustomerEmail(
+    projectId: string,
+    conversationId: string,
+    messageId: string,
+  ): Promise<{ ok: true; content: string } | { error: "already_sent" | "not_scheduled" | "not_found" }> {
+    const child = await this.resolveChild(projectId, conversationId);
+    return child
+      ? child.cancelPublicCustomerEmail(messageId)
+      : { error: "not_found" };
   }
 
   async acquireExternalAction(

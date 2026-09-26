@@ -246,6 +246,7 @@ export interface SidechatCustomerContext {
   conversationStatus: string;
   archivedAt: number | null;
   origin: SidechatMessageOrigin;
+  botName: string;
   // The verified teammate writing this turn; "me" in their message means them.
   author: { id: string; name: string } | null;
   assignee: { id: string; name: string } | null;

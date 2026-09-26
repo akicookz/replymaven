@@ -8,7 +8,10 @@ import { type PublicConversationStore } from "../conversations/public-conversati
 import { buildConversationDeepLink } from "../lib/deep-links";
 import { logError, logWarn } from "../observability";
 import type { AgentChannelAdapter, AgentChannelInbound } from "./agent-channel";
-import { assignConversation } from "./conversation-actions";
+import {
+  assignConversation,
+  deliverMessageToCustomerChannel,
+} from "./conversation-actions";
 import {
   startSidechatTurn,
   type StartSidechatTurnResult,
@@ -38,11 +41,12 @@ export async function ingestTeammateMessage(input: {
   inbound: AgentChannelInbound;
   botName: string | null | undefined;
   projectId: string;
+  project: { id: string; slug: string; name: string };
   // Access principal for Sidechat tools until the author is known.
   actorUserId: string;
   db: DrizzleD1Database<Record<string, unknown>>;
   chatService: PublicConversationStore;
-  env: Pick<AppEnv, "MAVEN_PROJECT_AGENT" | "BETTER_AUTH_URL">;
+  env: Pick<AppEnv, "MAVEN_PROJECT_AGENT" | "BETTER_AUTH_URL" | "RESEND_API_KEY">;
   getAgentModeConversations(): Promise<Array<{ id: string }>>;
   findByChannelThread(threadId: string): Promise<string | null>;
   startTurn?: typeof startSidechatTurn;
@@ -120,7 +124,30 @@ export async function ingestTeammateMessage(input: {
       });
       return null;
     });
-    if (!appended) await reply(FAILED_DELIVERY);
+    if (!appended) {
+      await reply(FAILED_DELIVERY);
+      return;
+    }
+    // Email conversations: the reply goes to the customer's inbox now, and
+    // the sender sees that it went out as an email.
+    const delivery = await deliverMessageToCustomerChannel({
+      env: input.env,
+      chatService: input.chatService,
+      project: input.project,
+      conversation,
+      message: appended,
+    }).catch((error: unknown) => {
+      logError(`${inbound.channel}.customer_email_failed`, error, {
+        conversationId: conversation.id,
+      });
+      return { delivered: false, failed: true } as const;
+    });
+    if (delivery.delivered) {
+      const who = conversation.visitorName?.trim() || "the customer";
+      await reply(`Emailed to ${who} (${conversation.visitorEmail}).`);
+    } else if ("failed" in delivery) {
+      await reply(`That reply is saved but the email to the customer failed. Send it from the conversation: ${conversationLink}`);
+    }
     return;
   }
 

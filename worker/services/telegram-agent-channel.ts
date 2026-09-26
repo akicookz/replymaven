@@ -20,7 +20,12 @@ export function resolveTelegramConversation(input: {
   inbound: AgentChannelInbound;
   agentModeConversationIds: string[];
   botName: string | null | undefined;
+  repliedConversationId?: string | null;
 }): AgentChannelResolve {
+  if (input.repliedConversationId) {
+    return { kind: "targeted", conversationId: input.repliedConversationId };
+  }
+  // Threads started before the message index keep working by their id line.
   const conversationId = readConversationIdFromReplyText(
     input.inbound.replyToText,
   );
@@ -84,15 +89,21 @@ export function createTelegramAgentChannel(input: {
   storedBotToken: string;
   chatId: string;
   service: TelegramService;
+  recordMessage?: (conversationId: string, messageId: string) => Promise<void>;
 }): AgentChannelAdapter {
   return {
     channel: "telegram",
     async resolveConversation(fields) {
-      const agentMode = await fields.getAgentModeConversations();
+      const repliedTo = fields.inbound.replyToExternalId;
+      const [agentMode, repliedConversationId] = await Promise.all([
+        fields.getAgentModeConversations(),
+        repliedTo ? fields.findByChannelThread(repliedTo) : Promise.resolve(null),
+      ]);
       return resolveTelegramConversation({
         inbound: fields.inbound,
         agentModeConversationIds: agentMode.map((row) => row.id),
         botName: input.botName,
+        repliedConversationId,
       });
     },
     async post(fields) {
@@ -107,7 +118,14 @@ export function createTelegramAgentChannel(input: {
         }),
         fields.threadId ? parseTelegramReplyId(fields.threadId) : undefined,
       );
-      return result.message_id == null ? null : String(result.message_id);
+      if (result.message_id == null) return null;
+      const messageId = String(result.message_id);
+      if (fields.conversationId && input.recordMessage) {
+        await input.recordMessage(fields.conversationId, messageId).catch(
+          () => undefined,
+        );
+      }
+      return messageId;
     },
   };
 }
