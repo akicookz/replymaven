@@ -1159,10 +1159,8 @@ export const visitorBans = sqliteTable(
     bannedBy: text("banned_by", { enum: ["dashboard", "agent"] })
       .notNull()
       .default("dashboard"),
-    bannedFromConversationId: text("banned_from_conversation_id").references(
-      () => conversations.id,
-      { onDelete: "set null" },
-    ),
+    // No FK: conversations live in the Agent, not the frozen D1 table.
+    bannedFromConversationId: text("banned_from_conversation_id"),
     expiresAt: integer("expires_at", { mode: "timestamp" }),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
