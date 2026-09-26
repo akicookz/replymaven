@@ -122,9 +122,9 @@ function normalizeSearchRadii(value: number | null | undefined): SearchRadii {
     return { box: "999px", trigger: "999px", button: "50%" };
   }
   return {
-    box: "var(--help-radius-2xl)",
-    trigger: "var(--help-radius-md)",
-    button: "var(--help-radius-lg)",
+    box: "10px",
+    trigger: "10px",
+    button: "10px",
   };
 }
 

@@ -68,8 +68,8 @@ function searchPreviewStyle(borderRadius: number): CSSProperties {
     } as CSSProperties;
   }
   return {
-    "--help-search-radius": "var(--help-radius-2xl)",
-    "--help-search-button-radius": "var(--help-radius-lg)",
+    "--help-search-radius": "10px",
+    "--help-search-button-radius": "10px",
   } as CSSProperties;
 }
 

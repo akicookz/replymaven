@@ -1333,7 +1333,7 @@ html.help-page-home .help-shell {
   gap: 0.5rem;
   width: 100%;
   padding: 0.5rem 0.5rem 0.5rem 1rem;
-  background: var(--background);
+  background: color-mix(in oklch, var(--muted) 50%, var(--background));
   box-shadow: var(--help-ring-shadow);
   border-radius: var(--help-search-radius);
   transition: box-shadow 150ms ease;
