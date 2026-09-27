@@ -15,7 +15,7 @@ export const INBOX_FILTERS: { id: InboxFilter; title: string }[] = [
   { id: "snoozed", title: "Snoozed" },
   { id: "resolved", title: "Resolved" },
   { id: "archived", title: "Archived" },
-  { id: "flagged", title: "Flagged" },
+  { id: "flagged", title: "Spam" },
 ];
 
 export function filterTitle(f: InboxFilter): string {

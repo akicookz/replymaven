@@ -107,7 +107,7 @@ const FILTER_NOUN: Record<InboxFilter, string> = {
   snoozed: "snoozed",
   resolved: "resolved",
   archived: "archived",
-  flagged: "flagged",
+  flagged: "spam",
 };
 
 // Placeholder row shown while the list loads (first page or a filter/search
@@ -257,7 +257,7 @@ export default function MessageList({
                 </button>
               </PopoverTrigger>
               <PopoverContent align="end" className="w-56 p-1.5">
-                <p className="px-2 pt-1 pb-1 text-[11px] font-semibold uppercase tracking-wider text-ink-7">
+                <p className="px-2 pt-1 pb-1 text-[12px] font-medium text-ink-6">
                   Sort by
                 </p>
                 {INBOX_SORTS.map((opt) => (
@@ -272,7 +272,7 @@ export default function MessageList({
                     )}
                   </button>
                 ))}
-                <p className="px-2 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-ink-7">
+                <p className="px-2 pt-2 pb-1 text-[12px] font-medium text-ink-6">
                   Filter
                 </p>
                 <button

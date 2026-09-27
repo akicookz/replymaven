@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  ArrowLeft,
   BookOpen,
   CheckCircle2,
   ExternalLink,
@@ -15,7 +14,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
+import { MobileMenuButton } from "@/components/PageHeader";
 import {
   Sheet,
   SheetBody,
@@ -268,19 +267,11 @@ function HelpCenterSettings() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <Button asChild variant="ghost" size="sm" className="-ml-2 mb-2">
-          <Link to={`/app/projects/${projectId}/knowledgebase/help-center`}>
-            <ArrowLeft className="w-4 h-4" />
-            Back to Articles
-          </Link>
-        </Button>
-        <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight">
-          Help Center Settings
+      <div className="flex items-start gap-3">
+        <MobileMenuButton />
+        <h1 className="text-xl md:text-2xl font-bold text-foreground">
+          Domain & site
         </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Configure how your help center is served.
-        </p>
       </div>
 
       <div className="glass-card rounded-lg p-6 space-y-5">
@@ -477,9 +468,6 @@ function HelpCenterSettings() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Label className="text-sm text-muted-foreground">
-              Default theme
-            </Label>
             <Tabs
               value={themeDefault}
               onValueChange={(value) =>

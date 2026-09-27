@@ -4,15 +4,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   AlertCircle,
-  ChevronDown,
-  ChevronRight,
   FileText,
   Globe,
   HelpCircle,
   Plus,
-  RefreshCw,
-  Sparkles,
-  Trash2,
+  ListPlus,
   Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -20,9 +16,11 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import FaqEditor from "@/components/faq-editor";
 import FaqGenerateModal, { type FaqDraft } from "@/components/faq-generate-modal";
-import PdfResourceDetail from "@/components/pdf-detail";
-import WebpageResourceDetail from "@/components/webpage-detail";
 import { MobileMenuButton } from "@/components/PageHeader";
+import { CompanyCard } from "@/components/company-card";
+import { RowCard } from "@/components/ui/row-card";
+import { ArticlesIcon } from "@/components/icons/nav-icons";
+import { projectRoute } from "@/lib/dashboard-routes";
 
 interface Resource {
   id: string;
@@ -31,7 +29,35 @@ interface Resource {
   url: string | null;
   content: string | null;
   status: "pending" | "crawling" | "indexed" | "failed";
+  pageCount?: number;
   createdAt: string;
+}
+
+function plural(count: number, one: string, many: string): string {
+  return `${count.toLocaleString()} ${count === 1 ? one : many}`;
+}
+
+function faqPairCount(content: string | null): number | null {
+  if (!content) return 0;
+  try {
+    const pairs: unknown = JSON.parse(content);
+    return Array.isArray(pairs) ? pairs.length : null;
+  } catch {
+    return null;
+  }
+}
+
+// What the source holds, next to where it came from.
+function resourceSummary(resource: Resource): string {
+  if (resource.type === "webpage") {
+    const pages = plural(resource.pageCount ?? 0, "crawled page", "crawled pages");
+    return resource.url ? `${resource.url} · ${pages}` : pages;
+  }
+  if (resource.type === "faq") {
+    const pairs = faqPairCount(resource.content);
+    return pairs === null ? "FAQ" : plural(pairs, "Q&A pair", "Q&A pairs");
+  }
+  return plural(resource.content?.length ?? 0, "character", "characters") + " extracted";
 }
 
 function Resources() {
@@ -49,7 +75,6 @@ function Resources() {
   const [url, setUrl] = useState("");
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: resources, isLoading: isLoadingResources } = useQuery<Resource[]>(
@@ -80,6 +105,19 @@ function Resources() {
       return res.json();
     },
   });
+
+  const { data: helpArticles } = useQuery<{ status: string }[]>({
+    queryKey: ["help-articles", projectId],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/help/articles`);
+      if (!res.ok) throw new Error("Failed to load articles");
+      return res.json();
+    },
+    enabled: Boolean(projectId),
+  });
+  const publishedArticles = (helpArticles ?? []).filter(
+    (article) => article.status === "published",
+  ).length;
 
   const helpCenterDuplicates = useMemo(() => {
     const prefixes: string[] = [];
@@ -163,44 +201,6 @@ function Resources() {
     },
   });
 
-  const deleteResource = useMutation({
-    mutationFn: async (resourceId: string) => {
-      const res = await fetch(
-        `/api/projects/${projectId}/resources/${resourceId}`,
-        { method: "DELETE" },
-      );
-      if (!res.ok) throw new Error("Failed to delete");
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["resources", projectId] });
-      toast.success("Resource deleted");
-    },
-    onError: () => toast.error("Failed to delete resource"),
-  });
-
-  const reindex = useMutation({
-    mutationFn: async (vars: {
-      id: string;
-      type: "webpage" | "pdf" | "faq";
-    }) => {
-      const res = await fetch(
-        `/api/projects/${projectId}/resources/${vars.id}/reindex`,
-        { method: "POST" },
-      );
-      if (!res.ok) throw new Error("Failed to index");
-      return vars;
-    },
-    onSuccess: (vars) => {
-      queryClient.invalidateQueries({ queryKey: ["resources", projectId] });
-      toast.success(
-        vars.type === "webpage"
-          ? "Re-crawling and indexing"
-          : "Indexing started",
-      );
-    },
-    onError: () => toast.error("Failed to index"),
-  });
-
   const typeIcons = {
     webpage: Globe,
     pdf: FileText,
@@ -252,22 +252,18 @@ function Resources() {
     setShowForm(true);
   }
 
-  function toggleExpanded(resourceId: string) {
-    setExpandedId(expandedId === resourceId ? null : resourceId);
-  }
 
   return (
     <div className="space-y-6">
       <div className="flex items-start gap-3">
         <MobileMenuButton />
-        <div>
-          <h1 className="text-balance text-xl font-bold text-foreground md:text-2xl">Sources</h1>
-          <p className="mt-1 text-pretty text-xs text-muted-foreground md:text-sm">
-            Webpages, PDFs, and FAQ sets the AI can draw on. Your help center
-            articles are indexed automatically and managed in Help Center.
-          </p>
-        </div>
+        <h1 className="text-balance text-xl font-bold text-foreground md:text-2xl">Knowledge</h1>
       </div>
+
+      <CompanyCard
+        projectId={projectId ?? ""}
+        hasResources={(resources?.length ?? 0) > 0}
+      />
 
       {helpCenterDuplicates.length > 0 && (
         <div className="flex items-start gap-3 rounded-2xl bg-amber-500/10 p-4">
@@ -300,14 +296,14 @@ function Resources() {
       <div className="space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-semibold text-foreground">Resources</h2>
+            <h2 className="text-lg font-semibold text-foreground">Sources</h2>
           </div>
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
               onClick={() => setShowGenerateModal(true)}
             >
-              <Sparkles className="w-4 h-4 mr-2" />
+              <ListPlus className="w-4 h-4 mr-2" />
               Generate FAQ
             </Button>
             <Button onClick={() => setShowForm(!showForm)}>
@@ -316,6 +312,13 @@ function Resources() {
             </Button>
           </div>
         </div>
+
+        <RowCard
+          icon={<ArticlesIcon />}
+          title="Help Center"
+          summary={`${publishedArticles} published ${publishedArticles === 1 ? "article" : "articles"} · synced automatically`}
+          to={projectRoute(projectId ?? "", "help-center")}
+        />
 
         <FaqGenerateModal
           open={showGenerateModal}
@@ -477,127 +480,24 @@ function Resources() {
           <div className="space-y-2">
             {resources?.map((resource) => {
               const Icon = typeIcons[resource.type];
-              const isExpanded = expandedId === resource.id;
-
               return (
-                <div
+                <RowCard
                   key={resource.id}
-                  className="glass-card rounded-lg overflow-hidden"
-                >
-                  <div
-                    className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-glass-card transition-colors"
-                    onClick={() => toggleExpanded(resource.id)}
-                  >
-                    <div className="flex items-center gap-2 shrink-0">
-                      {isExpanded ? (
-                        <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                      ) : (
-                        <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                      )}
-                      <div className="w-8 h-8 rounded-lg bg-glass-button flex items-center justify-center">
-                        <Icon className="w-4 h-4 text-muted-foreground" />
-                      </div>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">
-                        {resource.title}
-                      </p>
-                      {resource.url && (
-                        <p className="text-xs text-muted-foreground truncate">
-                          {resource.url}
-                        </p>
-                      )}
-                      <p className="text-xs text-muted-foreground">
-                        {resource.type.toUpperCase()}
-                      </p>
-                    </div>
+                  icon={<Icon className="size-4" />}
+                  title={resource.title}
+                  summary={resourceSummary(resource)}
+                  trailing={
                     <span
                       className={cn(
-                        "text-xs px-2 py-0.5 rounded-[6px] shrink-0",
+                        "shrink-0 rounded-[6px] px-2 py-0.5 text-xs",
                         statusColors[resource.status] ?? statusColors.pending,
                       )}
                     >
                       {resource.status}
                     </span>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          reindex.mutate({
-                            id: resource.id,
-                            type: resource.type,
-                          });
-                        }}
-                        disabled={reindex.isPending}
-                        className="p-1.5 rounded-lg hover:bg-glass-button text-muted-foreground disabled:opacity-50"
-                        title={
-                          resource.type === "webpage"
-                            ? "Re-crawl & Index"
-                            : "Index"
-                        }
-                      >
-                        <RefreshCw
-                          className={cn(
-                            "w-4 h-4",
-                            reindex.isPending && "animate-spin",
-                          )}
-                        />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (expandedId === resource.id) setExpandedId(null);
-                          deleteResource.mutate(resource.id);
-                        }}
-                        disabled={deleteResource.isPending}
-                        className="p-1.5 rounded-lg hover:bg-destructive/10 text-destructive disabled:opacity-50"
-                        title="Delete"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {isExpanded && (
-                    <div className="px-4 py-4">
-                      {resource.type === "faq" && (
-                        <FaqEditor
-                          projectId={projectId!}
-                          resourceId={resource.id}
-                          mode="edit"
-                          onSave={() => setExpandedId(null)}
-                          onCancel={() => setExpandedId(null)}
-                        />
-                      )}
-                      {resource.type === "webpage" && (
-                        <WebpageResourceDetail
-                          projectId={projectId!}
-                          resourceId={resource.id}
-                          resourceUrl={resource.url ?? ""}
-                          onRefreshAll={() =>
-                            reindex.mutate({
-                              id: resource.id,
-                              type: "webpage",
-                            })
-                          }
-                        />
-                      )}
-                      {resource.type === "pdf" && (
-                        <PdfResourceDetail
-                          projectId={projectId!}
-                          resourceId={resource.id}
-                          resourceTitle={resource.title}
-                          onReindex={() =>
-                            reindex.mutate({
-                              id: resource.id,
-                              type: "pdf",
-                            })
-                          }
-                        />
-                      )}
-                    </div>
-                  )}
-                </div>
+                  }
+                  to={`${projectRoute(projectId ?? "", "knowledge")}/${resource.id}`}
+                />
               );
             })}
             {(!resources || resources.length === 0) && (
@@ -609,6 +509,7 @@ function Resources() {
           </div>
         )}
       </div>
+
     </div>
   );
 }

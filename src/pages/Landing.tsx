@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Link, useSearchParams, useNavigate } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import AuthModal from "@/components/AuthModal";
 import { useSession } from "@/lib/auth-client";
+import { usePageMeta } from "@/hooks/use-page-meta";
 import { useSubscription } from "@/hooks/use-subscription";
 import {
   Check,
@@ -9,7 +10,6 @@ import {
   ArrowRight,
   ArrowUpRight,
   BookOpen,
-  Heart,
   Inbox,
   Hand,
   Clock,
@@ -31,7 +31,6 @@ import {
   MoreHorizontal,
   SlidersHorizontal,
   Search,
-  ArrowDownRight,
 } from "lucide-react";
 import {
   enterprisePlan,
@@ -45,6 +44,7 @@ import { KnowsSection } from "@/components/marketing/knows-section";
 import { HelpCenterBento } from "@/components/marketing/help-center-bento";
 import { HumanInboxBento } from "@/components/marketing/human-inbox-bento";
 import { ActionsVisual } from "@/components/marketing/marketing-visuals";
+import { MarketingFooter, MarketingHeader } from "@/components/marketing/marketing-shell";
 import { OverviewBento } from "@/components/marketing/overview-bento";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -677,6 +677,11 @@ function Landing() {
   const [authOpen, setAuthOpen] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<{ plan: string; interval: string } | null>(null);
 
+  usePageMeta({
+    title: "ReplyMaven | Frontline customer support for founding teams",
+    description: "Maven is an AI support agent that learns your docs, closes tickets, and takes real actions for customers. Plus a self-updating help center and an omnichannel inbox. Start a 7-day free trial.",
+    path: "/",
+  });
   const { data: session } = useSession();
   const { data: subData } = useSubscription();
   const isLoggedIn = !!session?.user;
@@ -707,24 +712,6 @@ function Landing() {
     navigate("/app/account");
   }
 
-  function contactSales() {
-    const widget = (
-      window as Window & {
-        ReplyMaven?: { sendMessage: (text: string) => void };
-      }
-    ).ReplyMaven;
-    widget?.sendMessage("I'd like to talk to sales about Enterprise.");
-  }
-
-  function chatWithMaven() {
-    const widget = (
-      window as Window & {
-        ReplyMaven?: { sendMessage: (text: string) => void };
-      }
-    ).ReplyMaven;
-    widget?.sendMessage("Hi Maven, what can you do?");
-  }
-
   const callbackParam = searchParams.get("callback");
   const authCallbackUrl = selectedPlan
     ? `/app/onboarding?plan=${selectedPlan.plan}&interval=${selectedPlan.interval}`
@@ -734,33 +721,7 @@ function Landing() {
 
   return (
     <div className="dark font-sans min-h-screen bg-background text-foreground scroll-smooth motion-reduce:scroll-auto overflow-x-hidden antialiased">
-      {/* ── Navigation ─────────────────────────────────────────────────── */}
-      <header className="fixed top-0 left-0 right-0 z-50 bg-background/70 backdrop-blur-xl shadow-[0_1px_0_rgba(255,255,255,0.06)]">
-        <nav className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2 shrink-0">
-            <LogoIcon className="h-5 w-auto text-foreground" />
-            <span className="font-medium tracking-tight text-[15px] text-ink-1">ReplyMaven</span>
-          </Link>
-
-          <div className="hidden md:flex items-center gap-0.5 text-[13px]">
-            <a href="#overview" className="px-3 py-1.5 text-ink-5 hover:text-ink-1 rounded-md transition-colors">Product</a>
-            <a href="#pricing" className="px-3 py-1.5 text-ink-5 hover:text-ink-1 rounded-md transition-colors">Pricing</a>
-            <a href="/docs" className="px-3 py-1.5 text-ink-5 hover:text-ink-1 rounded-md transition-colors">Docs</a>
-            <a href="#faq" className="px-3 py-1.5 text-ink-5 hover:text-ink-1 rounded-md transition-colors">FAQ</a>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {isLoggedIn && (
-              <Button variant="secondary" size="sm" onClick={() => navigate("/app")}>
-                Dashboard
-                <ArrowUpRight />
-              </Button>
-            )}
-            {!isLoggedIn && <Button variant="ghost" size="sm" onClick={handleGenericCta}>Log in</Button>}
-            {!isLoggedIn && <Button size="sm" onClick={handleGenericCta}>Start free trial</Button>}
-          </div>
-        </nav>
-      </header>
+      <MarketingHeader onAuth={handleGenericCta} />
 
       {/* ── Hero ──────────────────────────────────────────────────────── */}
       <section className="relative pt-36 pb-12 overflow-hidden">
@@ -784,9 +745,9 @@ function Landing() {
                 <ArrowRight className="w-4 h-4" />
               </Button>
             )}
-            <Button variant="outline" onClick={chatWithMaven}>
-              Chat with Maven
-              <ArrowDownRight className="w-4 h-4" />
+            <Button variant="secondary" onClick={() => navigate("/contact-sales")}>
+              Talk to sales
+              <ArrowUpRight className="w-4 h-4" />
             </Button>
           </div>
         </div>
@@ -884,7 +845,7 @@ function Landing() {
               </div>
             }
             onCtaClick={handlePricingCta}
-            onContactSales={contactSales}
+            onContactSales={() => navigate("/contact-sales")}
             currentPlan={currentPlan}
             currentInterval={currentInterval}
             onManagePlan={handleManagePlan}
@@ -934,41 +895,7 @@ function Landing() {
         </div>
       </section>
 
-      {/* ── Footer ────────────────────────────────────────────────────── */}
-      <footer className="px-6 pt-16 pb-10">
-        <div className="max-w-6xl mx-auto">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-14">
-            <div className="col-span-2 md:col-span-2 space-y-3">
-              <div className="flex items-center gap-2">
-                <LogoIcon className="h-5 w-auto text-foreground shrink-0" />
-                <span className="font-medium tracking-tight text-[15px] text-ink-1">ReplyMaven</span>
-              </div>
-              <p className="text-sm text-ink-6 leading-relaxed max-w-xs">Turn support into a word-of-mouth growth engine.</p>
-            </div>
-            {[
-              { h: "Resources", links: [{ label: "Documentation", href: "/docs" }, { label: "Getting started", href: "/docs" }, { label: "FAQ", href: "#faq" }] },
-              { h: "Legal", links: [{ label: "Privacy", href: "#" }, { label: "Terms", href: "#" }] },
-            ].map((col) => (
-              <div key={col.h} className="space-y-3">
-                <Mono className="text-ink-7">{col.h}</Mono>
-                <ul className="space-y-2.5">
-                  {col.links.map((l) => (
-                    <li key={l.label}>
-                      <a href={l.href} className="text-sm text-ink-5 hover:text-ink-1 transition-colors">{l.label}</a>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-          <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
-            <p className="text-sm text-ink-7">&copy; 2026 ReplyMaven. All rights reserved.</p>
-            <a href="https://launchfast.shop/" target="_blank" className="text-sm text-ink-7 flex items-center gap-2 hover:text-ink-4 transition-colors">
-              <Heart className="w-4 h-4" /> LaunchFast.shop product
-            </a>
-          </div>
-        </div>
-      </footer>
+      <MarketingFooter />
 
       {/* Auth Modal */}
       <AuthModal open={authOpen} onOpenChange={setAuthOpen} callbackURL={authCallbackUrl} />

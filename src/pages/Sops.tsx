@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { MobileMenuButton } from "@/components/PageHeader";
+import { PersonaCard } from "@/components/persona-card";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -221,11 +222,16 @@ function Sops() {
       {/* Header */}
       <div className="flex items-start gap-3">
         <MobileMenuButton />
-        <div className="flex-1">
-          <h1 className="text-balance text-xl font-bold text-foreground md:text-2xl">SOPs</h1>
-          <p className="mt-1 text-pretty text-xs text-muted-foreground md:text-sm">
-            Define step-by-step instructions for how your bot should handle
-            specific scenarios.
+        <h1 className="text-balance text-xl font-bold text-foreground md:text-2xl">Behavior</h1>
+      </div>
+
+      <PersonaCard projectId={projectId ?? ""} />
+
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">SOPs</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Step-by-step instructions for specific situations.
           </p>
         </div>
         {!showForm && (

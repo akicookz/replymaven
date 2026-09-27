@@ -56,7 +56,7 @@ function inboxFilterEmptyCopy(
     case "archived":
       return { headline: "Nothing archived." };
     case "flagged":
-      return { headline: "Nothing flagged." };
+      return { headline: "No spam." };
     default: {
       const _exhaustive: never = filter;
       return _exhaustive;

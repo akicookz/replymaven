@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -135,6 +136,7 @@ export function DashboardCommandMenu({
   onExecute,
 }: DashboardCommandMenuProps) {
   const rows = buildMenuRows(context, navItems);
+  const listRef = useRef<HTMLDivElement>(null);
 
   function handleSelect(row: MenuRow) {
     if (row.disabled || row.intent == null) return;
@@ -159,8 +161,14 @@ export function DashboardCommandMenu({
           onOpenChange(false);
         }}
       >
-        <CommandInput placeholder="Search…" />
-        <CommandList>
+        <CommandInput
+          placeholder="Search…"
+          onValueChange={() => {
+            // Results reorder as you type; keep the best match in view.
+            requestAnimationFrame(() => listRef.current?.scrollTo({ top: 0 }));
+          }}
+        />
+        <CommandList ref={listRef}>
           <CommandEmpty>No results</CommandEmpty>
           {GROUP_ORDER.map((group) => {
             const items = rows.filter((row) => row.group === group);
@@ -170,7 +178,7 @@ export function DashboardCommandMenu({
                 {items.map((row) => (
                   <CommandItem
                     key={row.id}
-                    value={row.id}
+                    value={`${row.label} ${row.id}`}
                     keywords={row.keywords}
                     disabled={row.disabled}
                     onSelect={() => handleSelect(row)}

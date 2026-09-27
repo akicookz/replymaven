@@ -1,6 +1,11 @@
 import {
+  NAV_COMMAND_IDS,
+  NAV_DESTINATION_IDS,
   destinationHref,
   destinationLabel,
+  navCommandId,
+  navSequenceKey,
+  type DashboardNavCommandId,
   type DashboardNavDestinationId,
 } from "../dashboard/nav";
 import type { InboxFilter } from "../inbox/filters";
@@ -16,23 +21,7 @@ export const COMMAND_REASONS = {
 
 export const DASHBOARD_COMMAND_IDS = [
   "toggle-command-menu",
-  "navigate-dashboard",
-  "navigate-needs-you",
-  "navigate-inbox",
-  "navigate-snoozed",
-  "navigate-resolved",
-  "navigate-archived",
-  "navigate-flagged",
-  "navigate-sources",
-  "navigate-help-center",
-  "navigate-sops",
-  "navigate-company-info",
-  "navigate-chat-widget",
-  "navigate-greetings",
-  "navigate-tools",
-  "navigate-customers",
-  "navigate-mcp-connections",
-  "navigate-settings",
+  ...NAV_COMMAND_IDS,
   "toggle-focus",
   "open-conversation-search",
   "open-sidechat",
@@ -310,28 +299,9 @@ const INTERACTIVE_ROLES = new Set([
 
 const MODIFIER_KEYS = new Set(["meta", "control", "alt", "shift"]);
 
-const NAV_DESTINATIONS: Record<
-  Extract<DashboardCommandId, `navigate-${string}`>,
-  { destination: DashboardNavDestinationId; secondKey: string }
-> = {
-  "navigate-dashboard": { destination: "dashboard", secondKey: "d" },
-  "navigate-needs-you": { destination: "needs-you", secondKey: "y" },
-  "navigate-inbox": { destination: "inbox", secondKey: "i" },
-  "navigate-snoozed": { destination: "snoozed", secondKey: "z" },
-  "navigate-resolved": { destination: "resolved", secondKey: "r" },
-  "navigate-archived": { destination: "archived", secondKey: "a" },
-  "navigate-flagged": { destination: "flagged", secondKey: "f" },
-  "navigate-sources": { destination: "sources", secondKey: "s" },
-  "navigate-help-center": { destination: "help-center", secondKey: "h" },
-  "navigate-sops": { destination: "sops", secondKey: "o" },
-  "navigate-company-info": { destination: "company-info", secondKey: "c" },
-  "navigate-chat-widget": { destination: "chat-widget", secondKey: "w" },
-  "navigate-greetings": { destination: "greetings", secondKey: "g" },
-  "navigate-tools": { destination: "tools", secondKey: "t" },
-  "navigate-customers": { destination: "customers", secondKey: "u" },
-  "navigate-mcp-connections": { destination: "mcp-connections", secondKey: "m" },
-  "navigate-settings": { destination: "settings", secondKey: "p" },
-};
+const NAV_DESTINATIONS = Object.fromEntries(
+  NAV_DESTINATION_IDS.map((destination) => [navCommandId(destination), destination]),
+) as Record<DashboardNavCommandId, DashboardNavDestinationId>;
 
 function normalizeKey(key: string): string {
   if (key === " ") return "space";
@@ -506,16 +476,17 @@ function resolveToggleMenu(
 }
 
 function resolveNavigate(
-  commandId: Extract<DashboardCommandId, `navigate-${string}`>,
+  commandId: DashboardNavCommandId,
   context: DashboardCommandContext,
 ): CommandAvailability {
-  const { destination, secondKey } = NAV_DESTINATIONS[commandId];
+  const destination = NAV_DESTINATIONS[commandId];
+  const secondKey = navSequenceKey(destination);
   const label = destinationLabel(destination);
   return enabled(
     presentation(
       label,
       `Go to ${label}`,
-      { keys: ["G", secondKey.toUpperCase()] },
+      { keys: secondKey ? ["G", secondKey.toUpperCase()] : [] },
     ),
     { type: "navigate", href: destinationHref(context.scope.projectId, destination) },
   );
@@ -897,19 +868,24 @@ function resolveEscapeInbox(
 }
 
 function navigateDefinition(
-  id: Extract<DashboardCommandId, `navigate-${string}`>,
+  id: DashboardNavCommandId,
 ): DashboardCommandDefinition {
-  const { secondKey } = NAV_DESTINATIONS[id];
+  const secondKey = navSequenceKey(NAV_DESTINATIONS[id]);
   return {
     id,
     group: "navigation",
-    shortcuts: [sequenceShortcut(secondKey)],
+    shortcuts: secondKey ? [sequenceShortcut(secondKey)] : [],
     repeat: "ignore",
     resolve: (context) => resolveNavigate(id, context),
   };
 }
 
+const NAVIGATE_COMMANDS = Object.fromEntries(
+  NAV_COMMAND_IDS.map((id) => [id, navigateDefinition(id)]),
+) as Record<DashboardNavCommandId, DashboardCommandDefinition>;
+
 export const DASHBOARD_COMMANDS = {
+  ...NAVIGATE_COMMANDS,
   "toggle-command-menu": {
     id: "toggle-command-menu",
     group: "global",
@@ -917,23 +893,6 @@ export const DASHBOARD_COMMANDS = {
     repeat: "ignore",
     resolve: resolveToggleMenu,
   },
-  "navigate-dashboard": navigateDefinition("navigate-dashboard"),
-  "navigate-needs-you": navigateDefinition("navigate-needs-you"),
-  "navigate-inbox": navigateDefinition("navigate-inbox"),
-  "navigate-snoozed": navigateDefinition("navigate-snoozed"),
-  "navigate-resolved": navigateDefinition("navigate-resolved"),
-  "navigate-archived": navigateDefinition("navigate-archived"),
-  "navigate-flagged": navigateDefinition("navigate-flagged"),
-  "navigate-sources": navigateDefinition("navigate-sources"),
-  "navigate-help-center": navigateDefinition("navigate-help-center"),
-  "navigate-sops": navigateDefinition("navigate-sops"),
-  "navigate-company-info": navigateDefinition("navigate-company-info"),
-  "navigate-chat-widget": navigateDefinition("navigate-chat-widget"),
-  "navigate-greetings": navigateDefinition("navigate-greetings"),
-  "navigate-tools": navigateDefinition("navigate-tools"),
-  "navigate-customers": navigateDefinition("navigate-customers"),
-  "navigate-mcp-connections": navigateDefinition("navigate-mcp-connections"),
-  "navigate-settings": navigateDefinition("navigate-settings"),
   "toggle-focus": {
     id: "toggle-focus",
     group: "inbox",

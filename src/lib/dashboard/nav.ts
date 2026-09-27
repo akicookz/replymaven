@@ -11,48 +11,18 @@ export const NAV_SEQUENCE_TIMEOUT_MS = 1000;
 export type DashboardNavDestinationId = InboxFilter | ProjectDestination;
 
 export type DashboardNavGroup =
-  | "inbox"
-  | "knowledgebase"
-  | "support-chat"
-  | "workspace";
+  | "main"
+  | "more"
+  | "maven"
+  | "help-center"
+  | "settings-widget"
+  | "settings-help-center"
+  | "settings-apps"
+  | "settings-workspace"
+  | "settings-account"
+  | "command-only";
 
-export type DashboardNavIcon =
-  | "layout-dashboard"
-  | "hand"
-  | "inbox"
-  | "clock"
-  | "check-circle"
-  | "archive"
-  | "flag"
-  | "database"
-  | "book-open"
-  | "list-checks"
-  | "building-2"
-  | "message-square"
-  | "messages-square"
-  | "cable"
-  | "users"
-  | "plug"
-  | "settings";
-
-export type DashboardNavCommandId =
-  | "navigate-dashboard"
-  | "navigate-needs-you"
-  | "navigate-inbox"
-  | "navigate-snoozed"
-  | "navigate-resolved"
-  | "navigate-archived"
-  | "navigate-flagged"
-  | "navigate-sources"
-  | "navigate-help-center"
-  | "navigate-sops"
-  | "navigate-company-info"
-  | "navigate-chat-widget"
-  | "navigate-greetings"
-  | "navigate-tools"
-  | "navigate-customers"
-  | "navigate-mcp-connections"
-  | "navigate-settings";
+export type DashboardNavCommandId = `navigate-${DashboardNavDestinationId}`;
 
 export interface DashboardNavSequence {
   kind: "sequence";
@@ -66,12 +36,11 @@ export interface DashboardNavItem {
   group: DashboardNavGroup;
   label: string;
   href: string;
-  icon: DashboardNavIcon;
   active: boolean;
   count?: number;
   searchTerms: string[];
   navigationCommandId: DashboardNavCommandId;
-  sequence: DashboardNavSequence;
+  sequence?: DashboardNavSequence;
 }
 
 export interface DashboardNavInput {
@@ -84,166 +53,213 @@ export interface DashboardNavInput {
 interface NavRecord {
   id: DashboardNavDestinationId;
   group: DashboardNavGroup;
-  icon: DashboardNavIcon;
   searchTerms: string[];
-  navigationCommandId: DashboardNavCommandId;
-  sequenceKey: string;
+  sequenceKey?: string;
 }
 
 const PROJECT_LABELS: Record<ProjectDestination, string> = {
-  dashboard: "Dashboard",
-  sources: "Sources",
-  "help-center": "Help Center",
-  sops: "SOPs",
-  "company-info": "Company info",
-  "chat-widget": "Chat Widget",
-  greetings: "Greetings",
-  tools: "Connectors",
   customers: "Customers",
-  "mcp-connections": "Connected apps",
+  knowledge: "Knowledge",
+  behavior: "Behavior",
+  connectors: "Connectors",
+  greetings: "Greetings",
+  "help-center": "Articles",
+  "help-home": "Home page",
   settings: "Settings",
+  "settings-appearance": "Appearance",
+  "settings-quick-actions": "Quick actions",
+  "settings-install": "Install",
+  "settings-channels": "Channels",
+  "settings-help-center": "Domain & site",
+  "settings-connected-apps": "MCP",
+  "settings-project": "Project",
+  "settings-team": "Team",
+  "settings-billing": "Billing",
+  "settings-profile": "Profile",
 };
+
+export const NAV_GROUP_LABELS: Record<DashboardNavGroup, string | null> = {
+  main: null,
+  more: null,
+  maven: "Maven",
+  "help-center": "Help Center",
+  "settings-widget": "Chat widget",
+  "settings-help-center": "Help Center",
+  "settings-apps": "Integrations",
+  "settings-workspace": "Workspace",
+  "settings-account": "Account",
+  "command-only": null,
+};
+
+export const SIDEBAR_GROUPS: readonly DashboardNavGroup[] = [
+  "main",
+  "maven",
+  "help-center",
+];
+
+export const SETTINGS_GROUPS: readonly DashboardNavGroup[] = [
+  "settings-widget",
+  "settings-help-center",
+  "settings-apps",
+  "settings-workspace",
+  "settings-account",
+];
 
 const NAV_RECORDS: NavRecord[] = [
   {
     id: "needs-you",
-    group: "inbox",
-    icon: "hand",
+    group: "main",
     searchTerms: ["needs you", "review", "waiting", "handoff"],
-    navigationCommandId: "navigate-needs-you",
     sequenceKey: "y",
   },
   {
     id: "inbox",
-    group: "inbox",
-    icon: "inbox",
+    group: "main",
     searchTerms: ["inbox", "all conversations", "open"],
-    navigationCommandId: "navigate-inbox",
     sequenceKey: "i",
   },
   {
+    id: "customers",
+    group: "main",
+    searchTerms: ["customers", "people", "contacts"],
+    sequenceKey: "u",
+  },
+  {
     id: "snoozed",
-    group: "inbox",
-    icon: "clock",
+    group: "more",
     searchTerms: ["snoozed", "later"],
-    navigationCommandId: "navigate-snoozed",
     sequenceKey: "z",
   },
   {
     id: "resolved",
-    group: "inbox",
-    icon: "check-circle",
+    group: "more",
     searchTerms: ["resolved", "closed", "done"],
-    navigationCommandId: "navigate-resolved",
     sequenceKey: "r",
   },
   {
     id: "archived",
-    group: "inbox",
-    icon: "archive",
+    group: "more",
     searchTerms: ["archived"],
-    navigationCommandId: "navigate-archived",
     sequenceKey: "a",
   },
   {
     id: "flagged",
-    group: "inbox",
-    icon: "flag",
-    searchTerms: ["flagged", "spam"],
-    navigationCommandId: "navigate-flagged",
+    group: "more",
+    searchTerms: ["spam", "flagged"],
     sequenceKey: "f",
   },
   {
-    id: "sources",
-    group: "knowledgebase",
-    icon: "database",
-    searchTerms: ["sources", "knowledge", "resources"],
-    navigationCommandId: "navigate-sources",
-    sequenceKey: "s",
+    id: "knowledge",
+    group: "maven",
+    searchTerms: ["knowledge", "sources", "resources", "company", "context", "working hours"],
+    sequenceKey: "k",
   },
   {
-    id: "help-center",
-    group: "knowledgebase",
-    icon: "book-open",
-    searchTerms: ["help center", "docs", "articles"],
-    navigationCommandId: "navigate-help-center",
-    sequenceKey: "h",
+    id: "behavior",
+    group: "maven",
+    searchTerms: ["behavior", "sops", "guidelines", "persona", "tone", "voice", "assistant name"],
+    sequenceKey: "b",
   },
   {
-    id: "sops",
-    group: "knowledgebase",
-    icon: "list-checks",
-    searchTerms: ["sops", "guidelines", "procedures"],
-    navigationCommandId: "navigate-sops",
-    sequenceKey: "o",
-  },
-  {
-    id: "company-info",
-    group: "knowledgebase",
-    icon: "building-2",
-    searchTerms: ["company info", "company", "general"],
-    navigationCommandId: "navigate-company-info",
+    id: "connectors",
+    group: "maven",
+    searchTerms: ["connectors", "tools", "mcp servers", "http", "webhooks"],
     sequenceKey: "c",
   },
   {
-    id: "chat-widget",
-    group: "support-chat",
-    icon: "message-square",
-    searchTerms: ["chat widget", "widget", "appearance"],
-    navigationCommandId: "navigate-chat-widget",
-    sequenceKey: "w",
-  },
-  {
     id: "greetings",
-    group: "support-chat",
-    icon: "messages-square",
-    searchTerms: ["greetings", "intro", "welcome"],
-    navigationCommandId: "navigate-greetings",
+    group: "maven",
+    searchTerms: ["greetings", "intro", "welcome", "announcements"],
     sequenceKey: "g",
   },
   {
-    id: "tools",
-    group: "support-chat",
-    icon: "cable",
-    searchTerms: ["connectors", "tools", "integrations", "mcp"],
-    navigationCommandId: "navigate-tools",
-    sequenceKey: "t",
+    id: "help-center",
+    group: "help-center",
+    searchTerms: ["help center", "docs", "articles"],
+    sequenceKey: "h",
   },
   {
-    id: "dashboard",
-    group: "workspace",
-    icon: "layout-dashboard",
-    searchTerms: ["dashboard", "home", "overview"],
-    navigationCommandId: "navigate-dashboard",
-    sequenceKey: "d",
-  },
-  {
-    id: "customers",
-    group: "workspace",
-    icon: "users",
-    searchTerms: ["customers", "people"],
-    navigationCommandId: "navigate-customers",
-    sequenceKey: "u",
-  },
-  {
-    id: "mcp-connections",
-    group: "workspace",
-    icon: "plug",
-    searchTerms: ["connected apps", "mcp connections", "mcp", "oauth"],
-    navigationCommandId: "navigate-mcp-connections",
-    sequenceKey: "m",
+    id: "help-home",
+    group: "help-center",
+    searchTerms: ["help center home", "home page", "landing"],
   },
   {
     id: "settings",
-    group: "workspace",
-    icon: "settings",
-    searchTerms: ["settings", "preferences", "account"],
-    navigationCommandId: "navigate-settings",
-    sequenceKey: "p",
+    group: "command-only",
+    searchTerms: ["settings", "preferences"],
+    sequenceKey: "s",
+  },
+  {
+    id: "settings-appearance",
+    group: "settings-widget",
+    searchTerms: ["appearance", "widget", "colors", "theme"],
+  },
+  {
+    id: "settings-quick-actions",
+    group: "settings-widget",
+    searchTerms: ["quick actions", "widget buttons", "actions"],
+  },
+  {
+    id: "settings-install",
+    group: "settings-widget",
+    searchTerms: ["install", "embed", "snippet", "identity secret", "signing"],
+  },
+  {
+    id: "settings-help-center",
+    group: "settings-help-center",
+    searchTerms: ["help center settings", "custom domain", "top nav", "analytics", "custom css"],
+  },
+  {
+    id: "settings-channels",
+    group: "settings-apps",
+    searchTerms: ["channels", "email", "inbound email", "forwarding", "telegram", "slack", "handoff"],
+  },
+  {
+    id: "settings-connected-apps",
+    group: "settings-apps",
+    searchTerms: ["mcp", "connected apps", "oauth", "claude", "cursor", "vs code"],
+  },
+  {
+    id: "settings-project",
+    group: "settings-workspace",
+    searchTerms: ["project", "slug", "auto-close", "delete project"],
+  },
+  {
+    id: "settings-team",
+    group: "settings-workspace",
+    searchTerms: ["team", "members", "invite"],
+  },
+  {
+    id: "settings-billing",
+    group: "settings-workspace",
+    searchTerms: ["billing", "plan", "usage", "seats", "message packs"],
+  },
+  {
+    id: "settings-profile",
+    group: "settings-account",
+    searchTerms: ["profile", "account", "email"],
   },
 ];
 
-function isInboxDestination(
+export const NAV_DESTINATION_IDS: readonly DashboardNavDestinationId[] =
+  NAV_RECORDS.map((record) => record.id);
+
+export const NAV_COMMAND_IDS: readonly DashboardNavCommandId[] =
+  NAV_DESTINATION_IDS.map((id) => navCommandId(id));
+
+export function navCommandId(
+  destination: DashboardNavDestinationId,
+): DashboardNavCommandId {
+  return `navigate-${destination}`;
+}
+
+export function navSequenceKey(
+  destination: DashboardNavDestinationId,
+): string | undefined {
+  return NAV_RECORDS.find((record) => record.id === destination)?.sequenceKey;
+}
+
+export function isInboxDestination(
   destination: DashboardNavDestinationId,
 ): destination is InboxFilter {
   return (INBOX_FILTER_IDS as readonly string[]).includes(destination);
@@ -301,8 +317,15 @@ function isNavActive(
     return current === record.id;
   }
   const path = href.split("?")[0] ?? href;
-  if (record.id === "dashboard") return pathname === path;
+  // Home page is a child path of Articles; keep only the deeper row lit.
+  if (record.id === "help-center" && pathname.startsWith(`${path}/home`)) {
+    return false;
+  }
   return pathname === path || pathname.startsWith(`${path}/`);
+}
+
+export function isSettingsPath(pathname: string): boolean {
+  return /^\/app\/projects\/[^/]+\/settings(\/|$)/.test(pathname);
 }
 
 export function dashboardNav(input: DashboardNavInput): DashboardNavItem[] {
@@ -314,12 +337,11 @@ export function dashboardNav(input: DashboardNavInput): DashboardNavItem[] {
       group: record.group,
       label,
       href,
-      icon: record.icon,
       active: isNavActive(record, href, input.pathname, input.search),
       searchTerms: searchTermsFor(record, label),
-      navigationCommandId: record.navigationCommandId,
-      sequence: navSequence(record.sequenceKey),
+      navigationCommandId: navCommandId(record.id),
     };
+    if (record.sequenceKey) item.sequence = navSequence(record.sequenceKey);
     if (isInboxDestination(record.id)) {
       item.count = input.counts?.[record.id] ?? 0;
     }
@@ -335,7 +357,7 @@ export function projectSwitchHref(
 ): string {
   const prefix = `/app/projects/${fromProjectId}`;
   if (!pathname.startsWith(prefix)) {
-    return projectRoute(toProjectId, "dashboard");
+    return `/app/projects/${toProjectId}`;
   }
   const nextPath = `/app/projects/${toProjectId}${pathname.slice(prefix.length)}`;
   const params = searchParamsFrom(search);

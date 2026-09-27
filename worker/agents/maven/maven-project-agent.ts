@@ -390,7 +390,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
   }
 
   private mcpOAuthReturnPath(): string {
-    return `/app/projects/${encodeURIComponent(this.name)}/support-chat/tools`;
+    return `/app/projects/${encodeURIComponent(this.name)}/maven/connectors`;
   }
 
   private finishMcpOAuthCallback(
@@ -1555,7 +1555,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
             conversationId,
           ),
           tools:
-            `${this.env.BETTER_AUTH_URL}/app/projects/${this.name}/support-chat/tools`,
+            `${this.env.BETTER_AUTH_URL}/app/projects/${this.name}/maven/connectors`,
         },
         emailSubject: emailThreads?.subject ??
           readConversationChannelMetadata(publicSnapshot.conversation.metadata)

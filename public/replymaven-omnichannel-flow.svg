@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 475" role="img" aria-labelledby="title desc">
+  <title id="title">ReplyMaven omnichannel support flow</title>
+  <desc id="desc">Website widget, Gmail, and webhooks flow into Maven in the ReplyMaven omni inbox. Maven routes team escalations to Slack, Telegram, the ReplyMaven shared inbox, and an email inbox.</desc>
+  <defs>
+    <linearGradient id="maven" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#60a5fa"/><stop offset="1" stop-color="#2563eb"/></linearGradient>
+    <linearGradient id="focus" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#142746"/><stop offset="1" stop-color="#10131a"/></linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="18"/></filter>
+  </defs>
+  <rect width="1200" height="475" fill="#08080a"/>
+  <style>
+    text{font-family:Inter,ui-sans-serif,system-ui,sans-serif} .head{fill:#f5f5f7;font-size:20px;font-weight:600;letter-spacing:-.4px}.label{fill:#f5f5f7;font-size:16px;font-weight:550}.sub{fill:#98989d;font-size:13px}.small{fill:#6e6e73;font-size:12px}.node{fill:#111216}.line{fill:none;stroke:#353943;stroke-width:2}.flow{fill:none;stroke:#4777cd;stroke-width:2.5;stroke-linecap:round;stroke-dasharray:5 8}
+  </style>
+  <ellipse cx="600" cy="275" rx="175" ry="180" fill="#2563eb" opacity=".14" filter="url(#glow)"/>
+  <text x="72" y="54" class="head">Omnichannel inbound</text>
+  <text x="449" y="54" class="head">Frontline support agent</text>
+  <text x="870" y="54" class="head">Smart escalation routing</text>
+
+  <!-- inbound -->
+  <rect x="72" y="94" width="282" height="92" rx="18" class="node"/>
+  <circle cx="112" cy="140" r="23" fill="#17233a"/><image href="data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgMjggMzIiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPCEtLSBGaXhlZCBicmFuZCBibHVlOiBzaG93biBhcyBhbiA8aW1nPiwgc28gaXQgY2Fubm90IHJlYWQgdGhlIGFwcCB0aGVtZS4gLS0+CiAgPG1hc2sgaWQ9InNtaWxlLW1hc2siPgogICAgPHJlY3Qgd2lkdGg9IjI4IiBoZWlnaHQ9IjMyIiBmaWxsPSJ3aGl0ZSIvPgogICAgPHBhdGggZD0iTTYgMTRDMTEuMzMzMyAxOS4zMzMzIDE2LjY2NjcgMTkuMzMzMyAyMiAxNCIgc3Ryb2tlPSJibGFjayIgc3Ryb2tlLXdpZHRoPSIxLjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgogIDwvbWFzaz4KICA8cGF0aCBmaWxsPSIjMjU2M2ViIiBtYXNrPSJ1cmwoI3NtaWxlLW1hc2spIiBkPSJNMjQgMzJINkMyLjY4NzUgMzIgMCAyOS4zMTI1IDAgMjZWNkMwIDIuNjg3NSAyLjY4NzUgMCA2IDBIMjVDMjYuNjU2MiAwIDI4IDEuMzQzNzUgMjggM1YyMUMyOCAyMi4zMDYyIDI3LjE2MjUgMjMuNDE4NyAyNiAyMy44MzEyVjI4QzI3LjEwNjMgMjggMjggMjguODkzNyAyOCAzMEMyOCAzMS4xMDYzIDI3LjEwNjMgMzIgMjYgMzJIMjRaTTYgMjRDNC44OTM3NSAyNCA0IDI0Ljg5MzcgNCAyNkM0IDI3LjEwNjMgNC44OTM3NSAyOCA2IDI4SDIyVjI0SDZaIi8+Cjwvc3ZnPgo=" x="100" y="126" width="24" height="28"/>
+  <text x="151" y="137" class="label">Website widget</text><text x="151" y="159" class="sub">Customer conversations</text>
+  <rect x="72" y="216" width="282" height="92" rx="18" class="node"/>
+  <rect x="89" y="237" width="46" height="46" rx="14" fill="#fff"/>
+  <path d="M98 271v-19l14 11 14-11v19" fill="none" stroke="#4285f4" stroke-width="5" stroke-linejoin="round"/>
+  <path d="m98 252 14 11 14-11" fill="none" stroke="#ea4335" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M98 252v19" fill="none" stroke="#34a853" stroke-width="5"/><path d="M126 252v19" fill="none" stroke="#fbbc04" stroke-width="5"/>
+  <text x="151" y="259" class="label">Gmail</text><text x="151" y="281" class="sub">support@northwind.com</text>
+  <rect x="72" y="338" width="282" height="92" rx="18" class="node"/>
+  <circle cx="112" cy="384" r="23" fill="#17233a"/>
+  <path d="M106 379a6 6 0 0 1 10 4l-4 7m-4-11-4 7m8 4h8m-12-2 4 7" fill="none" stroke="#8bb8ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="106" cy="379" r="2.5" fill="#8bb8ff"/><circle cx="120" cy="390" r="2.5" fill="#8bb8ff"/><circle cx="110" cy="401" r="2.5" fill="#8bb8ff"/>
+  <text x="151" y="381" class="label">Webhooks</text><text x="151" y="403" class="sub">Inbound events</text>
+
+  <!-- connectors -->
+  <path d="M354 140 C410 140 420 240 478 240M354 262H478M354 384C410 384 420 284 478 284" class="line"/>
+  <path d="M354 140 C410 140 420 240 478 240M354 262H478M354 384C410 384 420 284 478 284" class="flow"/>
+  <path d="M722 262H811" class="line"/><path d="M722 262H811" class="flow"/>
+
+  <!-- Maven inbox -->
+  <rect x="478" y="164" width="244" height="196" rx="26" fill="url(#focus)"/>
+  <circle cx="600" cy="220" r="31" fill="#eef4ff"/><image href="data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgMjggMzIiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPCEtLSBGaXhlZCBicmFuZCBibHVlOiBzaG93biBhcyBhbiA8aW1nPiwgc28gaXQgY2Fubm90IHJlYWQgdGhlIGFwcCB0aGVtZS4gLS0+CiAgPG1hc2sgaWQ9InNtaWxlLW1hc2siPgogICAgPHJlY3Qgd2lkdGg9IjI4IiBoZWlnaHQ9IjMyIiBmaWxsPSJ3aGl0ZSIvPgogICAgPHBhdGggZD0iTTYgMTRDMTEuMzMzMyAxOS4zMzMzIDE2LjY2NjcgMTkuMzMzMyAyMiAxNCIgc3Ryb2tlPSJibGFjayIgc3Ryb2tlLXdpZHRoPSIxLjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgogIDwvbWFzaz4KICA8cGF0aCBmaWxsPSIjMjU2M2ViIiBtYXNrPSJ1cmwoI3NtaWxlLW1hc2spIiBkPSJNMjQgMzJINkMyLjY4NzUgMzIgMCAyOS4zMTI1IDAgMjZWNkMwIDIuNjg3NSAyLjY4NzUgMCA2IDBIMjVDMjYuNjU2MiAwIDI4IDEuMzQzNzUgMjggM1YyMUMyOCAyMi4zMDYyIDI3LjE2MjUgMjMuNDE4NyAyNiAyMy44MzEyVjI4QzI3LjEwNjMgMjggMjggMjguODkzNyAyOCAzMEMyOCAzMS4xMDYzIDI3LjEwNjMgMzIgMjYgMzJIMjRaTTYgMjRDNC44OTM3NSAyNCA0IDI0Ljg5MzcgNCAyNkM0IDI3LjEwNjMgNC44OTM3NSAyOCA2IDI4SDIyVjI0SDZaIi8+Cjwvc3ZnPgo=" x="585" y="203" width="30" height="34"/>
+  <text x="600" y="277" text-anchor="middle" class="label">Maven</text>
+  <text x="600" y="301" text-anchor="middle" class="sub">ReplyMaven omni inbox</text>
+  <rect x="531" y="322" width="138" height="24" rx="12" fill="#1b2b45"/><circle cx="547" cy="334" r="4" fill="#30d158"/><text x="560" y="338" fill="#b9d4ff" font-size="11">Answering first</text>
+
+  <!-- escalation routes -->
+  <path d="M811 140v244" class="line"/><path d="M811 140h35M811 262h35M811 384h35" class="line"/>
+  <rect x="846" y="94" width="282" height="92" rx="18" class="node"/>
+  <circle cx="882" cy="140" r="20" fill="#211a22"/><image href="data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjRTAxRTVBIiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48dGl0bGU+U2xhY2s8L3RpdGxlPjxwYXRoIGQ9Ik01LjA0MiAxNS4xNjVhMi41MjggMi41MjggMCAwIDEtMi41MiAyLjUyM0EyLjUyOCAyLjUyOCAwIDAgMSAwIDE1LjE2NWEyLjUyNyAyLjUyNyAwIDAgMSAyLjUyMi0yLjUyaDIuNTJ2Mi41MnpNNi4zMTMgMTUuMTY1YTIuNTI3IDIuNTI3IDAgMCAxIDIuNTIxLTIuNTIgMi41MjcgMi41MjcgMCAwIDEgMi41MjEgMi41MnY2LjMxM0EyLjUyOCAyLjUyOCAwIDAgMSA4LjgzNCAyNGEyLjUyOCAyLjUyOCAwIDAgMS0yLjUyMS0yLjUyMnYtNi4zMTN6TTguODM0IDUuMDQyYTIuNTI4IDIuNTI4IDAgMCAxLTIuNTIxLTIuNTJBMi41MjggMi41MjggMCAwIDEgOC44MzQgMGEyLjUyOCAyLjUyOCAwIDAgMSAyLjUyMSAyLjUyMnYyLjUySDguODM0ek04LjgzNCA2LjMxM2EyLjUyOCAyLjUyOCAwIDAgMSAyLjUyMSAyLjUyMSAyLjUyOCAyLjUyOCAwIDAgMS0yLjUyMSAyLjUyMUgyLjUyMkEyLjUyOCAyLjUyOCAwIDAgMSAwIDguODM0YTIuNTI4IDIuNTI4IDAgMCAxIDIuNTIyLTIuNTIxaDYuMzEyek0xOC45NTYgOC44MzRhMi41MjggMi41MjggMCAwIDEgMi41MjItMi41MjFBMi41MjggMi41MjggMCAwIDEgMjQgOC44MzRhMi41MjggMi41MjggMCAwIDEtMi41MjIgMi41MjFoLTIuNTIyVjguODM0ek0xNy42ODggOC44MzRhMi41MjggMi41MjggMCAwIDEtMi41MjMgMi41MjEgMi41MjcgMi41MjcgMCAwIDEtMi41Mi0yLjUyMVYyLjUyMkEyLjUyNyAyLjUyNyAwIDAgMSAxNS4xNjUgMGEyLjUyOCAyLjUyOCAwIDAgMSAyLjUyMyAyLjUyMnY2LjMxMnpNMTUuMTY1IDE4Ljk1NmEyLjUyOCAyLjUyOCAwIDAgMSAyLjUyMyAyLjUyMkEyLjUyOCAyLjUyOCAwIDAgMSAxNS4xNjUgMjRhMi41MjcgMi41MjcgMCAwIDEtMi41Mi0yLjUyMnYtMi41MjJoMi41MnpNMTUuMTY1IDE3LjY4OGEyLjUyNyAyLjUyNyAwIDAgMS0yLjUyLTIuNTIzIDIuNTI2IDIuNTI2IDAgMCAxIDIuNTItMi41Mmg2LjMxM0EyLjUyNyAyLjUyNyAwIDAgMSAyNCAxNS4xNjVhMi41MjggMi41MjggMCAwIDEtMi41MjIgMi41MjNoLTYuMzEzeiIvPjwvc3ZnPgo=" x="870" y="128" width="24" height="24"/>
+  <circle cx="922" cy="140" r="20" fill="#122331"/><image href="data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjMjZBNUU0IiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48dGl0bGU+VGVsZWdyYW08L3RpdGxlPjxwYXRoIGQ9Ik0xMS45NDQgMEExMiAxMiAwIDAgMCAwIDEyYTEyIDEyIDAgMCAwIDEyIDEyIDEyIDEyIDAgMCAwIDEyLTEyQTEyIDEyIDAgMCAwIDEyIDBhMTIgMTIgMCAwIDAtLjA1NiAwem00Ljk2MiA3LjIyNGMuMS0uMDAyLjMyMS4wMjMuNDY1LjE0YS41MDYuNTA2IDAgMCAxIC4xNzEuMzI1Yy4wMTYuMDkzLjAzNi4zMDYuMDIuNDcyLS4xOCAxLjg5OC0uOTYyIDYuNTAyLTEuMzYgOC42MjctLjE2OC45LS40OTkgMS4yMDEtLjgyIDEuMjMtLjY5Ni4wNjUtMS4yMjUtLjQ2LTEuOS0uOTAyLTEuMDU2LS42OTMtMS42NTMtMS4xMjQtMi42NzgtMS44LTEuMTg1LS43OC0uNDE3LTEuMjEuMjU4LTEuOTEuMTc3LS4xODQgMy4yNDctMi45NzcgMy4zMDctMy4yMy4wMDctLjAzMi4wMTQtLjE1LS4wNTYtLjIxMnMtLjE3NC0uMDQxLS4yNDktLjAyNGMtLjEwNi4wMjQtMS43OTMgMS4xNC01LjA2MSAzLjM0NS0uNDguMzMtLjkxMy40OS0xLjMwMi40OC0uNDI4LS4wMDgtMS4yNTItLjI0MS0xLjg2NS0uNDQtLjc1Mi0uMjQ1LTEuMzQ5LS4zNzQtMS4yOTctLjc4OS4wMjctLjIxNi4zMjUtLjQzNy44OTMtLjY2MyAzLjQ5OC0xLjUyNCA1LjgzLTIuNTI5IDYuOTk4LTMuMDE0IDMuMzMyLTEuMzg2IDQuMDI1LTEuNjI3IDQuNDc2LTEuNjM1eiIvPjwvc3ZnPgo=" x="910" y="128" width="24" height="24"/>
+  <text x="958" y="137" class="label">Slack + Telegram</text><text x="958" y="159" class="sub">Team channels</text>
+  <rect x="846" y="216" width="282" height="92" rx="18" class="node"/>
+  <circle cx="887" cy="262" r="23" fill="#17233a"/><image href="data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgMjggMzIiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPCEtLSBGaXhlZCBicmFuZCBibHVlOiBzaG93biBhcyBhbiA8aW1nPiwgc28gaXQgY2Fubm90IHJlYWQgdGhlIGFwcCB0aGVtZS4gLS0+CiAgPG1hc2sgaWQ9InNtaWxlLW1hc2siPgogICAgPHJlY3Qgd2lkdGg9IjI4IiBoZWlnaHQ9IjMyIiBmaWxsPSJ3aGl0ZSIvPgogICAgPHBhdGggZD0iTTYgMTRDMTEuMzMzMyAxOS4zMzMzIDE2LjY2NjcgMTkuMzMzMyAyMiAxNCIgc3Ryb2tlPSJibGFjayIgc3Ryb2tlLXdpZHRoPSIxLjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgogIDwvbWFzaz4KICA8cGF0aCBmaWxsPSIjMjU2M2ViIiBtYXNrPSJ1cmwoI3NtaWxlLW1hc2spIiBkPSJNMjQgMzJINkMyLjY4NzUgMzIgMCAyOS4zMTI1IDAgMjZWNkMwIDIuNjg3NSAyLjY4NzUgMCA2IDBIMjVDMjYuNjU2MiAwIDI4IDEuMzQzNzUgMjggM1YyMUMyOCAyMi4zMDYyIDI3LjE2MjUgMjMuNDE4NyAyNiAyMy44MzEyVjI4QzI3LjEwNjMgMjggMjggMjguODkzNyAyOCAzMEMyOCAzMS4xMDYzIDI3LjEwNjMgMzIgMjYgMzJIMjRaTTYgMjRDNC44OTM3NSAyNCA0IDI0Ljg5MzcgNCAyNkM0IDI3LjEwNjMgNC44OTM3NSAyOCA2IDI4SDIyVjI0SDZaIi8+Cjwvc3ZnPgo=" x="875" y="248" width="24" height="28"/>
+  <text x="926" y="259" class="label">ReplyMaven</text><text x="926" y="281" class="sub">Shared inbox</text>
+  <rect x="846" y="338" width="282" height="92" rx="18" class="node"/>
+  <rect x="864" y="361" width="46" height="46" rx="14" fill="#fff"/>
+  <path d="M873 395v-19l14 11 14-11v19" fill="none" stroke="#4285f4" stroke-width="5" stroke-linejoin="round"/><path d="m873 376 14 11 14-11" fill="none" stroke="#ea4335" stroke-width="5" stroke-linejoin="round"/><path d="M873 376v19" fill="none" stroke="#34a853" stroke-width="5"/><path d="M901 376v19" fill="none" stroke="#fbbc04" stroke-width="5"/>
+  <text x="926" y="381" class="label">Gmail</text><text x="926" y="403" class="sub">amanda@northwind.com</text>
+</svg>

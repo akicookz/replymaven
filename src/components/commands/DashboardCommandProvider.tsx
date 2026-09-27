@@ -32,6 +32,7 @@ export interface InboxCommandRegistration {
 
 interface DashboardCommandApi {
   registerInbox: (registration: InboxCommandRegistration | null) => void;
+  openMenu: () => void;
 }
 
 const DashboardCommandApiContext = createContext<DashboardCommandApi | null>(
@@ -133,6 +134,14 @@ export function useRegisterInboxCommands(
   }
 }
 
+export function useOpenCommandMenu(): () => void {
+  const api = useContext(DashboardCommandApiContext);
+  if (api == null) {
+    throw new Error("useOpenCommandMenu requires DashboardCommandProvider");
+  }
+  return api.openMenu;
+}
+
 export function DashboardCommandProvider({
   projectId,
   children,
@@ -160,9 +169,15 @@ export function DashboardCommandProvider({
     },
     [],
   );
+  const openMenu = useCallback(() => {
+    if (menuOpenRef.current) return;
+    restoreFocusRef.current = document.activeElement;
+    applyPending(pendingRef, timerRef, cancelPendingSequence());
+    setMenuOpen(true);
+  }, []);
   const api = useMemo<DashboardCommandApi>(
-    () => ({ registerInbox }),
-    [registerInbox],
+    () => ({ registerInbox, openMenu }),
+    [registerInbox, openMenu],
   );
 
   const scope = inboxRegistration?.scope

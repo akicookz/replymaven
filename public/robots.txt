@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /app
+Disallow: /api/
+
+Sitemap: https://replymaven.com/sitemap.xml
+Sitemap: https://replymaven.com/docs/sitemap.xml

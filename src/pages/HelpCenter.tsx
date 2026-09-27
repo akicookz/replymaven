@@ -501,7 +501,7 @@ function HelpCenter() {
 
   function handleNewArticleInCategory(categoryId: string) {
     navigate(
-      `/app/projects/${projectId}/knowledgebase/help-center/articles/new?categoryId=${categoryId}`,
+      `/app/projects/${projectId}/help-center/articles/new?categoryId=${categoryId}`,
     );
   }
 
@@ -516,7 +516,7 @@ function HelpCenter() {
       return;
     }
     navigate(
-      `/app/projects/${projectId}/knowledgebase/help-center/articles/new?categoryId=${selectedCategoryId}`,
+      `/app/projects/${projectId}/help-center/articles/new?categoryId=${selectedCategoryId}`,
     );
   }
 
@@ -561,7 +561,7 @@ function HelpCenter() {
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           <Button asChild variant="outline" size="sm">
-            <Link to={`/app/projects/${projectId}/knowledgebase/help-center/settings`}>
+            <Link to={`/app/projects/${projectId}/settings/help-center`}>
               <Settings className="w-4 h-4" />
               <span className="hidden sm:inline">Site settings</span>
               <span className="sr-only sm:hidden">Site settings</span>
@@ -636,7 +636,7 @@ function HelpCenter() {
             <div className="flex gap-2 overflow-x-auto pb-1 lg:hidden">
               {showHomeLink ? (
                 <Link
-                  to={`/app/projects/${projectId}/knowledgebase/help-center/home`}
+                  to={`/app/projects/${projectId}/help-center/home`}
                   className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-glass-button px-2.5 py-1.5 text-sm font-medium text-foreground/70"
                 >
                   <Home className="h-4 w-4" />
@@ -667,7 +667,7 @@ function HelpCenter() {
           <aside className="hidden space-y-3 lg:sticky lg:top-6 lg:block">
             {showHomeLink ? (
               <Link
-                to={`/app/projects/${projectId}/knowledgebase/help-center/home`}
+                to={`/app/projects/${projectId}/help-center/home`}
                 className="flex items-center gap-2.5 rounded-lg py-1.5 pr-1 transition-colors hover:bg-glass-card"
               >
                 <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-glass-button text-muted-foreground">

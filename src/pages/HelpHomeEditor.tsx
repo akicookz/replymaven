@@ -210,7 +210,7 @@ function HelpHomeEditorPage() {
         <div className="flex min-w-0 items-center gap-2">
           <MobileMenuButton />
           <Button asChild variant="ghost" size="sm" className="-ml-1">
-            <Link to={`/app/projects/${projectId}/knowledgebase/help-center`}>
+            <Link to={`/app/projects/${projectId}/help-center`}>
               <ArrowLeft className="h-4 w-4" />
               <span className="hidden sm:inline">Articles</span>
             </Link>

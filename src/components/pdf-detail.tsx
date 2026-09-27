@@ -120,10 +120,12 @@ function PdfResourceDetail({
                 Save
               </Button>
             )}
-            <Button variant="outline" size="sm" onClick={onReindex}>
-              <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-              Re-extract
-            </Button>
+            {onReindex && (
+              <Button variant="outline" size="sm" onClick={onReindex}>
+                <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+                Re-extract
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -147,10 +149,12 @@ function PdfResourceDetail({
             <span className="font-medium text-foreground">{resourceTitle}</span>
           </span>
         </div>
-        <Button variant="outline" size="sm" onClick={onReindex}>
-          <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-          Re-extract
-        </Button>
+        {onReindex && (
+          <Button variant="outline" size="sm" onClick={onReindex}>
+            <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+            Re-extract
+          </Button>
+        )}
       </div>
 
       <Textarea

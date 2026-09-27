@@ -151,7 +151,7 @@ function SortHeader({
 
   return (
     <th
-      className="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider cursor-pointer select-none hover:text-foreground transition-colors"
+      className="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
       onClick={() =>
         onSort(field, isActive && currentOrder === "asc" ? "desc" : "asc")
       }
@@ -350,7 +350,7 @@ function UsageLog() {
         <table className="w-full min-w-[500px]">
           <thead>
             <tr className="bg-glass-card">
-              <th className="px-6 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <th className="px-6 py-2.5 text-left text-xs font-medium text-muted-foreground">
                 Visitor
               </th>
               <SortHeader
@@ -360,7 +360,7 @@ function UsageLog() {
                 currentOrder={sortOrder}
                 onSort={handleSort}
               />
-              <th className="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <th className="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground">
                 Status
               </th>
               <SortHeader

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 import {
   Routes,
   Route,
@@ -11,7 +11,10 @@ import { useQuery } from "@tanstack/react-query";
 import { Toaster } from "sonner";
 import {
   getInboxDestination,
+  getLegacySettingsDestination,
   projectRoute,
+  settingsRoute,
+  type ProjectDestination,
 } from "@/lib/dashboard-routes";
 import { ThemeContext } from "@/lib/theme";
 
@@ -20,22 +23,21 @@ import AuthGuard from "./components/AuthGuard";
 import OnboardingGuard from "./components/OnboardingGuard";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Landing from "./pages/Landing";
+import ContactSales from "./pages/ContactSales";
 import LandingMocks from "./pages/LandingMocks";
 import { useSubscription } from "./hooks/use-subscription";
 
-import Dashboard from "./pages/Dashboard";
 import Onboarding from "./pages/Onboarding";
 import Conversations from "./pages/Conversations";
 import Customers from "./pages/Customers";
 import CustomerDetail from "./pages/CustomerDetail";
-import ChatWidget from "./pages/ChatWidget";
-import GeneralSettings from "./pages/GeneralSettings";
 import HelpCenter from "./pages/HelpCenter";
 import McpConnections from "./pages/McpConnections";
 import Resources from "./pages/Resources";
+import SourceDetail from "./pages/SourceDetail";
+import CrawledPageDetail from "./pages/CrawledPageDetail";
 import Sops from "./pages/Sops";
 import Tools from "./pages/Tools";
-import Settings from "./pages/Settings";
 import WidgetGreetings from "./pages/WidgetGreetings";
 import AuthCallback from "./pages/AuthCallback";
 import TeamAccept from "./pages/TeamAccept";
@@ -43,6 +45,17 @@ import LinkTelegram from "./pages/LinkTelegram";
 import HelpCenterSettings from "./pages/HelpCenterSettings";
 import HelpArticleEditor from "./pages/HelpArticleEditor";
 import HelpHomeEditor from "./pages/HelpHomeEditor";
+import ProjectSettings from "./pages/ProjectSettings";
+import { SettingsPage } from "./components/settings/SettingsPage";
+import Team from "./pages/Team";
+import Billing from "./pages/Billing";
+import Profile from "./pages/Profile";
+import {
+  AppearanceSettings,
+  QuickActionsSettings,
+} from "./pages/settings/WidgetSettingsPages";
+import { InstallSettings } from "./pages/settings/InstallSettings";
+import { ChannelsSettings } from "./pages/settings/ChannelSettings";
 
 // ─── Redirect /app to first project's inbox ──────────────────────────────────
 function AppRedirect() {
@@ -98,7 +111,7 @@ function AppRedirect() {
   return <Navigate to="/app/onboarding" replace />;
 }
 
-function InboxRedirect() {
+function InboxRedirect({ projectId: targetProjectId }: { projectId?: string }) {
   const {
     data: projects,
     isPending: projectsPending,
@@ -113,7 +126,7 @@ function InboxRedirect() {
     staleTime: 0,
   });
 
-  const projectId = projects?.[0]?.id;
+  const projectId = targetProjectId ?? projects?.[0]?.id;
   const {
     data: inboxCounts,
     isPending: countsPending,
@@ -157,7 +170,7 @@ function AccountRedirect({ tab }: { tab: string }) {
   if (projects && projects.length > 0) {
     return (
       <Navigate
-        to={`/app/projects/${projects[0].id}/settings?tab=${tab}`}
+        to={getLegacySettingsDestination(projects[0].id, tab)}
         replace
       />
     );
@@ -165,14 +178,34 @@ function AccountRedirect({ tab }: { tab: string }) {
   return <Navigate to="/app" replace />;
 }
 
-function ProjectPageRedirect({ target }: { target: string }) {
+function ProjectHomeRedirect() {
   const { projectId } = useParams<{ projectId: string }>();
+  return <InboxRedirect projectId={projectId} />;
+}
 
-  if (!projectId) {
-    return <Navigate to="/app" replace />;
-  }
+// Old URLs keep working; the query string rides along unless a target sets its own.
+function ProjectRedirect({ to }: { to: ProjectDestination }) {
+  const { projectId } = useParams<{ projectId: string }>();
+  const location = useLocation();
+  if (!projectId) return <Navigate to="/app" replace />;
+  return (
+    <Navigate
+      to={{ pathname: projectRoute(projectId, to), search: location.search }}
+      replace
+    />
+  );
+}
 
-  return <Navigate to={`/app/projects/${projectId}/${target}`} replace />;
+function SettingsIndexRedirect() {
+  const { projectId } = useParams<{ projectId: string }>();
+  const [searchParams] = useSearchParams();
+  if (!projectId) return <Navigate to="/app" replace />;
+  return (
+    <Navigate
+      to={getLegacySettingsDestination(projectId, searchParams.get("tab"))}
+      replace
+    />
+  );
 }
 
 function LegacyKnowledgeRedirect() {
@@ -181,14 +214,26 @@ function LegacyKnowledgeRedirect() {
 
   if (!projectId) return <Navigate to="/app" replace />;
 
-  const tab = searchParams.get("tab");
-  const destination = tab === "sources"
-    ? "sources"
-    : tab === "sops"
-      ? "sops"
-      : "help-center";
+  const destination = ({
+    sources: "knowledge",
+    sops: "behavior",
+  } as const)[searchParams.get("tab") ?? ""] ?? "help-center";
 
   return <Navigate to={projectRoute(projectId, destination)} replace />;
+}
+
+function LegacyChatWidgetRedirect() {
+  const { projectId } = useParams<{ projectId: string }>();
+  const [searchParams] = useSearchParams();
+
+  if (!projectId) return <Navigate to="/app" replace />;
+  if (searchParams.get("install") === "open") {
+    return <Navigate to={settingsRoute(projectId, "install")} replace />;
+  }
+  if (searchParams.get("tab") === "actions") {
+    return <Navigate to={settingsRoute(projectId, "quick-actions")} replace />;
+  }
+  return <Navigate to={settingsRoute(projectId, "appearance")} replace />;
 }
 
 function LegacyConfigurationRedirect() {
@@ -202,24 +247,19 @@ function LegacyConfigurationRedirect() {
     return <Navigate to={projectRoute(projectId, "greetings")} replace />;
   }
   if (section === "installation") {
-    return (
-      <Navigate
-        to={`${projectRoute(projectId, "chat-widget")}?install=open`}
-        replace
-      />
-    );
+    return <Navigate to={settingsRoute(projectId, "install")} replace />;
   }
   if (section === "conversation") {
-    return <Navigate to={projectRoute(projectId, "company-info")} replace />;
+    return <Navigate to={settingsRoute(projectId, "project")} replace />;
   }
   if (section === "actions") {
     const destination = searchParams.get("tab") === "tools"
-      ? projectRoute(projectId, "tools")
-      : `${projectRoute(projectId, "chat-widget")}?tab=actions`;
+      ? projectRoute(projectId, "connectors")
+      : settingsRoute(projectId, "quick-actions");
     return <Navigate to={destination} replace />;
   }
 
-  return <Navigate to={projectRoute(projectId, "chat-widget")} replace />;
+  return <Navigate to={settingsRoute(projectId, "appearance")} replace />;
 }
 
 function LegacyQuickActionsRedirect() {
@@ -229,12 +269,12 @@ function LegacyQuickActionsRedirect() {
   if (!projectId) return <Navigate to="/app" replace />;
 
   const destination = searchParams.get("tab") === "tools"
-    ? projectRoute(projectId, "tools")
-    : `${projectRoute(projectId, "chat-widget")}?tab=actions`;
+    ? projectRoute(projectId, "connectors")
+    : settingsRoute(projectId, "quick-actions");
   return <Navigate to={destination} replace />;
 }
 
-function LegacyHelpRedirect({ target }: { target: "index" | "settings" | "new" | "article" }) {
+function LegacyHelpRedirect({ target }: { target: "index" | "settings" | "new" | "article" | "home" }) {
   const { projectId, articleId } = useParams<{
     projectId: string;
     articleId?: string;
@@ -244,20 +284,25 @@ function LegacyHelpRedirect({ target }: { target: "index" | "settings" | "new" |
   if (!projectId) return <Navigate to="/app" replace />;
 
   const base = projectRoute(projectId, "help-center");
-  const pathname = target === "settings"
-    ? `${base}/settings`
-    : target === "new"
-      ? `${base}/articles/new`
-      : target === "article" && articleId
-        ? `${base}/articles/${articleId}`
-        : base;
+  const pathnames: Record<typeof target, string> = {
+    index: base,
+    settings: settingsRoute(projectId, "help-center"),
+    new: `${base}/articles/new`,
+    article: articleId ? `${base}/articles/${articleId}` : base,
+    home: projectRoute(projectId, "help-home"),
+  };
 
   return (
     <Navigate
-      to={{ pathname, search: location.search }}
+      to={{ pathname: pathnames[target], search: location.search }}
       replace
     />
   );
+}
+
+// Width frame for Settings sections that render their own header; matches SettingsPage.
+function SettingsFrame({ children }: { children: ReactNode }) {
+  return <div className="w-full max-w-4xl">{children}</div>;
 }
 
 function App() {
@@ -279,6 +324,7 @@ function App() {
     />
     <Routes>
       <Route path="/" element={<Landing />} />
+      <Route path="/contact-sales" element={<ContactSales />} />
       <Route path="/landing-mocks" element={<LandingMocks />} />
 
       <Route
@@ -382,154 +428,74 @@ function App() {
       >
         <Route index element={<AppRedirect />} />
         <Route path="new-project" element={<Navigate to="/app/onboarding?new=1" replace />} />
-        <Route
-          path="projects/:projectId"
-          element={<Dashboard />}
-        />
-        <Route
-          path="projects/:projectId/conversations"
-          element={<Conversations />}
-        />
-        <Route
-          path="projects/:projectId/customers"
-          element={<Customers />}
-        />
-        <Route
-          path="projects/:projectId/customers/:customerId"
-          element={<CustomerDetail />}
-        />
-        <Route
-          path="projects/:projectId/knowledge"
-          element={<LegacyKnowledgeRedirect />}
-        />
-        <Route
-          path="projects/:projectId/company"
-          element={<ProjectPageRedirect target="knowledgebase/company-info" />}
-        />
-        <Route
-          path="projects/:projectId/knowledgebase"
-          element={<ProjectPageRedirect target="knowledgebase/sources" />}
-        />
-        <Route
-          path="projects/:projectId/knowledgebase/sources"
-          element={<Resources />}
-        />
-        <Route
-          path="projects/:projectId/knowledgebase/help-center"
-          element={<HelpCenter />}
-        />
-        <Route
-          path="projects/:projectId/knowledgebase/company-info"
-          element={<GeneralSettings />}
-        />
-        <Route
-          path="projects/:projectId/knowledgebase/sops"
-          element={<Sops />}
-        />
-        <Route
-          path="projects/:projectId/resources"
-          element={<ProjectPageRedirect target="knowledgebase/sources" />}
-        />
-        <Route
-          path="projects/:projectId/settings"
-          element={<Settings />}
-        />
-        <Route
-          path="projects/:projectId/mcp-connections"
-          element={<McpConnections />}
-        />
-        <Route
-          path="projects/:projectId/support-chat/widget"
-          element={<ChatWidget />}
-        />
-        <Route
-          path="projects/:projectId/support-chat/greetings"
-          element={<WidgetGreetings />}
-        />
-        <Route
-          path="projects/:projectId/support-chat/tools"
-          element={<Tools />}
-        />
-        <Route
-          path="projects/:projectId/configuration"
-          element={<LegacyConfigurationRedirect />}
-        />
-        <Route
-          path="projects/:projectId/widget"
-          element={<ProjectPageRedirect target="support-chat/widget" />}
-        />
-        <Route
-          path="projects/:projectId/widget/home"
-          element={<ProjectPageRedirect target="support-chat/widget" />}
-        />
-        <Route
-          path="projects/:projectId/widget/greetings"
-          element={<ProjectPageRedirect target="support-chat/greetings" />}
-        />
-        <Route
-          path="projects/:projectId/widget/installation"
-          element={<ProjectPageRedirect target="support-chat/widget?install=open" />}
-        />
-        <Route
-          path="projects/:projectId/widget/quick-actions"
-          element={<ProjectPageRedirect target="support-chat/widget?tab=actions" />}
-        />
-        <Route
-          path="projects/:projectId/widget/tools"
-          element={<ProjectPageRedirect target="support-chat/tools" />}
-        />
-        <Route
-          path="projects/:projectId/widget/*"
-          element={<ProjectPageRedirect target="support-chat/widget" />}
-        />
-        <Route
-          path="projects/:projectId/tickets"
-          element={<Navigate to="../conversations?filter=needs-you" replace />}
-        />
-        <Route
-          path="projects/:projectId/inquiries"
-          element={<Navigate to="../conversations?filter=needs-you" replace />}
-        />
-        <Route
-          path="projects/:projectId/quick-actions"
-          element={<LegacyQuickActionsRedirect />}
-        />
-        <Route
-          path="projects/:projectId/tools"
-          element={<ProjectPageRedirect target="support-chat/tools" />}
-        />
-        <Route
-          path="projects/:projectId/help"
-          element={<LegacyHelpRedirect target="index" />}
-        />
-        <Route
-          path="projects/:projectId/help/settings"
-          element={<LegacyHelpRedirect target="settings" />}
-        />
-        <Route
-          path="projects/:projectId/help/articles/new"
-          element={<LegacyHelpRedirect target="new" />}
-        />
-        <Route
-          path="projects/:projectId/help/articles/:articleId"
-          element={<LegacyHelpRedirect target="article" />}
-        />
-        <Route
-          path="projects/:projectId/knowledgebase/help-center/home"
-          element={<HelpHomeEditor />}
-        />
-        <Route
-          path="projects/:projectId/knowledgebase/help-center/settings"
-          element={<HelpCenterSettings />}
-        />
-        <Route
-          path="projects/:projectId/knowledgebase/help-center/articles/new"
-          element={<HelpArticleEditor />}
-        />
-        <Route
-          path="projects/:projectId/knowledgebase/help-center/articles/:articleId"
-          element={<HelpArticleEditor />}
-        />
+        <Route path="projects/:projectId" element={<ProjectHomeRedirect />} />
+        <Route path="projects/:projectId/conversations" element={<Conversations />} />
+        <Route path="projects/:projectId/customers" element={<Customers />} />
+        <Route path="projects/:projectId/customers/:customerId" element={<CustomerDetail />} />
+
+        {/* Maven */}
+        <Route path="projects/:projectId/maven/knowledge" element={<Resources />} />
+        <Route path="projects/:projectId/maven/knowledge/:resourceId" element={<SourceDetail />} />
+        <Route path="projects/:projectId/maven/knowledge/:resourceId/pages/:pageId" element={<CrawledPageDetail />} />
+        <Route path="projects/:projectId/maven/behavior" element={<Sops />} />
+        <Route path="projects/:projectId/maven/connectors" element={<Tools />} />
+        <Route path="projects/:projectId/maven/greetings" element={<WidgetGreetings />} />
+
+        {/* Help Center */}
+        <Route path="projects/:projectId/help-center" element={<HelpCenter />} />
+        <Route path="projects/:projectId/help-center/home" element={<HelpHomeEditor />} />
+        <Route path="projects/:projectId/help-center/articles/new" element={<HelpArticleEditor />} />
+        <Route path="projects/:projectId/help-center/articles/:articleId" element={<HelpArticleEditor />} />
+
+        {/* Settings */}
+        <Route path="projects/:projectId/settings" element={<SettingsIndexRedirect />} />
+        <Route path="projects/:projectId/settings/appearance" element={<AppearanceSettings />} />
+        <Route path="projects/:projectId/settings/quick-actions" element={<QuickActionsSettings />} />
+        <Route path="projects/:projectId/settings/install" element={<InstallSettings />} />
+        <Route path="projects/:projectId/settings/channels" element={<ChannelsSettings />} />
+        <Route path="projects/:projectId/settings/email" element={<ProjectRedirect to="settings-channels" />} />
+        <Route path="projects/:projectId/settings/telegram" element={<ProjectRedirect to="settings-channels" />} />
+        <Route path="projects/:projectId/settings/slack" element={<ProjectRedirect to="settings-channels" />} />
+        <Route path="projects/:projectId/settings/help-center" element={<SettingsFrame><HelpCenterSettings /></SettingsFrame>} />
+        <Route path="projects/:projectId/settings/connected-apps" element={<SettingsFrame><McpConnections /></SettingsFrame>} />
+        <Route path="projects/:projectId/settings/project" element={<ProjectSettings />} />
+        <Route path="projects/:projectId/settings/team" element={<SettingsPage title="Team"><Team /></SettingsPage>} />
+        <Route path="projects/:projectId/settings/billing" element={<SettingsFrame><Billing /></SettingsFrame>} />
+        <Route path="projects/:projectId/settings/profile" element={<SettingsFrame><Profile /></SettingsFrame>} />
+
+        {/* Legacy URLs */}
+        <Route path="projects/:projectId/knowledge" element={<LegacyKnowledgeRedirect />} />
+        <Route path="projects/:projectId/company" element={<ProjectRedirect to="knowledge" />} />
+        <Route path="projects/:projectId/knowledgebase" element={<ProjectRedirect to="knowledge" />} />
+        <Route path="projects/:projectId/knowledgebase/sources" element={<ProjectRedirect to="knowledge" />} />
+        <Route path="projects/:projectId/knowledgebase/sops" element={<ProjectRedirect to="behavior" />} />
+        <Route path="projects/:projectId/knowledgebase/company-info" element={<ProjectRedirect to="knowledge" />} />
+        <Route path="projects/:projectId/help-center" element={<LegacyHelpRedirect target="index" />} />
+        <Route path="projects/:projectId/help-center/home" element={<LegacyHelpRedirect target="home" />} />
+        <Route path="projects/:projectId/settings/help-center" element={<LegacyHelpRedirect target="settings" />} />
+        <Route path="projects/:projectId/help-center/articles/new" element={<LegacyHelpRedirect target="new" />} />
+        <Route path="projects/:projectId/help-center/articles/:articleId" element={<LegacyHelpRedirect target="article" />} />
+        <Route path="projects/:projectId/resources" element={<ProjectRedirect to="knowledge" />} />
+        <Route path="projects/:projectId/mcp-connections" element={<ProjectRedirect to="settings-connected-apps" />} />
+        <Route path="projects/:projectId/support-chat/widget" element={<LegacyChatWidgetRedirect />} />
+        <Route path="projects/:projectId/support-chat/greetings" element={<ProjectRedirect to="greetings" />} />
+        <Route path="projects/:projectId/support-chat/tools" element={<ProjectRedirect to="connectors" />} />
+        <Route path="projects/:projectId/configuration" element={<LegacyConfigurationRedirect />} />
+        <Route path="projects/:projectId/widget" element={<ProjectRedirect to="settings-appearance" />} />
+        <Route path="projects/:projectId/widget/home" element={<ProjectRedirect to="settings-appearance" />} />
+        <Route path="projects/:projectId/widget/greetings" element={<ProjectRedirect to="greetings" />} />
+        <Route path="projects/:projectId/widget/installation" element={<ProjectRedirect to="settings-install" />} />
+        <Route path="projects/:projectId/widget/quick-actions" element={<ProjectRedirect to="settings-quick-actions" />} />
+        <Route path="projects/:projectId/widget/tools" element={<ProjectRedirect to="connectors" />} />
+        <Route path="projects/:projectId/widget/*" element={<ProjectRedirect to="settings-appearance" />} />
+        <Route path="projects/:projectId/tickets" element={<Navigate to="../conversations?filter=needs-you" replace />} />
+        <Route path="projects/:projectId/inquiries" element={<Navigate to="../conversations?filter=needs-you" replace />} />
+        <Route path="projects/:projectId/quick-actions" element={<LegacyQuickActionsRedirect />} />
+        <Route path="projects/:projectId/tools" element={<ProjectRedirect to="connectors" />} />
+        <Route path="projects/:projectId/help" element={<LegacyHelpRedirect target="index" />} />
+        <Route path="projects/:projectId/help/settings" element={<LegacyHelpRedirect target="settings" />} />
+        <Route path="projects/:projectId/help/articles/new" element={<LegacyHelpRedirect target="new" />} />
+        <Route path="projects/:projectId/help/articles/:articleId" element={<LegacyHelpRedirect target="article" />} />
       </Route>
     </Routes>
     </ThemeContext.Provider>
