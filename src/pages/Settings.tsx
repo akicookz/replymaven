@@ -1,15 +1,19 @@
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Navigate, useParams, useSearchParams } from "react-router-dom";
+import { useSubscription } from "@/hooks/use-subscription";
 import { getLegacySettingsDestination } from "@/lib/dashboard-routes";
+import ProjectSettings from "./ProjectSettings";
 import Team from "./Team";
 import Billing from "./Billing";
 import Profile from "./Profile";
 
-const TABS = new Set(["team", "billing", "profile"]);
+const TABS = new Set(["team", "billing", "profile", "project"]);
 
 export default function Settings() {
   const { projectId } = useParams<{ projectId: string }>();
   const [sp, setSp] = useSearchParams();
+  const { data: subData } = useSubscription();
+  const isOwner = subData?.role === "owner";
   const raw = sp.get("tab") ?? "team";
   const legacyDestination = projectId
     ? getLegacySettingsDestination(projectId, raw)
@@ -19,17 +23,19 @@ export default function Settings() {
     return <Navigate to={legacyDestination} replace />;
   }
 
-  const tab = TABS.has(raw) ? raw : "team";
+  const tab = TABS.has(raw) && (raw !== "project" || isOwner) ? raw : "team";
   return (
     <Tabs value={tab} onValueChange={(v) => setSp({ tab: v }, { replace: true })}>
       <TabsList className="h-auto max-w-full flex-wrap justify-start">
         <TabsTrigger value="team">Team</TabsTrigger>
         <TabsTrigger value="billing">Billing</TabsTrigger>
         <TabsTrigger value="profile">Profile</TabsTrigger>
+        {isOwner && <TabsTrigger value="project">Project</TabsTrigger>}
       </TabsList>
       <TabsContent value="team"><Team /></TabsContent>
       <TabsContent value="billing"><Billing /></TabsContent>
       <TabsContent value="profile"><Profile /></TabsContent>
+      {isOwner && <TabsContent value="project"><ProjectSettings /></TabsContent>}
     </Tabs>
   );
 }

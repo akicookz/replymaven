@@ -728,7 +728,8 @@ Column lists below are the load-bearing ones, not the full set. `worker/db/schem
 projects
   id, userId (FK users), name, slug (unique per user), domain, onboarded,
   knowledgePages (ceil(size / 2500) per indexed `.md` object in R2; kept by
-  `trackKnowledgeBucket`, recounted nightly)
+  `trackKnowledgeBucket`, recounted nightly), onboardingState (JSON: step,
+  iconUrl, docsSuggestions, docsResourceId, scanned)
 
 project_settings
   id, projectId, geminiApiKey (encrypted, unused: platform key is used instead),
@@ -909,7 +910,8 @@ Grouped, not exhaustive. `worker/index.ts` and `worker/routes/*.ts` are the sour
 | GET/POST/PATCH/DELETE | `/api/team[s]`, `/api/team/invite`, `/api/team/accept/:inviteId` | Members, invites, team switching |
 | GET/POST | `/api/billing/{subscription,checkout,portal,usage-log,packs/checkout,seats,start-plan-now}` | Stripe subscription, usage, message packs, extra seats, ending a trial early |
 | GET/POST/DELETE | `/api/mcp/{register,authorize,token,revoke,connections}` | MCP OAuth client registration and consent |
-| GET/PUT/POST | `/api/profile`, `/api/onboarding/*` | Account profile and first-run onboarding |
+| GET/PUT/POST | `/api/profile` | Account profile |
+| GET/PUT/POST | `/api/onboarding[/:projectId/{scrape,state,widget,install-status,send-to-developer,docs,complete}]` | First-run onboarding: website → brand (scan detects color, radius, font, icon, docs URLs) → trial (only without a subscription) → install (verified by the first conversation from a non-ReplyMaven host) → docs → voice → team → done. Progress lives in `projects.onboarding_state` JSON |
 | POST | `/api/upload`, `/api/help-images/upload` | Upload files to R2 |
 
 Scopes are `projects:read`, `conversations:reply`, `resources:write`, `helpdesk:write`, and `widget:write` (`worker/services/mcp-oauth-service.ts`). The consent screen (`worker/oauth-render/consent-page.tsx`) lists each as a switch the user can turn off, so a token can be granted a subset of what the client asked for. Authorize is refused when every switch is off. A request for a scope the client's stored registration predates is downgraded to the scopes it holds, not rejected, so adding a scope never breaks clients registered before it existed.

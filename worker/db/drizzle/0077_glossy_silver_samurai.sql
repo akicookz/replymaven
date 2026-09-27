@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `onboarding_state` text;

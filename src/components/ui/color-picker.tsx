@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Pipette } from "lucide-react"
+import { Check, Pipette } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -9,9 +9,16 @@ interface ColorPickerProps {
   value: string
   onChange: (color: string) => void
   className?: string
+  /**
+   * "field" (default) is a full-width control with the hex value.
+   * "swatch" is a 32px tile that sits in a row of preset swatches; `selected`
+   * marks it when the current color is a custom one.
+   */
+  variant?: "field" | "swatch"
+  selected?: boolean
 }
 
-function ColorPicker({ value, onChange, className }: ColorPickerProps) {
+function ColorPicker({ value, onChange, className, variant = "field", selected = false }: ColorPickerProps) {
   const [hexInput, setHexInput] = React.useState(value)
 
   React.useEffect(() => {
@@ -40,10 +47,33 @@ function ColorPicker({ value, onChange, className }: ColorPickerProps) {
     setHexInput(e.target.value)
   }
 
+  const trigger =
+    variant === "swatch" ? (
+      <button
+        type="button"
+        aria-label="Custom color"
+        className={cn(
+          "relative flex size-8 shrink-0 items-center justify-center rounded-md outline-none focus-visible:inset-ring focus-visible:inset-ring-hairline-strong",
+          className
+        )}
+        style={{
+          // Hue wheel is the universal "pick any color" cue; not a theme color.
+          background: selected ? value : "conic-gradient(from 180deg, hsl(0 85% 60%), hsl(60 85% 60%), hsl(120 70% 50%), hsl(180 70% 50%), hsl(240 80% 65%), hsl(300 80% 60%), hsl(360 85% 60%))",
+          boxShadow: selected ? `0 0 0 2px var(--background), 0 0 0 4px ${value}` : undefined,
+        }}
+      >
+        {selected ? (
+          <Check className="size-3.5 text-white mix-blend-difference" />
+        ) : (
+          <Pipette className="size-3.5 text-white drop-shadow" />
+        )}
+      </button>
+    ) : null
+
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button
+        {trigger ?? <button
           type="button"
           className={cn(
             "glass-control rounded-glass group flex h-9 w-full items-center gap-2.5 px-2.5 text-[13px] outline-none focus-visible:inset-ring focus-visible:inset-ring-hairline-strong",
@@ -58,7 +88,7 @@ function ColorPicker({ value, onChange, className }: ColorPickerProps) {
             {value}
           </span>
           <Pipette className="size-3.5 text-ink-6 opacity-0 transition-opacity group-hover:opacity-100" />
-        </button>
+        </button>}
       </PopoverTrigger>
       <PopoverContent className="w-56 space-y-3 p-3" align="start">
         {/* Native color picker — styled so the swatch fills the rounded container */}

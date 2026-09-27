@@ -376,6 +376,39 @@ export class EmailService {
     });
   }
 
+  async sendWidgetInstallEmail(input: {
+    to: string;
+    requesterName: string;
+    requesterEmail: string;
+    projectName: string;
+    snippet: string;
+  }): Promise<void> {
+    const text = [
+      `${input.requesterName} (${input.requesterEmail}) asked you to add the ReplyMaven chat widget to ${input.projectName}.`,
+      "",
+      "Paste this tag before the closing </body> tag on every page where the chat should appear:",
+      "",
+      input.snippet,
+      "",
+      "It works with any site builder or framework. Once it's live, open the site and send a test message in the chat.",
+      "",
+      "Install guide: https://replymaven.com/docs/getting-started/install-the-chat-widget",
+    ].join("\n");
+    await this.send({
+      to: input.to,
+      replyTo: input.requesterEmail,
+      subject: `Add the ReplyMaven chat widget to ${input.projectName}`,
+      html: wrapEmail(`
+<p style="${BODY_TEXT} margin: 0 0 16px;">${escapeHtml(input.requesterName)} (${escapeHtml(input.requesterEmail)}) asked you to add the ReplyMaven chat widget to ${escapeHtml(input.projectName)}.</p>
+<p style="${BODY_TEXT} margin: 0 0 12px;">Paste this tag before the closing <code>&lt;/body&gt;</code> tag on every page where the chat should appear:</p>
+<pre style="background: #1c1c1e; color: #f5f5f7; padding: 14px 16px; border-radius: 10px; font-size: 13px; white-space: pre-wrap; word-break: break-all; margin: 0 0 16px;">${escapeHtml(input.snippet)}</pre>
+<p style="${BODY_TEXT} margin: 0 0 16px;">It works with any site builder or framework. Once it's live, open the site and send a test message in the chat.</p>
+<p style="${MUTED_TEXT} font-size: 13px; margin: 0;">Install guide: <a href="https://replymaven.com/docs/getting-started/install-the-chat-widget" style="color: #60a5fa;">Install the chat widget</a></p>
+      `),
+      text,
+    });
+  }
+
   async sendOtpEmail(to: string, otp: string): Promise<void> {
     await this.send({
       to,

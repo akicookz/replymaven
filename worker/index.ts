@@ -206,6 +206,11 @@ import {
   KnowledgeUsageService,
 } from "./services/knowledge-usage-service";
 import { PLANS } from "../shared/plans";
+import { detectBrand, suggestDocsUrls } from "./services/brand-detection";
+import { parseOnboardingState } from "./services/project-service";
+import type { ProjectRow } from "./db/schema";
+
+
 import {
   addProjectAccessToMembers,
   TeamService,
@@ -332,6 +337,9 @@ import {
   createCheckoutSchema,
   createPackCheckoutSchema,
   setExtraSeatsSchema,
+  onboardingStateSchema,
+  sendToDeveloperSchema,
+  onboardingDocsSchema,
   inviteTeamMemberSchema,
   bulkInviteTeamMembersSchema,
   updateTeamMemberRoleSchema,
@@ -718,6 +726,159 @@ function getSidechatRouteActor(
         projectIds: c.get("activeProjectIds"),
       }
     : null;
+}
+
+// ─── Onboarding scan: brand, docs suggestions, company profile ─────────────────
+async function runOnboardingScan(env: AppEnv, ctx: ExecutionContext, project: ProjectRow): Promise<void> {
+  const db = drizzle(env.DB);
+  const projectService = new ProjectService(db);
+  const settings = await projectService.getSettings(project.id);
+  if (!settings?.companyUrl) {
+    await projectService.updateOnboardingState(project.id, { scanned: true });
+    return;
+  }
+
+  let html: string;
+  let pageUrl = settings.companyUrl;
+  try {
+    const response = await fetch(settings.companyUrl, {
+      headers: {
+        "User-Agent": "ReplyMaven Bot/1.0 (https://replymaven.com)",
+        Accept: "text/html",
+      },
+      redirect: "follow",
+      signal: AbortSignal.timeout(8_000),
+    });
+    const body = response.ok ? await readTextCapped(response, 2_000_000) : null;
+    if (body === null) {
+      await projectService.updateOnboardingState(project.id, { scanned: true });
+      return;
+    }
+    html = body;
+    pageUrl = response.url || settings.companyUrl;
+  } catch {
+    await projectService.updateOnboardingState(project.id, { scanned: true });
+    return;
+  }
+
+  const aiService = new AiService({
+    model: env.AI_MODEL,
+    geminiApiKey: env.GEMINI_API_KEY,
+    openaiApiKey: env.OPENAI_API_KEY,
+  });
+
+  const rawText = html
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const [brand, docsSuggestions, profile] = await Promise.all([
+    detectBrand(html, pageUrl, aiService).catch(() => null),
+    suggestDocsUrls(html, pageUrl, aiService).catch(() => []),
+    rawText.length >= 100
+      ? aiService.extractCompanyProfile(rawText, settings.companyUrl).catch(() => null)
+      : Promise.resolve(null),
+  ]);
+
+  if (brand) {
+    const widgetService = new WidgetService(db);
+    const current = await widgetService.getWidgetConfig(project.id);
+    await widgetService.updateWidgetConfig(project.id, {
+      primaryColor: brand.primaryColor,
+      textColor: brand.textColor,
+      backgroundColor: brand.backgroundColor,
+      borderRadius: brand.borderRadius,
+      fontFamily: brand.fontFamily,
+      ...(current?.avatarUrl || !brand.iconUrl ? {} : { avatarUrl: brand.iconUrl }),
+    });
+  }
+  // The page's own name (title, og:site_name, logo) keeps the brand's casing.
+  const brandName = brand?.name ?? profile?.websiteName ?? null;
+  if (brandName) {
+    await projectService.updateProject(project.id, project.userId, { name: brandName });
+    await new WidgetService(db).updateWidgetConfig(project.id, { headerText: brandName });
+  }
+  await projectService.updateOnboardingState(project.id, {
+    iconUrl: brand?.iconUrl ?? null,
+    docsSuggestions,
+    scanned: true,
+  });
+
+  const resourceService = new ResourceService(db, env.UPLOADS);
+  const hasSiteResource = (await resourceService.getResourcesByProject(project.id))
+    .some((r) => r.type === "webpage" && r.url === settings.companyUrl);
+  if (rawText.length >= 100 && !hasSiteResource) {
+    // Index the site in the background so Maven can answer from it.
+    const resource = await resourceService.createResource({
+      projectId: project.id,
+      type: "webpage",
+      title: `${settings.companyName ?? project.name} - Website`,
+      url: settings.companyUrl,
+    });
+    ctx.waitUntil(
+      resourceService.ingestWebpage(
+        project.id,
+        resource.id,
+        settings.companyUrl,
+        resource.title,
+        env.CRAWL_QUEUE,
+        env.CF_ACCOUNT_ID,
+        env.BROWSER_RENDERING_API_TOKEN,
+      ),
+    );
+  }
+
+  if (profile) {
+    await projectService.updateSettings(project.id, {
+      companyName: profile.companyName,
+      industry: profile.industry,
+      companyContext: profile.context,
+    });
+  }
+  scheduleHelpPageCachePurge(ctx, project.id);
+
+  }
+
+function widgetEmbedSnippet(slug: string): string {
+  return `<script src="https://widget.replymaven.com/widget-embed.js" data-project="${slug}"></script>`;
+}
+
+/** Reads a response body up to `maxBytes`; returns null when it is larger. */
+async function readTextCapped(response: Response, maxBytes: number): Promise<string | null> {
+  const declared = Number(response.headers.get("content-length") ?? "0");
+  if (declared > maxBytes) {
+    await response.body?.cancel();
+    return null;
+  }
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
 }
 
 // Seconds a human reply on an email conversation waits before it is sent.
@@ -3296,8 +3457,8 @@ const app = new Hono<HonoAppContext>()
       effectiveUserId,
       baseSlug,
     );
-    if (existing) {
-      // Reuse the existing project — update its settings and return it
+    // Resume an unfinished project for the same site; a finished one gets a new project.
+    if (existing && !existing.onboarded) {
       await projectService.updateSettings(existing.id, {
         companyUrl: parsed.data.websiteUrl,
       });
@@ -3339,106 +3500,24 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const settings = await projectService.getSettings(project.id);
-    if (!settings?.companyUrl) {
-      return c.json({ context: "", scraped: false });
+    // One scan per project: a repeat (reload, second tab) must not overwrite saved styling.
+    const scanState = parseOnboardingState(project.onboardingState);
+    if (scanState.scanned) return c.json({ scanned: true });
+    if (scanState.scanStartedAt && Date.now() - scanState.scanStartedAt < 120_000) {
+      return c.json({ scanned: false, scanning: true });
     }
+    await projectService.updateOnboardingState(project.id, { scanStartedAt: Date.now() });
 
-    try {
-      // Fetch the website
-      const response = await fetch(settings.companyUrl, {
-        headers: {
-          "User-Agent": "ReplyMaven Bot/1.0 (https://replymaven.com)",
-          Accept: "text/html",
-        },
-        redirect: "follow",
-      });
-
-      if (!response.ok) {
-        return c.json({ context: "", scraped: false });
-      }
-
-      const html = await response.text();
-
-      // Strip HTML tags to get plain text
-      const rawText = html
-        .replace(/<script[\s\S]*?<\/script>/gi, "")
-        .replace(/<style[\s\S]*?<\/style>/gi, "")
-        .replace(/<[^>]+>/g, " ")
-        .replace(/&nbsp;/g, " ")
-        .replace(/&amp;/g, "&")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
-        .replace(/\s+/g, " ")
-        .trim();
-
-      // If too little content, let user input manually
-      if (rawText.length < 100) {
-        return c.json({ context: "", scraped: false });
-      }
-
-      // Store as a resource (webpage type) in R2
-      const resourceService = new ResourceService(db, c.env.UPLOADS);
-      const resource = await resourceService.createResource({
-        projectId: project.id,
-        type: "webpage",
-        title: `${settings.companyName ?? project.name} - Website`,
-        url: settings.companyUrl,
-      });
-
-      // Ingest in background (use waitUntil to keep isolate alive)
-      c.executionCtx.waitUntil(
-        resourceService.ingestWebpage(
-          project.id,
-          resource.id,
-          settings.companyUrl,
-          resource.title,
-          c.env.CRAWL_QUEUE,
-          c.env.CF_ACCOUNT_ID,
-          c.env.BROWSER_RENDERING_API_TOKEN,
-        ),
-      );
-
-      // Extract company profile (name, industry, context) via AI
-      const aiService = new AiService({
-        model: c.env.AI_MODEL,
-        geminiApiKey: c.env.GEMINI_API_KEY,
-        openaiApiKey: c.env.OPENAI_API_KEY,
-      });
-      const profile = await aiService.extractCompanyProfile(
-        rawText,
-        settings.companyUrl,
-      );
-
-      if (!profile) {
-        return c.json({ context: "", scraped: false });
-      }
-
-      // Save the extracted profile to project settings
-      await projectService.updateSettings(project.id, {
-        companyName: profile.companyName,
-        industry: profile.industry,
-        companyContext: profile.context,
-      });
-      if (profile.websiteName) {
-        await projectService.updateProject(project.id, project.userId, {
-          name: profile.websiteName,
-        });
-        scheduleHelpPageCachePurge(c.executionCtx, project.id);
-      }
-
-      return c.json({
-        scraped: true,
-        context: profile.context,
-        websiteName: profile.websiteName,
-        companyName: profile.companyName,
-        industry: profile.industry,
-      });
-    } catch {
-      return c.json({ context: "", scraped: false });
-    }
+    // Runs after the response so a reload or closed tab can't cancel it; the page polls state.
+    const env = c.env;
+    const ctx = c.executionCtx;
+    ctx.waitUntil(
+      runOnboardingScan(env, ctx, project).catch(async (err) => {
+        console.error("Onboarding scan failed:", err);
+        await new ProjectService(drizzle(env.DB)).updateOnboardingState(project.id, { scanned: true });
+      }),
+    );
+    return c.json({ scanned: false, scanning: true }, 202);
   })
 
   // ─── Step 2: Save reviewed company profile ─────────────────────────────────
@@ -3490,8 +3569,10 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
+    const { name, ...widget } = parsed.data;
     const widgetService = new WidgetService(db);
-    await widgetService.updateWidgetConfig(project.id, parsed.data);
+    await widgetService.updateWidgetConfig(project.id, name ? { ...widget, headerText: name } : widget);
+    if (name) await projectService.updateProject(project.id, project.userId, { name });
     scheduleHelpPageCachePurge(c.executionCtx, project.id);
 
     return c.json({ ok: true });
@@ -3539,8 +3620,146 @@ const app = new Hono<HonoAppContext>()
     }
 
     await projectService.markOnboarded(project.id);
+    await projectService.updateOnboardingState(project.id, { step: "done" });
 
     return c.json({ ok: true });
+  })
+
+  // ─── Onboarding state (current step + detected suggestions) ───────────────
+  .get("/api/onboarding/:projectId/state", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("projectId"));
+    if (!project || !(await canAccessCustomerProject(c, project.id))) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    return c.json({
+      slug: project.slug,
+      name: project.name,
+      domain: project.domain,
+      onboarded: project.onboarded,
+      ...parseOnboardingState(project.onboardingState),
+    });
+  })
+  .put("/api/onboarding/:projectId/state", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const parsed = validate(onboardingStateSchema, await c.req.json());
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("projectId"));
+    if (!project || !(await canAccessCustomerProject(c, project.id))) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    await projectService.updateOnboardingState(project.id, { step: parsed.data.step });
+    return c.json({ ok: true });
+  })
+
+  // ─── Install check: first conversation from the customer's own site ───────
+  .get("/api/onboarding/:projectId/install-status", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("projectId"));
+    if (!project || !(await canAccessCustomerProject(c, project.id))) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    const page = await new AgentPublicConversationStore({ db, env: c.env })
+      .getDashboardConversationPage(project.id, { status: "all", sort: "newest", limit: 20 });
+    for (const { conversation } of page.conversations) {
+      const pageUrl = conversation.metadata?.currentPageUrl;
+      if (typeof pageUrl !== "string") continue;
+      let host: string;
+      try {
+        host = new URL(pageUrl).hostname;
+      } catch {
+        continue;
+      }
+      // Dashboard previews run in about:srcdoc or on our own hosts.
+      if (!host || host === "localhost" || host === "127.0.0.1") continue;
+      if (host === "replymaven.com" || host.endsWith(".replymaven.com")) continue;
+      return c.json({ verified: true, host, conversationId: conversation.id });
+    }
+    return c.json({ verified: false, host: null, conversationId: null });
+  })
+
+  // ─── Email the install snippet to a developer ─────────────────────────────
+  .post("/api/onboarding/:projectId/send-to-developer", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    if (!checkRateLimit(`dev-invite:${user.id}`, 5, 60 * 60_000)) {
+      return c.json({ error: "Too many emails. Try again later." }, 429);
+    }
+    const parsed = validate(sendToDeveloperSchema, await c.req.json());
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("projectId"));
+    if (!project || !(await canAccessCustomerProject(c, project.id))) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    try {
+      await new EmailService(c.env.RESEND_API_KEY).sendWidgetInstallEmail({
+        to: parsed.data.email,
+        requesterName: user.name || user.email,
+        requesterEmail: user.email,
+        projectName: project.name,
+        snippet: widgetEmbedSnippet(project.slug),
+      });
+      return c.json({ ok: true });
+    } catch (err) {
+      console.error("Send to developer failed:", err);
+      return c.json({ error: "Could not send the email" }, 500);
+    }
+  })
+
+  // ─── Start indexing the help center / docs ────────────────────────────────
+  .post("/api/onboarding/:projectId/docs", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const parsed = validate(onboardingDocsSchema, await c.req.json());
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("projectId"));
+    if (!project || !(await canAccessCustomerProject(c, project.id))) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    const resourceService = new ResourceService(db, c.env.UPLOADS);
+    const existing = (await resourceService.getResourcesByProject(project.id))
+      .find((r) => r.type === "webpage" && r.url === parsed.data.url);
+    if (existing && existing.status !== "failed") {
+      await projectService.updateOnboardingState(project.id, { docsResourceId: existing.id });
+      return c.json({ resourceId: existing.id });
+    }
+
+    const resource = existing ?? await resourceService.createResource({
+      projectId: project.id,
+      type: "webpage",
+      title: `${project.name} - Help docs`,
+      url: parsed.data.url,
+    });
+    if (existing) await resourceService.updateResourceStatus(existing.id, project.id, "pending");
+    c.executionCtx.waitUntil(
+      (async () => {
+        await resourceService.ingestWebpage(
+          project.id,
+          resource.id,
+          parsed.data.url,
+          resource.title,
+          c.env.CRAWL_QUEUE,
+          c.env.CF_ACCOUNT_ID,
+          c.env.BROWSER_RENDERING_API_TOKEN,
+        );
+        await triggerAutoRagSync(c.env, "onboarding.docs");
+      })(),
+    );
+    await projectService.updateOnboardingState(project.id, { docsResourceId: resource.id });
+    return c.json({ resourceId: resource.id }, 201);
   })
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -4881,6 +5100,21 @@ const app = new Hono<HonoAppContext>()
     }
     if (!deleted) return c.json({ error: "Not found" }, 404);
     scheduleHelpPageCachePurge(c.executionCtx, projectId);
+    // Knowledge, PDFs, chat uploads ({projectId}/) and help images (help-images/{projectId}/).
+    c.executionCtx.waitUntil(
+      (async () => {
+        for (const prefix of [`${projectId}/`, `help-images/${projectId}/`]) {
+          let cursor: string | undefined;
+          do {
+            const listed = await c.env.UPLOADS.list({ prefix, cursor, limit: 1000 });
+            const keys = listed.objects.map((o) => o.key);
+            if (keys.length > 0) await c.env.UPLOADS.delete(keys);
+            cursor = listed.truncated ? listed.cursor : undefined;
+          } while (cursor);
+        }
+        await triggerAutoRagSync(c.env, "project.delete");
+      })().catch((err) => console.error("Project R2 cleanup failed:", err)),
+    );
     return c.json({ ok: true });
   })
 

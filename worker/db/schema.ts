@@ -26,6 +26,8 @@ export const projects = sqliteTable(
       .default(false),
     // Indexed knowledge pages in R2: ceil(size / 2500) per .md object.
     knowledgePages: integer("knowledge_pages").notNull().default(0),
+    // Onboarding progress as JSON: current step and detected suggestions.
+    onboardingState: text("onboarding_state"),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),

@@ -620,6 +620,18 @@ export const createApiKeySchema = z.object({
 });
 
 // ─── Onboarding ───────────────────────────────────────────────────────────────
+export const onboardingStateSchema = z.object({
+  step: z.enum(["website", "brand", "trial", "install", "docs", "voice", "team", "done"]),
+});
+
+export const sendToDeveloperSchema = z.object({
+  email: z.string().email("Enter a valid email").max(320),
+});
+
+export const onboardingDocsSchema = z.object({
+  url: z.string().url("Must be a valid URL").max(2048),
+});
+
 export const onboardingStep1Schema = z.object({
   websiteUrl: z.string().url("Must be a valid URL").max(2048),
 });
@@ -642,6 +654,13 @@ export const onboardingWidgetSchema = z.object({
   borderRadius: z.number().min(0).max(50),
   fontFamily: z.string().max(100),
   position: z.enum(["bottom-right", "bottom-left", "center-inline"]).optional(),
+  backgroundColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/, "Must be a valid hex color")
+    .optional(),
+  avatarUrl: z.string().max(500).nullable().optional(),
+  bannerUrl: z.string().max(500).nullable().optional(),
+  name: z.string().trim().min(1).max(100).optional(),
 });
 
 // ─── Contact Form ─────────────────────────────────────────────────────────

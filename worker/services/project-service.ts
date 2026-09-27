@@ -14,6 +14,63 @@ import { RESERVED_INBOUND_LOCAL_PARTS } from "./email-service";
 import { encrypt } from "./encryption-service";
 import { TeamService } from "./team-service";
 
+// ─── Onboarding State ─────────────────────────────────────────────────────────
+
+export const ONBOARDING_STEPS = [
+  "website",
+  "brand",
+  "trial",
+  "install",
+  "docs",
+  "voice",
+  "team",
+  "done",
+] as const;
+
+export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
+
+export interface OnboardingState {
+  step: OnboardingStep;
+  iconUrl: string | null;
+  docsSuggestions: Array<{ url: string; label: string }>;
+  docsResourceId: string | null;
+  /** True once the site scan (brand, docs, profile) has run. */
+  scanned: boolean;
+  /** When the running scan started (ms); stops a reload from starting a second one. */
+  scanStartedAt: number | null;
+}
+
+export function parseOnboardingState(raw: string | null): OnboardingState {
+  const empty: OnboardingState = {
+    step: "brand",
+    iconUrl: null,
+    docsSuggestions: [],
+    docsResourceId: null,
+    scanned: false,
+    scanStartedAt: null,
+  };
+  if (!raw) return empty;
+  try {
+    const parsed = JSON.parse(raw) as Partial<OnboardingState>;
+    return {
+      step: ONBOARDING_STEPS.includes(parsed.step as OnboardingStep)
+        ? (parsed.step as OnboardingStep)
+        : empty.step,
+      iconUrl: typeof parsed.iconUrl === "string" ? parsed.iconUrl : null,
+      docsSuggestions: Array.isArray(parsed.docsSuggestions)
+        ? parsed.docsSuggestions.filter(
+            (s) => s && typeof s.url === "string" && typeof s.label === "string",
+          )
+        : [],
+      docsResourceId: typeof parsed.docsResourceId === "string" ? parsed.docsResourceId : null,
+      scanned: parsed.scanned === true,
+      scanStartedAt: typeof parsed.scanStartedAt === "number" ? parsed.scanStartedAt : null,
+    };
+  } catch {
+    return empty;
+  }
+}
+
 export interface HelpPresentationSettings {
   botName: string | null;
   helpCustomUrl: string | null;
@@ -274,6 +331,23 @@ export class ProjectService {
       .set({ customerIdentitySecret: encryptedSecret })
       .where(eq(projectSettings.projectId, projectId));
     return { configured: true, secret };
+  }
+
+  async updateOnboardingState(
+    projectId: string,
+    patch: Partial<OnboardingState>,
+  ): Promise<OnboardingState> {
+    const rows = await this.db
+      .select({ onboardingState: projects.onboardingState })
+      .from(projects)
+      .where(eq(projects.id, projectId))
+      .limit(1);
+    const next = { ...parseOnboardingState(rows[0]?.onboardingState ?? null), ...patch };
+    await this.db
+      .update(projects)
+      .set({ onboardingState: JSON.stringify(next) })
+      .where(eq(projects.id, projectId));
+    return next;
   }
 
   async markOnboarded(projectId: string): Promise<void> {

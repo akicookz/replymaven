@@ -7,6 +7,7 @@ import {
   Check,
   ChevronDown,
   ArrowRight,
+  ArrowUpRight,
   BookOpen,
   Heart,
   Inbox,
@@ -749,12 +750,14 @@ function Landing() {
           </div>
 
           <div className="flex items-center gap-2">
-            {isLoggedIn ? (
-              <Button variant="ghost" size="sm" onClick={() => navigate("/app")}>Dashboard</Button>
-            ) : (
-              <Button variant="ghost" size="sm" onClick={handleGenericCta}>Log in</Button>
+            {isLoggedIn && (
+              <Button variant="secondary" size="sm" onClick={() => navigate("/app")}>
+                Dashboard
+                <ArrowUpRight />
+              </Button>
             )}
-            <Button size="sm" onClick={handleGenericCta}>Start free</Button>
+            {!isLoggedIn && <Button variant="ghost" size="sm" onClick={handleGenericCta}>Log in</Button>}
+            {!isLoggedIn && <Button size="sm" onClick={handleGenericCta}>Start free trial</Button>}
           </div>
         </nav>
       </header>
@@ -769,12 +772,20 @@ function Landing() {
             Delegate troubleshooting, upgrades, refunds, account changes, and repetitive questions to Maven, your customer support AI agent. Maven learns your docs and product, takes action for customers, and brings you in only when the stakes are high and judgment is needed.
           </p>
           <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center animate-in fade-in slide-in-from-bottom-3 duration-700 delay-200 fill-mode-both">
-            <Button onClick={handleGenericCta}>
-              Start 7-day free trial
-              <ArrowRight className="w-4 h-4" />
-            </Button>
+            {currentPlan && (
+              <Button variant="secondary" onClick={handleGenericCta}>
+                Go to dashboard
+                <ArrowUpRight className="w-4 h-4" />
+              </Button>
+            )}
+            {!currentPlan && (
+              <Button onClick={handleGenericCta}>
+                Start 7-day free trial
+                <ArrowRight className="w-4 h-4" />
+              </Button>
+            )}
             <Button variant="outline" onClick={chatWithMaven}>
-              Ask Maven on this page
+              Chat with Maven
               <ArrowDownRight className="w-4 h-4" />
             </Button>
           </div>
@@ -904,10 +915,18 @@ function Landing() {
             Turn support into a<br />word-of-mouth growth engine.
           </h2>
           <div className="mt-9 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
-            <Button onClick={handleGenericCta}>
-              Start free trial
-              <ArrowRight className="w-4 h-4" />
-            </Button>
+            {currentPlan && (
+              <Button variant="secondary" onClick={handleGenericCta}>
+                Go to dashboard
+                <ArrowUpRight className="w-4 h-4" />
+              </Button>
+            )}
+            {!currentPlan && (
+              <Button onClick={handleGenericCta}>
+                Start 7-day free trial
+                <ArrowRight className="w-4 h-4" />
+              </Button>
+            )}
             <Button variant="outline" asChild>
               <a href="/docs"><BookOpen className="w-4 h-4" /> Read the docs</a>
             </Button>

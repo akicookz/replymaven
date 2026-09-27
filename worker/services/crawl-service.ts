@@ -92,6 +92,15 @@ export class CrawlService {
     this.r2 = trackKnowledgeBucket(r2, db);
   }
 
+  private async resourceExists(resourceId: string): Promise<boolean> {
+    const rows = await this.db
+      .select({ id: resources.id })
+      .from(resources)
+      .where(eq(resources.id, resourceId))
+      .limit(1);
+    return rows.length > 0;
+  }
+
   private get browserApiBase(): string {
     return `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/browser-rendering`;
   }
@@ -160,6 +169,9 @@ export class CrawlService {
     queue: Queue<CrawlMessage>,
   ): Promise<void> {
     const { resourceId, projectId, url, depth, maxDepth, maxPages } = message;
+
+    // Queued pages can outlive a deleted resource or project; never write for them.
+    if (!(await this.resourceExists(resourceId))) return;
 
     // 1. Check if this page has already been crawled (or is being processed)
     const existing = await this.getCrawledPage(resourceId, url);
@@ -255,6 +267,7 @@ export class CrawlService {
     const r2Key = `${projectId}/page-${urlHash}.md`;
     const content = `# ${pageTitle}\n\nSource: ${url}\n\n${markdown}`;
 
+    if (!(await this.resourceExists(resourceId))) return;
     try {
       await this.r2.put(r2Key, content, {
         customMetadata: {

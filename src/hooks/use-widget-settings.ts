@@ -54,7 +54,8 @@ export const BACKGROUND_STYLES = [
   },
 ] as const;
 
-export type WidgetPreviewMode = "launcher" | "open";
+/** "chat" opens the chat screen; used by onboarding's three-view preview. */
+export type WidgetPreviewMode = "launcher" | "open" | "chat";
 
 export interface WidgetSettingsOptions {
   /**
@@ -94,7 +95,7 @@ export interface WidgetSettingsState {
   uploadBanner: (file: File) => Promise<void>;
 }
 
-interface PreviewGreetingPayload {
+export interface PreviewGreetingPayload {
   id: string;
   enabled: boolean;
   imageUrl: string | null;
@@ -158,7 +159,7 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function buildPreviewHtml(options: {
+export function buildPreviewHtml(options: {
   projectSlug: string;
   form: Partial<WidgetConfigData>;
   greetings: PreviewGreetingPayload[];
@@ -167,6 +168,7 @@ function buildPreviewHtml(options: {
   pagePath: string;
   hiddenByPageRules: boolean;
   replayNonce: number;
+  botName?: string | null;
 }): string {
   const backdrop = PREVIEW_BACKDROP[options.theme];
   // The widget derives the in-thread intro from the first compact greeting
@@ -207,7 +209,7 @@ function buildPreviewHtml(options: {
       : null,
     introMessageDelay: firstGreeting?.delaySeconds ?? 1,
     introMessageDuration: firstGreeting?.durationSeconds ?? 15,
-    botName: null,
+    botName: options.botName?.trim() || "Maven",
     contactForm: null,
   };
 
@@ -296,6 +298,8 @@ function buildPreviewHtml(options: {
       clearInterval(waitForWidget);
       if (mode === "open") {
         setTimeout(function() { window.ReplyMaven.open(); }, 300);
+      } else if (mode === "chat") {
+        setTimeout(function() { window.ReplyMaven.open("chat"); }, 300);
       }
     }
   }, 100);

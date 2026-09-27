@@ -5485,7 +5485,7 @@ import {
       const label = document.createElement("div");
       label.className = `rm-sender-label ${role}`;
       if (role === "bot") {
-        const botDisplayName = senderName || config?.botName || "Assistant";
+        const botDisplayName = senderName || config?.botName || "Maven";
         label.textContent = `${botDisplayName} · AI`;
       } else {
         label.textContent = senderName || config?.agentName || "Support Agent";

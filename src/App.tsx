@@ -381,7 +381,7 @@ function App() {
         }
       >
         <Route index element={<AppRedirect />} />
-        <Route path="new-project" element={<Onboarding />} />
+        <Route path="new-project" element={<Navigate to="/app/onboarding?new=1" replace />} />
         <Route
           path="projects/:projectId"
           element={<Dashboard />}

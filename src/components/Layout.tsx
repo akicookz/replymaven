@@ -377,7 +377,7 @@ function Layout() {
                   </div>
                   {canCreateProjects(subData?.role) && (
                     <Link
-                      to="/app/new-project"
+                      to="/app/onboarding?new=1"
                       onClick={() => setSelectorOpen(false)}
                       className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                     >
@@ -427,7 +427,7 @@ function Layout() {
   
             {!currentProject && canCreateProjects(subData?.role) && (
               <Link
-                to="/app/onboarding"
+                to="/app/onboarding?new=1"
                 className={cn(
                   "flex h-8 items-center gap-2 rounded-md text-[13px] font-medium text-ink-4 hover:bg-glass-button hover:text-ink-1",
                   collapsed ? "justify-center px-0" : "px-2",

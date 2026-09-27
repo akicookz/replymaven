@@ -756,7 +756,7 @@ function Billing() {
             </p>
           </div>
           {isOwner && (
-            <Button onClick={() => (window.location.href = "/app/onboarding?step=4")}>
+            <Button onClick={() => (window.location.href = "/app/onboarding")}>
               Choose a Plan
             </Button>
           )}
