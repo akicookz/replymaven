@@ -198,6 +198,7 @@ import {
 } from "./services/encryption-service";
 import {
   BillingService,
+  isStripeCardError,
   entitlementsFor,
   messageAllowance,
 } from "./services/billing-service";
@@ -208,7 +209,7 @@ import {
 import { PLANS } from "../shared/plans";
 import { detectBrand, suggestDocsUrls } from "./services/brand-detection";
 import { parseOnboardingState } from "./services/project-service";
-import type { ProjectRow } from "./db/schema";
+import type { ProjectRow, SubscriptionRow } from "./db/schema";
 
 
 import {
@@ -729,6 +730,41 @@ function getSidechatRouteActor(
 }
 
 // ─── Onboarding scan: brand, docs suggestions, company profile ─────────────────
+type SeatChangeGuard =
+  | { ok: true; subscription: SubscriptionRow; extraSeats: number }
+  | { ok: false; response: Response };
+
+/** Owner-only, self-serve, active subscription, and not below the seats already in use. */
+async function checkSeatChange(c: Context<HonoAppContext>, extraSeats: number): Promise<SeatChangeGuard> {
+  const user = c.get("user");
+  if (!user) return { ok: false, response: c.json({ error: "Unauthorized" }, 401) };
+  if (c.get("activeRole") !== "owner") {
+    return { ok: false, response: c.json({ error: "Only the account owner can change billing" }, 403) };
+  }
+  if (!Number.isInteger(extraSeats) || extraSeats < 0 || extraSeats > 200) {
+    return { ok: false, response: c.json({ error: "Invalid seat count" }, 400) };
+  }
+  const subscription = c.get("subscription");
+  if (!subscription || !(subscription.status === "active" || subscription.status === "trialing")) {
+    return { ok: false, response: c.json({ error: "No active subscription" }, 400) };
+  }
+  if (entitlementsFor(subscription).plan === "enterprise") {
+    return { ok: false, response: c.json({ error: "Seats on Enterprise are set by contract." }, 400) };
+  }
+  const included = PLANS.business.limits.seats ?? 0;
+  const seatCount = await new TeamService(c.get("db")).getSeatCount(c.get("effectiveUserId") ?? user.id);
+  if (included + extraSeats < seatCount) {
+    return {
+      ok: false,
+      response: c.json(
+        { error: `You have ${seatCount} seats in use. Remove members before going below that.`, code: "seats_in_use" },
+        400,
+      ),
+    };
+  }
+  return { ok: true, subscription, extraSeats };
+}
+
 async function runOnboardingScan(env: AppEnv, ctx: ExecutionContext, project: ProjectRow): Promise<void> {
   const db = drizzle(env.DB);
   const projectService = new ProjectService(db);
@@ -3872,47 +3908,38 @@ const app = new Hono<HonoAppContext>()
   })
 
   // ─── Extra Seats ────────────────────────────────────────────────────────────
+  .get("/api/billing/seats/preview", async (c) => {
+    const guard = await checkSeatChange(c, Number(c.req.query("extraSeats")));
+    if (!guard.ok) return guard.response;
+    try {
+      const preview = await new BillingService(c.get("db"), c.env).previewExtraSeats(guard.subscription, guard.extraSeats);
+      return c.json(preview);
+    } catch (err) {
+      console.error("Preview extra seats error:", err);
+      return c.json({ error: "Could not price this change" }, 500);
+    }
+  })
+
   .post("/api/billing/seats", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-    if (c.get("activeRole") !== "owner") {
-      return c.json({ error: "Only the account owner can change billing" }, 403);
-    }
-
-    const subscription = c.get("subscription");
-    if (
-      !subscription ||
-      !(subscription.status === "active" || subscription.status === "trialing")
-    ) {
-      return c.json({ error: "No active subscription" }, 400);
-    }
-    if (entitlementsFor(subscription).plan === "enterprise") {
-      return c.json({ error: "Seats on Enterprise are set by contract." }, 400);
-    }
-
     const body = await c.req.json();
     const parsed = validate(setExtraSeatsSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
-
-    const db = c.get("db");
-    const effectiveUserId = c.get("effectiveUserId") ?? user.id;
-    const included = PLANS.business.limits.seats ?? 0;
-    const seatCount = await new TeamService(db).getSeatCount(effectiveUserId);
-    if (included + parsed.data.extraSeats < seatCount) {
-      return c.json(
-        {
-          error: `You have ${seatCount} seats in use. Remove members before going below that.`,
-          code: "seats_in_use",
-        },
-        400,
-      );
-    }
+    const guard = await checkSeatChange(c, parsed.data.extraSeats);
+    if (!guard.ok) return guard.response;
 
     try {
-      await new BillingService(db, c.env).setExtraSeats(subscription, parsed.data.extraSeats);
-      return c.json({ extraSeats: parsed.data.extraSeats });
+      await new BillingService(c.get("db"), c.env).setExtraSeats(
+        guard.subscription,
+        guard.extraSeats,
+        parsed.data.prorationDate,
+      );
+      return c.json({ extraSeats: guard.extraSeats });
     } catch (err) {
       console.error("Set extra seats error:", err);
+      // error_if_incomplete: a declined charge leaves the seats unchanged.
+      if (isStripeCardError(err)) {
+        return c.json({ error: err.message || "Your card was declined.", code: "payment_failed" }, 402);
+      }
       return c.json({ error: "Failed to update seats" }, 500);
     }
   })

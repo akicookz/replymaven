@@ -21,7 +21,15 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -32,6 +40,7 @@ import {
 import { MobileMenuButton } from "@/components/PageHeader";
 import { useSubscription, type MessagePackGrant } from "@/hooks/use-subscription";
 import { formatPlanName, usagePercent, getTrialDaysRemaining } from "@/lib/plan";
+import { cn } from "@/lib/utils";
 import { EXTRA_SEAT_PRICE_USD, MESSAGE_PACKS, type MessagePack } from "../../shared/plans";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -589,30 +598,12 @@ function ExtraSeats({
   inUse: number;
   interval: string;
 }) {
-  const queryClient = useQueryClient();
   const [target, setTarget] = useState(extra);
   const minExtra = Math.max(0, inUse - included);
   const unitPrice = interval === "annual" ? EXTRA_SEAT_PRICE_USD.annual : EXTRA_SEAT_PRICE_USD.monthly;
   const unitLabel = interval === "annual" ? "yr" : "mo";
 
-  const seatsMutation = useMutation({
-    mutationFn: async (extraSeats: number) => {
-      const res = await fetch("/api/billing/seats", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ extraSeats }),
-      });
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) throw new Error(body.error ?? "Could not update seats");
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["subscription"] });
-    },
-    onError: (error: Error) => {
-      toast.error(error.message);
-      setTarget(extra);
-    },
-  });
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   return (
     <div className="glass-card rounded-lg p-6 space-y-4">
@@ -629,7 +620,7 @@ function ExtraSeats({
             size="icon"
             variant="outline"
             aria-label="Remove a seat"
-            disabled={target <= minExtra || seatsMutation.isPending}
+            disabled={target <= minExtra}
             onClick={() => setTarget((n) => Math.max(minExtra, n - 1))}
           >
             <Minus className="w-4 h-4" />
@@ -641,7 +632,6 @@ function ExtraSeats({
             size="icon"
             variant="outline"
             aria-label="Add a seat"
-            disabled={seatsMutation.isPending}
             onClick={() => setTarget((n) => n + 1)}
           >
             <Plus className="w-4 h-4" />
@@ -650,16 +640,171 @@ function ExtraSeats({
         <span className="text-sm text-muted-foreground">
           {(included + target).toLocaleString()} seats total
         </span>
-        <Button
-          className="ml-auto"
-          disabled={target === extra || seatsMutation.isPending}
-          onClick={() => seatsMutation.mutate(target)}
-        >
-          {seatsMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+        <Button className="ml-auto" disabled={target === extra} onClick={() => setConfirmOpen(true)}>
           Update seats
         </Button>
       </div>
+      <SeatChangeDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        currentExtra={extra}
+        targetExtra={target}
+        onFailed={() => setTarget(extra)}
+      />
     </div>
+  );
+}
+
+interface SeatChangePreview {
+  currency: string;
+  interval: "monthly" | "annual";
+  trialing: boolean;
+  trialEndsAt: number | null;
+  periodEnd: number | null;
+  currentExtra: number;
+  targetExtra: number;
+  seatUnitCents: number;
+  planCents: number;
+  dueNowCents: number;
+  creditCents: number;
+  prorationDate: number;
+}
+
+function formatMoney(cents: number, currency: string): string {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: currency.toUpperCase() }).format(cents / 100);
+}
+
+function formatUnixDate(seconds: number | null): string {
+  if (!seconds) return "the next billing date";
+  return new Date(seconds * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function BreakdownRow({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 text-sm">
+      <span className={strong ? "font-medium text-foreground" : "text-muted-foreground"}>{label}</span>
+      <span className={cn("tabular-nums", strong ? "font-medium text-foreground" : "text-ink-2")}>{value}</span>
+    </div>
+  );
+}
+
+function seatConfirmLabel(preview: SeatChangePreview): string {
+  if (preview.dueNowCents > 0) return `Pay ${formatMoney(preview.dueNowCents, preview.currency)}`;
+  return preview.targetExtra > preview.currentExtra ? "Add seats" : "Remove seats";
+}
+
+function SeatChangeDialog({
+  open,
+  onOpenChange,
+  currentExtra,
+  targetExtra,
+  onFailed,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  currentExtra: number;
+  targetExtra: number;
+  onFailed: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const preview = useQuery<SeatChangePreview>({
+    queryKey: ["seat-preview", targetExtra],
+    queryFn: async () => {
+      const res = await fetch(`/api/billing/seats/preview?extraSeats=${targetExtra}`);
+      const body = (await res.json().catch(() => ({}))) as SeatChangePreview & { error?: string };
+      if (!res.ok) throw new Error(body.error ?? "Could not price this change");
+      return body;
+    },
+    enabled: open,
+    staleTime: 0,
+    gcTime: 0,
+  });
+
+  const apply = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/billing/seats", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ extraSeats: targetExtra, prorationDate: preview.data?.prorationDate }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? "Could not update seats");
+    },
+    onSuccess: () => {
+      toast.success("Seats updated");
+      onOpenChange(false);
+      void queryClient.invalidateQueries({ queryKey: ["subscription"] });
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+      onOpenChange(false);
+      onFailed();
+    },
+  });
+
+  const delta = targetExtra - currentExtra;
+  const title = delta > 0
+    ? `Add ${delta} seat${delta === 1 ? "" : "s"}`
+    : `Remove ${-delta} seat${delta === -1 ? "" : "s"}`;
+  const data = preview.data;
+  const per = data?.interval === "annual" ? "yr" : "mo";
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => !apply.isPending && onOpenChange(next)}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+
+        {preview.isPending && (
+          <div className="space-y-3 py-1">
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-2/3" />
+          </div>
+        )}
+        {preview.isError && <p className="text-sm text-destructive">{preview.error.message}</p>}
+        {data && (
+          <div className="space-y-4">
+            <div className="space-y-2.5">
+              <BreakdownRow label="Plan" value={`${formatMoney(data.planCents, data.currency)}/${per}`} />
+              <BreakdownRow
+                label={`Extra seats · ${data.targetExtra} × ${formatMoney(data.seatUnitCents, data.currency)}`}
+                value={`${formatMoney(data.targetExtra * data.seatUnitCents, data.currency)}/${per}`}
+              />
+              <BreakdownRow
+                strong
+                label="New total"
+                value={`${formatMoney(data.planCents + data.targetExtra * data.seatUnitCents, data.currency)}/${per}`}
+              />
+            </div>
+            <div className="space-y-1 rounded-glass bg-muted/40 px-3.5 py-3">
+              {data.creditCents > 0 && (
+                <BreakdownRow strong label="Credit on next invoice" value={formatMoney(data.creditCents, data.currency)} />
+              )}
+              {data.creditCents === 0 && (
+                <BreakdownRow strong label="Due today" value={formatMoney(data.dueNowCents, data.currency)} />
+              )}
+              <p className="text-xs text-muted-foreground">
+                {data.trialing && `Seats are billed with your first invoice on ${formatUnixDate(data.trialEndsAt)}.`}
+                {!data.trialing && data.dueNowCents > 0 && `Prorated to ${formatUnixDate(data.periodEnd)}, charged to your card on file.`}
+                {!data.trialing && data.creditCents > 0 && `Prorated to ${formatUnixDate(data.periodEnd)}.`}
+              </p>
+            </div>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={apply.isPending}>
+            Cancel
+          </Button>
+          <Button onClick={() => apply.mutate()} disabled={!data || apply.isPending}>
+            {apply.isPending && <Loader2 className="size-4 animate-spin" />}
+            {data ? seatConfirmLabel(data) : "Confirm"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

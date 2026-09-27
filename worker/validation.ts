@@ -926,6 +926,8 @@ export const createCheckoutSchema = z.object({
 
 export const setExtraSeatsSchema = z.object({
   extraSeats: z.number().int().min(0).max(200),
+  /** Unix seconds from the preview, so the charge matches what was shown. */
+  prorationDate: z.number().int().positive().optional(),
 });
 
 export const createPackCheckoutSchema = z.object({

@@ -119,6 +119,36 @@ function buildPriceMaps(env: AppEnv) {
 
 // ─── Billing Service ──────────────────────────────────────────────────────────
 
+export function isStripeCardError(err: unknown): err is Stripe.errors.StripeCardError {
+  return err instanceof Stripe.errors.StripeCardError;
+}
+
+function seatPreviewItem(seatItemId: string | null, seatPriceId: string, extraSeats: number) {
+  if (!seatItemId) return { price: seatPriceId, quantity: extraSeats };
+  if (extraSeats === 0) return { id: seatItemId, deleted: true };
+  return { id: seatItemId, quantity: extraSeats };
+}
+
+export interface SeatChangePreview {
+  currency: string;
+  interval: BillingInterval;
+  trialing: boolean;
+  /** Unix seconds. */
+  trialEndsAt: number | null;
+  /** Unix seconds; end of the current billing period. */
+  periodEnd: number | null;
+  currentExtra: number;
+  targetExtra: number;
+  seatUnitCents: number;
+  planCents: number;
+  /** Prorated amount charged now (active plans only). */
+  dueNowCents: number;
+  /** Prorated credit applied to the next invoice when seats are removed. */
+  creditCents: number;
+  /** Pass back to setExtraSeats so the charge matches the preview. */
+  prorationDate: number;
+}
+
 export class BillingService {
   private stripe: Stripe;
   private priceToMapping: Map<string, PriceMapping>;
@@ -353,27 +383,83 @@ export class BillingService {
     await this.stripe.subscriptions.update(sub.stripeSubscriptionId, { trial_end: "now" });
   }
 
-  /**
-   * Sets the number of seats bought on top of the plan. The seat item uses the
-   * plan's interval, and Stripe prorates the change on the next invoice.
-   */
-  async setExtraSeats(sub: SubscriptionRow, extraSeats: number): Promise<void> {
+  private async seatContext(sub: SubscriptionRow) {
     if (!sub.stripeSubscriptionId) throw new Error("No Stripe subscription");
     const seatPriceIds = new Set(this.seatPrices.values());
     const stripeSub = await this.stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
-    const seatItem = stripeSub.items.data.find((item) => seatPriceIds.has(item.price.id));
+    const seatItem = stripeSub.items.data.find((item) => seatPriceIds.has(item.price.id)) ?? null;
+    const planItem = stripeSub.items.data.find((item) => !seatPriceIds.has(item.price.id)) ?? null;
+    const seatPriceId = seatItem?.price.id ?? this.seatPrices.get(sub.interval);
+    if (!seatPriceId) throw new Error(`Seat price not configured: ${sub.interval}`);
+    return { stripeSub, seatItem, planItem, seatPriceId, trialing: stripeSub.status === "trialing" };
+  }
+
+  /** What changing to `extraSeats` costs: recurring amounts and what Stripe would bill right now. */
+  async previewExtraSeats(sub: SubscriptionRow, extraSeats: number): Promise<SeatChangePreview> {
+    const { stripeSub, seatItem, planItem, seatPriceId, trialing } = await this.seatContext(sub);
+    const seatPrice = seatItem?.price ?? (await this.stripe.prices.retrieve(seatPriceId));
+    const currentExtra = seatItem?.quantity ?? 0;
+    const periodEnd = planItem?.current_period_end ?? seatItem?.current_period_end ?? null;
+    const prorationDate = Math.floor(Date.now() / 1000);
+
+    let dueNowCents = 0;
+    let creditCents = 0;
+    // Trial invoices are $0; seats are billed with the first real invoice.
+    if (!trialing && extraSeats !== currentExtra) {
+      const item = seatPreviewItem(seatItem?.id ?? null, seatPriceId, extraSeats);
+      const preview = await this.stripe.invoices.createPreview({
+        subscription: stripeSub.id,
+        subscription_details: {
+          items: [item],
+          proration_behavior: "always_invoice",
+          proration_date: prorationDate,
+        },
+      });
+      dueNowCents = Math.max(0, preview.total);
+      creditCents = Math.max(0, -preview.total);
+    }
+
+    return {
+      currency: seatPrice.currency,
+      interval: sub.interval,
+      trialing,
+      trialEndsAt: stripeSub.trial_end ?? null,
+      periodEnd,
+      currentExtra,
+      targetExtra: extraSeats,
+      seatUnitCents: seatPrice.unit_amount ?? 0,
+      planCents: (planItem?.price.unit_amount ?? 0) * (planItem?.quantity ?? 1),
+      dueNowCents,
+      creditCents,
+      prorationDate,
+    };
+  }
+
+  /**
+   * Sets the number of seats bought on top of the plan. On an active plan the
+   * prorated difference is invoiced and charged at once; a failed charge rejects
+   * the change. During a trial the seats join the first invoice.
+   */
+  async setExtraSeats(sub: SubscriptionRow, extraSeats: number, prorationDate?: number): Promise<void> {
+    const { stripeSub, seatItem, seatPriceId, trialing } = await this.seatContext(sub);
+    const billing = trialing
+      ? {}
+      : {
+          proration_behavior: "always_invoice" as const,
+          payment_behavior: "error_if_incomplete" as const,
+          ...(prorationDate ? { proration_date: prorationDate } : {}),
+        };
 
     if (extraSeats === 0) {
-      if (seatItem) await this.stripe.subscriptionItems.del(seatItem.id);
+      if (seatItem) await this.stripe.subscriptionItems.del(seatItem.id, billing);
     } else if (seatItem) {
-      await this.stripe.subscriptionItems.update(seatItem.id, { quantity: extraSeats });
+      await this.stripe.subscriptionItems.update(seatItem.id, { quantity: extraSeats, ...billing });
     } else {
-      const price = this.seatPrices.get(sub.interval);
-      if (!price) throw new Error(`Seat price not configured: ${sub.interval}`);
       await this.stripe.subscriptionItems.create({
-        subscription: sub.stripeSubscriptionId,
-        price,
+        subscription: stripeSub.id,
+        price: seatPriceId,
         quantity: extraSeats,
+        ...billing,
       });
     }
 
