@@ -50,7 +50,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Segmented } from "@/components/ui/segmented";
 import { cn } from "@/lib/utils";
-import { type PlanId } from "../../shared/plans";
+import { EXTRA_SEAT_PRICE_USD, MESSAGE_PACKS, type PlanId } from "../../shared/plans";
 
 // ─── FAQ Data ─────────────────────────────────────────────────────────────────
 
@@ -544,6 +544,17 @@ function FaqItem({ question, answer }: { question: string; answer: string }) {
 
 type Interval = "monthly" | "annual";
 
+function addOnLines(interval: Interval): string[] {
+  const seat = interval === "annual"
+    ? `$${EXTRA_SEAT_PRICE_USD.annual}/seat/yr`
+    : `$${EXTRA_SEAT_PRICE_USD.monthly}/seat/mo`;
+  const pack = MESSAGE_PACKS[0];
+  return [
+    `Extra seats at ${seat}`,
+    `AI message top-ups from $${pack.priceUsd} for ${pack.messages.toLocaleString("en-US")}`,
+  ];
+}
+
 function LandingPricing({
   onCtaClick,
   onContactSales,
@@ -607,12 +618,13 @@ function LandingPricing({
                     <span className="text-ink-3">{feature}</span>
                   </li>
                 ))}
+                {addOnLines(interval).map((line) => (
+                  <li key={line} className="flex items-start gap-2.5 text-sm">
+                    <Plus className="w-4 h-4 text-ink-5 shrink-0 mt-0.5" />
+                    <span className="text-ink-3">{line}</span>
+                  </li>
+                ))}
               </ul>
-
-              <div className="mb-4 flex items-center gap-2.5 rounded-glass bg-muted/40 px-3 py-2.5 text-sm text-ink-4">
-                <Plus className="w-4 h-4 shrink-0 text-ink-5" />
-                Add AI messages or seats anytime
-              </div>
 
               <Button
                 type="button"

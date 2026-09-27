@@ -34,7 +34,7 @@ export type FeatureKey =
   | "visitor_bans"
   | "priority_support"
   | "sso"
-  | "scim"
+  | "onboarding"
   | "sla"
   | "security_review"
   | "dedicated_mcp";
@@ -89,8 +89,8 @@ export const FEATURE_LABELS: Record<FeatureKey, { label: string; group: string }
   customers: { label: "Customer profiles and history", group: "Customers" },
   visitor_bans: { label: "Visitor bans", group: "Safety" },
   priority_support: { label: "Priority support", group: "Support" },
-  sso: { label: "SSO", group: "Enterprise" },
-  scim: { label: "SCIM user provisioning", group: "Enterprise" },
+  sso: { label: "SSO & SCIM", group: "Enterprise" },
+  onboarding: { label: "Onboarding assistance & team training", group: "Enterprise" },
   sla: { label: "99.9% uptime guarantee", group: "Enterprise" },
   security_review: { label: "Security review and DPA", group: "Enterprise" },
   dedicated_mcp: { label: "Dedicated MCP deployment", group: "Enterprise" },
@@ -127,7 +127,7 @@ const SELF_SERVE_FEATURES: readonly FeatureKey[] = [
 
 const ENTERPRISE_ONLY_FEATURES: readonly FeatureKey[] = [
   "sso",
-  "scim",
+  "onboarding",
   "sla",
   "security_review",
   "dedicated_mcp",
