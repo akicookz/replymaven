@@ -188,9 +188,8 @@ const integrations: { name: string; logo: string; invert?: boolean }[] = [
 
 export function ActionsVisual() {
   return (
-    <ProductFrame>
-      <ul
-        className="grid list-none grid-cols-2 gap-3 p-4 sm:grid-cols-3 sm:p-6"
+    <ul
+        className="grid list-none grid-cols-2 gap-3 sm:grid-cols-3"
         aria-label="Supported integrations"
       >
         {integrations.map((integration) => (
@@ -212,8 +211,7 @@ export function ActionsVisual() {
             </p>
           </li>
         ))}
-      </ul>
-    </ProductFrame>
+    </ul>
   );
 }
 
