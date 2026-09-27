@@ -126,6 +126,7 @@ function sanitizeForSelectorPrompt(value: string, maxChars: number): string {
   // Output is still wrapped in an explicit delimiter block that the prompt
   // labels as untrusted user input.
   const cleaned = value
+    // eslint-disable-next-line no-control-regex -- stripping control characters is the point
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .replace(/<\/?untrusted[^>]*>/gi, " ")
     .replace(/\s+/g, " ")

@@ -22,6 +22,7 @@ export function createAuth(
         geolocationTracking: true,
         cf: (cf as CloudflareGeolocation) || ({} as CloudflareGeolocation),
         d1: {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- better-auth-cloudflare's D1 type does not accept a Drizzle instance
           db: db as any,
           options: {
             usePlural: true,
