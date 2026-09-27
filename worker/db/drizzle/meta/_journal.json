@@ -533,6 +533,13 @@
       "when": 1790406678271,
       "tag": "0075_dry_captain_cross",
       "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "6",
+      "when": 1790514968915,
+      "tag": "0076_narrow_goblin_queen",
+      "breakpoints": true
     }
   ]
 }

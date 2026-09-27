@@ -26,12 +26,18 @@ import {
   Home,
   Zap,
   UserPlus,
+  Plus,
   MoreHorizontal,
   SlidersHorizontal,
   Search,
   ArrowDownRight,
 } from "lucide-react";
-import { pricingPlans } from "@/components/PricingCards";
+import {
+  enterprisePlan,
+  getCtaLabel,
+  pricingPlans,
+  type SelfServePlanId,
+} from "@/components/PricingCards";
 import { LogoIcon } from "@/components/Logo";
 import { ChannelFlowSection } from "@/components/marketing/channel-flow";
 import { KnowsSection } from "@/components/marketing/knows-section";
@@ -44,6 +50,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Segmented } from "@/components/ui/segmented";
 import { cn } from "@/lib/utils";
+import { type PlanId } from "../../shared/plans";
 
 // ─── FAQ Data ─────────────────────────────────────────────────────────────────
 
@@ -67,6 +74,11 @@ const faqItems = [
     question: "Does the help center train Maven?",
     answer:
       "Yes. Published help-center articles become trusted sources for Maven, so customers and the AI receive the same answer.",
+  },
+  {
+    question: "What counts as an AI message?",
+    answer:
+      "Each reply Maven sends to a customer counts as one AI message. Replies from your team and private Sidechat turns do not count. When the monthly messages run out, extra packs keep Maven answering.",
   },
   {
     question: "Which AI clients work with ReplyMaven MCP?",
@@ -530,33 +542,18 @@ function FaqItem({ question, answer }: { question: string; answer: string }) {
 
 // ─── Pricing ──────────────────────────────────────────────────────────────────
 
-type PlanId = "starter" | "standard" | "business";
 type Interval = "monthly" | "annual";
-
-const PLAN_RANK: Record<PlanId, number> = { starter: 0, standard: 1, business: 2 };
-
-function getLandingCtaLabel(
-  cardPlan: PlanId,
-  cardInterval: Interval,
-  currentPlan?: PlanId | null,
-  currentInterval?: Interval | null,
-): string {
-  if (!currentPlan || !currentInterval) return "Start 7-day free trial";
-  const isSamePlan = cardPlan === currentPlan;
-  const isSameInterval = cardInterval === currentInterval;
-  if (isSamePlan && isSameInterval) return "Manage Plan";
-  if (isSamePlan && !isSameInterval) return cardInterval === "annual" ? "Switch to annual" : "Switch to monthly";
-  return PLAN_RANK[cardPlan] > PLAN_RANK[currentPlan] ? "Upgrade" : "Downgrade";
-}
 
 function LandingPricing({
   onCtaClick,
+  onContactSales,
   currentPlan,
   currentInterval,
   onManagePlan,
   heading,
 }: {
-  onCtaClick: (planId: PlanId, interval: Interval) => void;
+  onCtaClick: (planId: SelfServePlanId, interval: Interval) => void;
+  onContactSales: () => void;
   currentPlan?: PlanId | null;
   currentInterval?: Interval | null;
   onManagePlan?: () => void;
@@ -566,33 +563,31 @@ function LandingPricing({
 
   return (
     <div>
-      <div className="mb-12 flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
-        {heading}
-        <div className="flex shrink-0 items-center">
-          <Segmented
-          label="Billing interval"
-          value={interval}
-          onValueChange={setInterval}
-          options={[
-            { value: "monthly", label: "Monthly" },
-            { value: "annual", label: "Annual" },
-          ]}
-          />
-        </div>
-      </div>
+      <div className="mb-12">{heading}</div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {pricingPlans.map((plan) => {
           const price = interval === "monthly" ? plan.monthlyPrice : Math.floor(plan.annualPrice / 12);
-          const ctaLabel = getLandingCtaLabel(plan.id, interval, currentPlan, currentInterval);
+          const ctaLabel = getCtaLabel(plan.id, interval, currentPlan, currentInterval);
           const isCurrent = plan.id === currentPlan && interval === currentInterval;
 
           return (
             <Card key={plan.id} className="gap-0 px-6">
-              <div className="flex h-6 items-center gap-2">
-                <h3 className="text-sm text-ink-5">{plan.name}</h3>
-                {isCurrent && <Badge variant="secondary">Current plan</Badge>}
-                {!isCurrent && plan.highlighted && plan.badge && <Badge variant="secondary">{plan.badge}</Badge>}
+              <div className="flex h-8 items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm text-ink-5">{plan.name}</h3>
+                  {isCurrent && <Badge variant="secondary">Current plan</Badge>}
+                </div>
+                <Segmented
+                  size="sm"
+                  label="Billing interval"
+                  value={interval}
+                  onValueChange={setInterval}
+                  options={[
+                    { value: "monthly", label: "Monthly" },
+                    { value: "annual", label: "Annual" },
+                  ]}
+                />
               </div>
               <div className="mt-4 flex items-baseline gap-1">
                 <span className="text-4xl font-medium text-ink-1 tracking-tight tabular-nums">${price}</span>
@@ -605,7 +600,7 @@ function LandingPricing({
               </div>
               <p className="mt-3 text-sm text-ink-5">{plan.description}</p>
 
-              <ul className="mt-6 space-y-3 flex-1 pb-7">
+              <ul className="mt-6 space-y-3 flex-1 pb-6">
                 {plan.features.map((feature) => (
                   <li key={feature} className="flex items-start gap-2.5 text-sm">
                     <Check className="w-4 h-4 text-ink-5 shrink-0 mt-0.5" />
@@ -614,9 +609,13 @@ function LandingPricing({
                 ))}
               </ul>
 
+              <div className="mb-4 flex items-center gap-2.5 rounded-glass bg-muted/40 px-3 py-2.5 text-sm text-ink-4">
+                <Plus className="w-4 h-4 shrink-0 text-ink-5" />
+                Add AI messages or seats anytime
+              </div>
+
               <Button
                 type="button"
-                variant={plan.highlighted ? "default" : "outline"}
                 className="w-full"
                 onClick={() => {
                   if (ctaLabel === "Manage Plan" && onManagePlan) onManagePlan();
@@ -628,6 +627,30 @@ function LandingPricing({
             </Card>
           );
         })}
+
+        <Card className="gap-0 px-6">
+          <div className="flex h-8 items-center gap-2">
+            <h3 className="text-sm text-ink-5">{enterprisePlan.name}</h3>
+            {currentPlan === "enterprise" && <Badge variant="secondary">Current plan</Badge>}
+          </div>
+          <div className="mt-4 flex items-baseline gap-1">
+            <span className="text-4xl font-medium text-ink-1 tracking-tight">Custom</span>
+          </div>
+          <p className="mt-3 text-sm text-ink-5">{enterprisePlan.description}</p>
+
+          <ul className="mt-6 space-y-3 flex-1 pb-7">
+            {enterprisePlan.features.map((feature) => (
+              <li key={feature} className="flex items-start gap-2.5 text-sm">
+                <Check className="w-4 h-4 text-ink-5 shrink-0 mt-0.5" />
+                <span className="text-ink-3">{feature}</span>
+              </li>
+            ))}
+          </ul>
+
+          <Button type="button" variant="outline" className="w-full" onClick={onContactSales}>
+            Contact sales
+          </Button>
+        </Card>
       </div>
     </div>
   );
@@ -644,14 +667,12 @@ function Landing() {
   const { data: session } = useSession();
   const { data: subData } = useSubscription();
   const isLoggedIn = !!session?.user;
-  const currentPlan = isLoggedIn
-    ? (subData?.subscription?.plan as PlanId | undefined) ?? null
-    : null;
+  const currentPlan = isLoggedIn ? subData?.subscription?.plan ?? null : null;
   const currentInterval = isLoggedIn
     ? (subData?.subscription?.interval as Interval | undefined) ?? null
     : null;
 
-  function handlePricingCta(planId: PlanId, interval: Interval) {
+  function handlePricingCta(planId: SelfServePlanId, interval: Interval) {
     if (isLoggedIn) {
       navigate(`/app/onboarding?plan=${planId}&interval=${interval}`);
       return;
@@ -671,6 +692,15 @@ function Landing() {
 
   function handleManagePlan() {
     navigate("/app/account");
+  }
+
+  function contactSales() {
+    const widget = (
+      window as Window & {
+        ReplyMaven?: { sendMessage: (text: string) => void };
+      }
+    ).ReplyMaven;
+    widget?.sendMessage("I'd like to talk to sales about Enterprise.");
   }
 
   function chatWithMaven() {
@@ -826,44 +856,17 @@ function Landing() {
                   Delegate support today
                 </h2>
                 <p className="mt-4 text-[1.05rem] text-ink-5 leading-relaxed">
-                  Experience ReplyMaven for seven days free.
+                  Experience ReplyMaven for seven days free. Setup takes ~15 minutes.
                 </p>
               </div>
             }
             onCtaClick={handlePricingCta}
+            onContactSales={contactSales}
             currentPlan={currentPlan}
             currentInterval={currentInterval}
             onManagePlan={handleManagePlan}
           />
 
-          <Card className="mt-4 px-6">
-            <div className="flex flex-col md:flex-row md:items-center gap-6">
-              <div className="space-y-2 md:max-w-xs shrink-0">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-lg font-medium text-ink-1">Enterprise</h3>
-                  <Badge variant="secondary">Custom</Badge>
-                </div>
-                <p className="text-sm text-ink-5">Unlimited everything, SSO, and a dedicated MCP deployment with priority support.</p>
-              </div>
-              <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
-                {[
-                  "Unlimited projects & AI messages",
-                  "SLA & uptime guarantee",
-                  "Dedicated MCP deployment",
-                  "SSO & advanced security",
-                ].map((feature) => (
-                  <span key={feature} className="flex items-center gap-2 text-sm text-ink-3">
-                    <Check className="w-4 h-4 text-ink-5 shrink-0" />
-                    {feature}
-                  </span>
-                ))}
-              </div>
-              <Button variant="outline" onClick={handleGenericCta} className="w-full shrink-0 md:w-auto">
-                Contact sales
-                <ArrowRight className="w-4 h-4" />
-              </Button>
-            </div>
-          </Card>
         </div>
       </section>
 

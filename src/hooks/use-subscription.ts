@@ -1,10 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
-import type { PlanLimits } from "@/lib/plan";
+import type { FeatureKey, PlanId, PlanLimits } from "../../shared/plans";
 
-interface SubscriptionData {
+export interface MessagePackGrant {
+  id: string;
+  packId: string;
+  messages: number;
+  remaining: number;
+  purchasedAt: string;
+  expiresAt: string;
+}
+
+export interface SubscriptionData {
   subscription: {
     id: string;
-    plan: string;
+    plan: PlanId;
     interval: string;
     status: string;
     trialEndsAt: string | null;
@@ -18,9 +27,24 @@ interface SubscriptionData {
   usagePeriodStart: string | null;
   usagePeriodEnd: string | null;
   limits: PlanLimits | null;
+  features: FeatureKey[];
+  /** AI messages allowed this period; null = no limit. */
+  messageAllowance: number | null;
+  packs: {
+    balance: number;
+    grants: MessagePackGrant[];
+  };
+  knowledgePages: {
+    used: number;
+    max: number | null;
+  };
   seats: {
     current: number;
-    max: number;
+    max: number | null;
+    /** Seats bought on top of the included ones. */
+    extra: number;
+    /** Seats the plan includes; null on Enterprise. */
+    included: number | null;
   };
   role: "owner" | "admin" | "member";
   pendingInvite: { id: string } | null;

@@ -8,6 +8,7 @@
 		"build": "tsc -b && vite build",
 		"typecheck": "tsc -b",
 		"lint": "eslint .",
+		"test": "bun test shared",
 		"preview": "bun run build && vite preview",
 		"deploy": "bun run build && wrangler deploy",
 		"cf-typegen": "wrangler types --strict-vars=false --include-runtime=false",

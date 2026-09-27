@@ -443,8 +443,8 @@ export class EmailService {
         html: wrapEmail(`
 <p style="${BODY_TEXT} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
 <p style="${BODY_TEXT} margin: 0 0 16px;">You've used all <span style="color: #f5f5f7;">${max}</span> messages on your <span style="color: #f5f5f7;">${escapeHtml(plan)}</span> plan. Your chatbot will not respond to new visitor messages until your next billing period.</p>
-<p style="${BODY_TEXT} margin: 0 0 24px;">Upgrade your plan to get more messages and keep your chatbot online.</p>
-<a href="https://replymaven.com/app/account/billing" style="${styles.button}">Upgrade Plan</a>
+<p style="${BODY_TEXT} margin: 0 0 24px;">Buy extra messages or upgrade your plan to keep your chatbot online.</p>
+<a href="https://replymaven.com/app/account/billing" style="${styles.button}">Add messages</a>
         `),
       });
     } catch (error) {

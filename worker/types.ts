@@ -2,10 +2,11 @@ import { type User, type Session } from "better-auth";
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { type SubscriptionRow } from "./db/schema";
 import { type CrawlMessage } from "./services/crawl-service";
+import type { FeatureKey, PlanId, PlanLimits } from "../shared/plans";
 
 // ─── Plan Types ───────────────────────────────────────────────────────────────
 
-export type Plan = "starter" | "standard" | "business";
+export type { PlanId as Plan } from "../shared/plans";
 export type BillingInterval = "monthly" | "annual";
 export type SubscriptionStatus =
   | "trialing"
@@ -15,18 +16,12 @@ export type SubscriptionStatus =
   | "unpaid"
   | "incomplete";
 
-export interface PlanLimits {
-  plan: Plan;
-  maxProjects: number;
-  maxMessagesPerMonth: number;
-  maxKnowledgeSources: number;
-  maxSeats: number;
-  pdfIndexing: boolean;
-  telegram: boolean;
-  slack: boolean;
-  customTone: boolean;
-  customCss: boolean;
-  tools: boolean;
+/** What the active account may do; null limits are not enforced. */
+export interface Entitlements {
+  plan: PlanId;
+  trialing: boolean;
+  limits: PlanLimits;
+  features: ReadonlySet<FeatureKey>;
 }
 
 // Extend Env with secrets not in generated wrangler types
@@ -49,12 +44,6 @@ export interface AppEnv extends Env {
   CF_ACCOUNT_ID: string;
   STRIPE_SECRET_KEY: string;
   STRIPE_WEBHOOK_SECRET: string;
-  STRIPE_STARTER_MONTHLY_PRICE_ID: string;
-  STRIPE_STARTER_ANNUAL_PRICE_ID: string;
-  STRIPE_STANDARD_MONTHLY_PRICE_ID: string;
-  STRIPE_STANDARD_ANNUAL_PRICE_ID: string;
-  STRIPE_BUSINESS_MONTHLY_PRICE_ID: string;
-  STRIPE_BUSINESS_ANNUAL_PRICE_ID: string;
   RESEND_WEBHOOK_SECRET: string;
   UPLOADS: R2Bucket;
   CONVERSATIONS_CACHE: KVNamespace;
@@ -70,7 +59,7 @@ export interface HonoAppContext {
     session: Session | null;
     db: DrizzleD1Database<Record<string, unknown>>;
     subscription: SubscriptionRow | null;
-    planLimits: PlanLimits | null;
+    entitlements: Entitlements | null;
     // Active-team context (resolved + cached per request). effectiveUserId is the
     // active team's owner id.
     effectiveUserId: string | null;

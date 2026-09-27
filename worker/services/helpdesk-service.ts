@@ -20,6 +20,10 @@ import { buildHelpUrl } from "../helpdesk-render/build-help-url";
 import { buildFrontmatterMarkdown } from "../helpdesk-render/build-frontmatter-md";
 import { applyHelpArticleSeoDefaults } from "../helpdesk-render/apply-help-article-seo-defaults";
 import { helpArticleR2RefreshAction } from "../helpdesk-render/help-article-r2-refresh";
+import {
+  KnowledgeUsageService,
+  trackKnowledgeBucket,
+} from "./knowledge-usage-service";
 
 export const MAX_HELP_TABS = 6;
 
@@ -135,10 +139,14 @@ const helpArticleNavColumns = {
 } as const;
 
 export class HelpdeskService {
+  private r2: R2Bucket;
+
   constructor(
     private db: DrizzleD1Database<Record<string, unknown>>,
-    private r2: R2Bucket,
-  ) {}
+    r2: R2Bucket,
+  ) {
+    this.r2 = trackKnowledgeBucket(r2, db);
+  }
 
   // ─── Tabs ──────────────────────────────────────────────────────────────────
 
@@ -636,6 +644,14 @@ export class HelpdeskService {
       sortOrder,
       publishedAt,
     };
+    if (status === "published" && projectSlug) {
+      const now = new Date();
+      await this.assertArticleFits(
+        { ...row, publishedAt, createdAt: now, updatedAt: now } as HelpArticleRow,
+        category,
+        projectId,
+      );
+    }
     await this.db.insert(helpArticles).values(row);
 
     const created = (await this.getArticleById(id, projectId))!;
@@ -751,6 +767,17 @@ export class HelpdeskService {
       patch.ogImageUrl = seo.ogImageUrl;
     }
 
+    if (nextStatus === "published" && projectSlug && Object.keys(patch).length > 0) {
+      const category = await this.getCategoryById(targetCategoryId, projectId);
+      if (category) {
+        await this.assertArticleFits(
+          { ...existing, ...patch, updatedAt: new Date() } as HelpArticleRow,
+          category,
+          projectId,
+        );
+      }
+    }
+
     if (Object.keys(patch).length > 0) {
       const scope = and(
         eq(helpArticles.id, id),
@@ -860,6 +887,18 @@ export class HelpdeskService {
   }
 
   // ─── R2 / RAG Bridge ───────────────────────────────────────────────────────
+
+  private async assertArticleFits(
+    article: HelpArticleRow,
+    category: HelpCategoryRow,
+    projectId: string,
+  ): Promise<void> {
+    await new KnowledgeUsageService(this.db).assertCanWrite(
+      this.r2,
+      `${projectId}/articles/${article.id}.md`,
+      buildFrontmatterMarkdown(article, category),
+    );
+  }
 
   private async publishArticleToR2(
     article: HelpArticleRow,

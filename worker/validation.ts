@@ -899,8 +899,18 @@ export const revokeSidechatAlwaysAllowSchema = z
 // ─── Billing ──────────────────────────────────────────────────────────────────
 
 export const createCheckoutSchema = z.object({
-  plan: z.enum(["starter", "standard", "business"]),
+  plan: z.enum(["business"]),
   interval: z.enum(["monthly", "annual"]),
+  successUrl: z.string().url(),
+  cancelUrl: z.string().url(),
+});
+
+export const setExtraSeatsSchema = z.object({
+  extraSeats: z.number().int().min(0).max(200),
+});
+
+export const createPackCheckoutSchema = z.object({
+  packId: z.enum(["pack_500", "pack_1100", "pack_5500"]),
   successUrl: z.string().url(),
   cancelUrl: z.string().url(),
 });

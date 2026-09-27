@@ -124,9 +124,8 @@ bun run lint
 bun run build         # tsc -b && vite build
 ```
 
-There is no test suite. The repo has no `*.test.ts` files and no `test` or `test:agents`
-script, so `bun test` exits with "0 test files matching". If you add tests, add the script
-and update this section.
+`bun run test` runs the unit tests under `shared/` (`bun test shared`). Worker modules that
+import `cloudflare:workers` cannot load under bun, so keep testable logic pure and in `shared/`.
 
 Widget changes also need `bun run widget:build`. Verify UI work in the real browser
 (see the preview note below) rather than assuming a build success means it renders.
@@ -424,6 +423,16 @@ Validated via a generic helper:
 function validate<T>(schema, data): { success: true; data: T } | { success: false; error: string }
 ```
 
+### Plans and limits
+
+The plan catalog (prices, limits, features, packs) lives in `shared/plans.ts` and is read by
+both the worker and the SPA. The worker resolves `c.get("entitlements")` per request via
+`entitlementsFor()` in `worker/services/billing-service.ts`. Knowledge writes to R2 go through
+`trackKnowledgeBucket()` (`worker/services/knowledge-usage-service.ts`), which keeps the page
+count current and throws `KnowledgeLimitError` (mapped to 403 `knowledge_limit_reached`) past
+the limit. Resource, crawl, and help-center services wrap their bucket with it; new code that
+writes indexed markdown must use one of those services.
+
 ### Rate limiting
 
 In-memory per-isolate rate limiter using `Map<string, { count: number; resetAt: number }>`:
@@ -717,7 +726,9 @@ Column lists below are the load-bearing ones, not the full set. `worker/db/schem
 
 ```
 projects
-  id, userId (FK users), name, slug (unique per user), domain, onboarded
+  id, userId (FK users), name, slug (unique per user), domain, onboarded,
+  knowledgePages (ceil(size / 2500) per indexed `.md` object in R2; kept by
+  `trackKnowledgeBucket`, recounted nightly)
 
 project_settings
   id, projectId, geminiApiKey (encrypted, unused: platform key is used instead),
@@ -801,8 +812,15 @@ team_member_projects
   id, teamMemberId, projectId
 
 subscriptions
-  id, userId, stripeCustomerId, stripeSubscriptionId, plan, interval, status,
-  trialEndsAt, currentPeriodStart, currentPeriodEnd, cancelAtPeriodEnd
+  id, userId, stripeCustomerId, stripeSubscriptionId, plan (business|enterprise;
+  legacy starter/standard read as business), interval, status, trialEndsAt,
+  currentPeriodStart, currentPeriodEnd, cancelAtPeriodEnd, limitOverrides (JSON,
+  read only on enterprise), extraSeats (Stripe seat item quantity, added to the
+  plan's included seats)
+
+message_credit_grants
+  id, userId, packId, messages, remaining, stripePaymentIntentId, purchasedAt,
+  expiresAt (one-time AI message packs, spent after the monthly allowance)
 
 usage
   id, userId, periodStart, messagesUsed, alerted80, alerted100
@@ -889,7 +907,7 @@ Grouped, not exhaustive. `worker/index.ts` and `worker/routes/*.ts` are the sour
 | GET/POST/DELETE | `/api/projects/:id/visitors/ban[ned]` | Visitor bans |
 | GET/PUT + POST `/test` | `/api/projects/:id/telegram`, `/slack` | Messenger config and connection test |
 | GET/POST/PATCH/DELETE | `/api/team[s]`, `/api/team/invite`, `/api/team/accept/:inviteId` | Members, invites, team switching |
-| GET/POST | `/api/billing/{subscription,checkout,portal,usage-log}` | Stripe subscription and usage |
+| GET/POST | `/api/billing/{subscription,checkout,portal,usage-log,packs/checkout,seats,start-plan-now}` | Stripe subscription, usage, message packs, extra seats, ending a trial early |
 | GET/POST/DELETE | `/api/mcp/{register,authorize,token,revoke,connections}` | MCP OAuth client registration and consent |
 | GET/PUT/POST | `/api/profile`, `/api/onboarding/*` | Account profile and first-run onboarding |
 | POST | `/api/upload`, `/api/help-images/upload` | Upload files to R2 |

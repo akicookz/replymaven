@@ -412,7 +412,7 @@ export class TeamService {
     inputs: Array<{ email: string; role: "admin" | "member" }>,
     accessAllProjects: boolean,
     projectIds: string[],
-    maxSeats: number,
+    maxSeats: number | null,
   ): Promise<TeamMemberRow[]> {
     const normalized = inputs.map((input) => ({
       email: input.email.trim().toLowerCase(),
@@ -443,8 +443,10 @@ export class TeamService {
     }
 
     const seatCount = await this.getSeatCount(ownerId);
-    if (seatCount + normalized.length > maxSeats) {
-      throw new Error("Seat limit reached. Upgrade your plan for more seats.");
+    if (maxSeats !== null && seatCount + normalized.length > maxSeats) {
+      throw new Error(
+        `Seat limit reached (${seatCount} of ${maxSeats}). Remove members or upgrade your plan.`,
+      );
     }
 
     const ids = normalized.map((_, index) =>

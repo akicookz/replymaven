@@ -24,6 +24,8 @@ export const projects = sqliteTable(
     onboarded: integer("onboarded", { mode: "boolean" })
       .notNull()
       .default(false),
+    // Indexed knowledge pages in R2: ceil(size / 2500) per .md object.
+    knowledgePages: integer("knowledge_pages").notNull().default(0),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),
@@ -762,7 +764,10 @@ export const subscriptions = sqliteTable(
       .references(() => authSchema.users.id, { onDelete: "cascade" }),
     stripeCustomerId: text("stripe_customer_id").notNull(),
     stripeSubscriptionId: text("stripe_subscription_id"),
-    plan: text("plan", { enum: ["starter", "standard", "business"] }).notNull(),
+    // "starter" and "standard" are pre-v2 ids kept for old rows; normalizePlanId maps them.
+    plan: text("plan", {
+      enum: ["business", "enterprise", "starter", "standard"],
+    }).notNull(),
     interval: text("interval", { enum: ["monthly", "annual"] }).notNull(),
     status: text("status", {
       enum: [
@@ -780,6 +785,10 @@ export const subscriptions = sqliteTable(
     cancelAtPeriodEnd: integer("cancel_at_period_end", { mode: "boolean" })
       .notNull()
       .default(false),
+    // Enterprise contract limits as JSON; read only when plan is "enterprise".
+    limitOverrides: text("limit_overrides"),
+    // Seats bought on top of the plan's included seats (Stripe seat item quantity).
+    extraSeats: integer("extra_seats").notNull().default(0),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),
@@ -940,6 +949,8 @@ export const messageUsageCredits = sqliteTable(
       .notNull()
       .references(() => authSchema.users.id, { onDelete: "cascade" }),
     periodStart: integer("period_start", { mode: "timestamp" }).notNull(),
+    // Set when the message was paid from a pack instead of the monthly allowance.
+    grantId: text("grant_id"),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),
@@ -953,6 +964,38 @@ export const messageUsageCredits = sqliteTable(
 );
 
 export type MessageUsageCreditRow = typeof messageUsageCredits.$inferSelect;
+
+// ─── Message Credit Grants (AI message packs) ─────────────────────────────────
+
+export const messageCreditGrants = sqliteTable(
+  "message_credit_grants",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => authSchema.users.id, { onDelete: "cascade" }),
+    packId: text("pack_id").notNull(),
+    messages: integer("messages").notNull(),
+    remaining: integer("remaining").notNull(),
+    stripePaymentIntentId: text("stripe_payment_intent_id").notNull(),
+    purchasedAt: integer("purchased_at", { mode: "timestamp" }).notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_message_credit_grants_payment").on(table.stripePaymentIntentId),
+    index("idx_message_credit_grants_user_expiry").on(table.userId, table.expiresAt),
+  ],
+);
+
+export type MessageCreditGrantRow = typeof messageCreditGrants.$inferSelect;
+export type NewMessageCreditGrantRow = typeof messageCreditGrants.$inferInsert;
 export type NewMessageUsageCreditRow = typeof messageUsageCredits.$inferInsert;
 
 // ─── API Keys ─────────────────────────────────────────────────────────────────

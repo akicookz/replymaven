@@ -6,6 +6,10 @@ import {
   resources,
   type CrawledPageRow,
 } from "../db";
+import {
+  KnowledgeLimitError,
+  trackKnowledgeBucket,
+} from "./knowledge-usage-service";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -77,12 +81,16 @@ async function getRobots(origin: string): Promise<ReturnType<typeof robotsParser
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 export class CrawlService {
+  private r2: R2Bucket;
+
   constructor(
     private db: DrizzleD1Database<Record<string, unknown>>,
-    private r2: R2Bucket,
+    r2: R2Bucket,
     private accountId: string,
     private apiToken: string,
-  ) {}
+  ) {
+    this.r2 = trackKnowledgeBucket(r2, db);
+  }
 
   private get browserApiBase(): string {
     return `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/browser-rendering`;
@@ -247,13 +255,20 @@ export class CrawlService {
     const r2Key = `${projectId}/page-${urlHash}.md`;
     const content = `# ${pageTitle}\n\nSource: ${url}\n\n${markdown}`;
 
-    await this.r2.put(r2Key, content, {
-      customMetadata: {
-        context: `Web page: ${pageTitle} (${url})`,
-        resourceId,
-        projectId,
-      },
-    });
+    try {
+      await this.r2.put(r2Key, content, {
+        customMetadata: {
+          context: `Web page: ${pageTitle} (${url})`,
+          resourceId,
+          projectId,
+        },
+      });
+    } catch (err) {
+      if (!(err instanceof KnowledgeLimitError)) throw err;
+      await this.markPageStatus(resourceId, url, "failed");
+      await this.checkAndFinalizeResource(resourceId, projectId);
+      return;
+    }
 
     // 6. Mark page as crawled in DB
     if (existing) {

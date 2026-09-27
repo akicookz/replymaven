@@ -26,12 +26,10 @@ import {
   WidgetPreviewPanel,
   WidgetSectionCard,
 } from "@/components/WidgetSettings";
-import { useSubscription } from "@/hooks/use-subscription";
 import {
   BACKGROUND_STYLES,
   useWidgetSettings,
 } from "@/hooks/use-widget-settings";
-import { canAccessFeature } from "@/lib/plan";
 import { cn } from "@/lib/utils";
 import { WIDGET_FONTS } from "../../shared/widget-fonts";
 import {
@@ -48,8 +46,6 @@ interface WidgetAppearancePanelProps {
 }
 
 export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
-  const { data: subData } = useSubscription();
-  const canCustomCss = canAccessFeature(subData?.limits ?? null, "customCss");
   const customCss = state.form.customCss ?? "";
   const widgetPages = (state.form.allowedPages ?? "")
     .split(",")
@@ -137,16 +133,10 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
                   state.updateForm({ customCss: next || null })
                 }
                 classes={WIDGET_CUSTOM_CSS_CLASSES}
-                disabled={!canCustomCss && !customCss.trim()}
                 autoFocus
                 placeholder={`.rm-header { font-weight: 800; }
 .rm-chat-window { border-radius: 20px; }`}
               />
-              {!canCustomCss && (
-                <p className="text-xs text-muted-foreground">
-                  Custom CSS is available on the Business plan.
-                </p>
-              )}
             </AccordionContent>
           </AccordionItem>
         </Accordion>

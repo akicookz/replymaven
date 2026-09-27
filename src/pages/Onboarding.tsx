@@ -21,7 +21,12 @@ import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/Logo";
 import { signOut } from "@/lib/auth-client";
 import { resetFirstPartyPostHog } from "@/lib/posthog";
-import { PricingCardsSelect, BillingToggle, getCtaLabel } from "@/components/PricingCards";
+import {
+  PricingCardsSelect,
+  BillingToggle,
+  getCtaLabel,
+  type SelfServePlanId,
+} from "@/components/PricingCards";
 import {
   Select,
   SelectContent,
@@ -1018,9 +1023,7 @@ function Step5({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: subData } = useSubscription();
-  const [selectedPlan, setSelectedPlan] = useState<
-    "starter" | "standard" | "business"
-  >("standard");
+  const [selectedPlan, setSelectedPlan] = useState<SelfServePlanId>("business");
   const [checkoutPending, setCheckoutPending] = useState(false);
   const [portalPending, setPortalPending] = useState(false);
   const [billingInterval, setBillingInterval] = useState<"monthly" | "annual">("annual");
@@ -1030,12 +1033,12 @@ function Step5({
   const isCelebratePreview = searchParams.get("celebrate") === "1";
   const showCelebration = isStripeReturn || isCelebratePreview;
 
-  const currentPlan = subData?.subscription?.plan as "starter" | "standard" | "business" | undefined;
+  const currentPlan = subData?.subscription?.plan;
   const currentInterval = subData?.subscription?.interval as "monthly" | "annual" | undefined;
   const confettiFired = useRef(false);
 
   useEffect(() => {
-    if (currentPlan) setSelectedPlan(currentPlan);
+    if (currentPlan && currentPlan !== "enterprise") setSelectedPlan(currentPlan);
   }, [currentPlan]);
 
   useEffect(() => {
@@ -1361,7 +1364,7 @@ function Onboarding() {
     if (
       plan &&
       interval &&
-      ["starter", "standard", "business"].includes(plan) &&
+      plan === "business" &&
       ["monthly", "annual"].includes(interval)
     ) {
       // Clean URL params immediately

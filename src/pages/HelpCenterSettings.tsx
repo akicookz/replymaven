@@ -42,8 +42,6 @@ import {
   HelpAnalyticsEditor,
   type HelpAnalyticsEmbed,
 } from "@/components/help-analytics-editor";
-import { useSubscription } from "@/hooks/use-subscription";
-import { canAccessFeature } from "@/lib/plan";
 
 type HelpThemeDefault = "system" | "light" | "dark";
 
@@ -96,8 +94,6 @@ function HelpCenterSettings() {
   const [analytics, setAnalytics] = useState<HelpAnalyticsEmbed[]>([]);
   const [themeDefault, setThemeDefault] =
     useState<HelpThemeDefault>("system");
-  const { data: subData } = useSubscription();
-  const canCustomCss = canAccessFeature(subData?.limits ?? null, "customCss");
 
   const { data: project } = useQuery<ProjectData>({
     queryKey: ["project", projectId],
@@ -528,21 +524,11 @@ function HelpCenterSettings() {
           value={customCss}
           onChange={setCustomCss}
           classes={HELP_CUSTOM_CSS_CLASSES}
-          disabled={
-            isLoading ||
-            saveSettings.isPending ||
-            (!canCustomCss && !customCss.trim())
-          }
+          disabled={isLoading || saveSettings.isPending}
           placeholder={`:root {
   --help-heading-weight: 700;
 }`}
         />
-
-        {!canCustomCss && (
-          <p className="text-xs text-muted-foreground">
-            Custom CSS is available on the Business plan.
-          </p>
-        )}
 
         <div className="flex justify-end">
           <Button
@@ -570,20 +556,10 @@ function HelpCenterSettings() {
           </p>
         </div>
 
-        {!canCustomCss && (
-          <p className="text-xs text-muted-foreground">
-            Analytics embeds are available on the Business plan.
-          </p>
-        )}
-
         <HelpAnalyticsEditor
           value={analytics}
           onChange={setAnalytics}
-          disabled={
-            isLoading ||
-            saveSettings.isPending ||
-            (!canCustomCss && analytics.length === 0)
-          }
+          disabled={isLoading || saveSettings.isPending}
           action={
             <Button
               onClick={() => saveSettings.mutate()}

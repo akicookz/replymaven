@@ -1,80 +1,85 @@
-import { useState } from "react";
 import { Check } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { cardVariants } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import {
+  FEATURE_LABELS,
+  PLANS,
+  pricingFeatures,
+  type PlanId,
+} from "../../shared/plans";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type PlanId = "starter" | "standard" | "business";
+export type SelfServePlanId = Exclude<PlanId, "enterprise">;
 type Interval = "monthly" | "annual";
 
 // ─── Pricing Data ─────────────────────────────────────────────────────────────
 
-const pricingPlans = [
-  {
-    id: "starter" as const,
-    name: "ReplyMaven Starter",
-    monthlyPrice: 19,
-    annualPrice: 190,
-    description: "For personal projects and small sites.",
-    highlighted: false,
+interface SelfServePricingPlan {
+  id: SelfServePlanId;
+  name: string;
+  monthlyPrice: number;
+  annualPrice: number;
+  description: string;
+  highlighted: boolean;
+  badge?: string;
+  features: string[];
+}
+
+function limitLine(value: number | null, unit: string): string {
+  return `${(value ?? 0).toLocaleString("en-US")} ${unit}`;
+}
+
+function selfServePlan(
+  id: SelfServePlanId,
+  description: string,
+  highlighted: boolean,
+  features: string[],
+  inherits?: string,
+): SelfServePricingPlan {
+  const plan = PLANS[id];
+  return {
+    id,
+    name: plan.name,
+    monthlyPrice: plan.monthlyPriceUsd ?? 0,
+    annualPrice: plan.annualPriceUsd ?? 0,
+    description,
+    highlighted,
     features: [
-      "1 project",
-      "100 AI messages / month",
-      "50 knowledge sources",
-      "1 seat",
-      "Web page & FAQ indexing",
-      "Widget customization",
-      "Email support",
+      ...(inherits ? [inherits] : []),
+      limitLine(plan.limits.aiMessagesPerMonth, "AI messages / month"),
+      limitLine(plan.limits.seats, plan.limits.seats === 1 ? "seat included" : "seats included"),
+      ...features,
     ],
-  },
-  {
-    id: "standard" as const,
-    name: "ReplyMaven Standard",
-    monthlyPrice: 49,
-    annualPrice: 490,
-    description: "For small teams handling growing ticket volume.",
-    highlighted: true,
-    badge: "Most Popular",
-    features: [
-      "Everything in Starter",
-      "3 projects",
-      "500 AI messages / month",
-      "3 seats",
-      "PDF indexing",
-      "Telegram live agent handoff",
-      "Custom tone of voice",
-      "Connectors",
-    ],
-  },
-  {
-    id: "business" as const,
-    name: "ReplyMaven Business",
-    monthlyPrice: 99,
-    annualPrice: 990,
-    description: "For teams looking to retain support quality at scale.",
-    highlighted: false,
-    features: [
-      "Everything in Standard",
-      "5 projects",
-      "2,000 AI messages / month",
-      "5 seats",
-      "Auto canned response drafts",
-      "Custom CSS & branding",
-      "Priority support",
-    ],
-  },
+  };
+}
+
+const pricingPlans: SelfServePricingPlan[] = [
+  selfServePlan("business", "For teams looking to delegate support while keeping the quality bar high.", false, [
+    "Train on web pages, FAQs, SOPs, and PDFs",
+    "Omni-channel shared inbox",
+    "AI Sidechat and Connectors",
+    "Help center on your own domain",
+    "Custom tools and MCP",
+  ]),
 ];
 
-export { pricingPlans };
+const enterprisePlan = {
+  name: PLANS.enterprise.name,
+  description: "For security reviews and custom scale.",
+  features: [
+    "Everything in Business",
+    "Custom limits",
+    ...pricingFeatures("enterprise").map((key) => FEATURE_LABELS[key].label),
+  ],
+};
+
+export { pricingPlans, enterprisePlan };
 
 // ─── Plan Comparison Helper ───────────────────────────────────────────────────
 
 const PLAN_RANK: Record<PlanId, number> = {
-  starter: 0,
-  standard: 1,
-  business: 2,
+  business: 0,
+  enterprise: 1,
 };
 
 export function getCtaLabel(
@@ -155,130 +160,11 @@ export function BillingToggle({
   );
 }
 
-// ─── Pricing Cards (for Landing page) ─────────────────────────────────────────
-
-interface PricingCardsProps {
-  onCtaClick: (planId: PlanId, interval: Interval) => void;
-  currentPlan?: PlanId | null;
-  currentInterval?: Interval | null;
-  onManagePlan?: () => void;
-}
-
-export function PricingCards({
-  onCtaClick,
-  currentPlan,
-  currentInterval,
-  onManagePlan,
-}: PricingCardsProps) {
-  const [interval, setInterval] = useState<Interval>("monthly");
-
-  return (
-    <div className="space-y-8">
-      <BillingToggle interval={interval} onChange={setInterval} />
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {pricingPlans.map((plan) => {
-          const price =
-            interval === "monthly"
-              ? plan.monthlyPrice
-              : Math.floor(plan.annualPrice / 12);
-
-          const ctaLabel = getCtaLabel(plan.id, interval, currentPlan, currentInterval);
-          const isCurrent = isCurrentPlanCard(plan.id, interval, currentPlan, currentInterval);
-
-          return (
-            <div
-              key={plan.id}
-              className={cn(
-                cardVariants({
-                  variant: plan.highlighted ? "glow-primary" : "glow-secondary",
-                }),
-                "relative flex flex-col rounded-3xl",
-                plan.highlighted
-                  ? "bg-black/80 backdrop-blur-2xl border border-primary/20"
-                  : "bg-black/80 backdrop-blur-2xl border border-primary/15",
-                isCurrent && "ring-2 ring-brand/40",
-              )}
-            >
-              {isCurrent && (
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                  <span className="text-[11px] bg-brand text-white px-3 py-1 rounded-[6px] font-medium">
-                    Current Plan
-                  </span>
-                </div>
-              )}
-
-              <div className="p-7 pb-0 space-y-4">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm text-muted-foreground">{plan.name}</h3>
-                  {plan.highlighted && plan.badge && (
-                    <span className="text-[11px] bg-brand/10 text-brand px-2 py-0.5 rounded-[6px] font-medium">
-                      {plan.badge}
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-baseline gap-1">
-                  <span className="text-4xl font-semibold text-foreground tracking-tight tabular-nums">
-                    ${price}
-                  </span>
-                  <span className="text-quaternary text-sm">
-                    /mo
-                    {interval === "annual" && (
-                      <span className="ml-1 text-xs text-muted-foreground tabular-nums">
-                        (${plan.annualPrice}/yr)
-                      </span>
-                    )}
-                  </span>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  {plan.description}
-                </p>
-              </div>
-
-              <ul className="p-7 space-y-3 flex-1">
-                {plan.features.map((feature) => (
-                  <li
-                    key={feature}
-                    className="flex items-start gap-2.5 text-sm"
-                  >
-                    <Check className="w-4 h-4 text-brand shrink-0 mt-0.5" />
-                    <span className="text-secondary-foreground">{feature}</span>
-                  </li>
-                ))}
-              </ul>
-
-              <div className="p-7 pt-0">
-                <Button
-                  variant={plan.highlighted ? "glow-primary" : "glow-secondary"}
-                  onClick={() => {
-                    if (ctaLabel === "Manage Plan" && onManagePlan) {
-                      onManagePlan();
-                    } else {
-                      onCtaClick(plan.id, interval);
-                    }
-                  }}
-                  className={cn(
-                    "w-full rounded-full h-11 text-sm font-medium",
-                    !plan.highlighted &&
-                    "bg-white/[0.05] hover:bg-white/[0.08] border-white/[0.06]",
-                  )}
-                >
-                  {ctaLabel}
-                </Button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 // ─── Pricing Cards (for Onboarding plan selection) ────────────────────────────
 
 interface PricingCardsSelectProps {
-  selectedPlan: PlanId;
-  onSelectedPlanChange: (plan: PlanId) => void;
+  selectedPlan: SelfServePlanId;
+  onSelectedPlanChange: (plan: SelfServePlanId) => void;
   interval: Interval;
   currentPlan?: PlanId | null;
   currentInterval?: Interval | null;
@@ -333,7 +219,7 @@ export function PricingCardsSelect({
                 <div className="min-w-0 space-y-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-semibold text-foreground text-sm">
-                      {plan.name.replace("ReplyMaven ", "")}
+                      {plan.name}
                     </span>
                     {plan.badge && (
                       <span className="text-[11px] bg-brand/10 text-brand px-2 py-0.5 rounded-[6px] font-medium">

@@ -1,14 +1,16 @@
 import Stripe from "stripe";
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, and } from "drizzle-orm";
+import { eq, and, asc, gt, sql } from "drizzle-orm";
 import {
   subscriptions,
   usage,
   messageUsageCredits,
+  messageCreditGrants,
   projects,
   projectSettings,
   type SubscriptionRow,
   type UsageRow,
+  type MessageCreditGrantRow,
 } from "../db";
 import { createPublicConversationStore } from "../conversations/create-public-conversation-store";
 import type { PublicConversationStore } from "../conversations/public-conversation-store";
@@ -17,57 +19,55 @@ import {
   type AppEnv,
   type Plan,
   type BillingInterval,
-  type PlanLimits,
+  type Entitlements,
 } from "../types";
+import {
+  MESSAGE_PACKS,
+  MESSAGE_PACK_VALID_MONTHS,
+  PLANS,
+  TRIAL_AI_MESSAGES,
+  isPlanId,
+  parseLimitOverrides,
+  planLimits,
+  type MessagePack,
+  type PlanId,
+} from "../../shared/plans";
 import {
   EmailService,
   type SubscriptionInactiveReason,
 } from "./email-service";
 import { TelegramService } from "./telegram-service";
 
-// ─── Plan Limits Configuration ────────────────────────────────────────────────
+// ─── Plan Resolution ──────────────────────────────────────────────────────────
 
-const PLAN_LIMITS: Record<Plan, PlanLimits> = {
-  starter: {
-    plan: "starter",
-    maxProjects: 1,
-    maxMessagesPerMonth: 100,
-    maxKnowledgeSources: 50,
-    maxSeats: 1,
-    pdfIndexing: false,
-    telegram: false,
-    slack: false,
-    customTone: false,
-    customCss: false,
-    tools: false,
-  },
-  standard: {
-    plan: "standard",
-    maxProjects: 3,
-    maxMessagesPerMonth: 500,
-    maxKnowledgeSources: 50,
-    maxSeats: 3,
-    pdfIndexing: true,
-    telegram: true,
-    slack: true,
-    customTone: true,
-    customCss: false,
-    tools: true,
-  },
-  business: {
-    plan: "business",
-    maxProjects: 5,
-    maxMessagesPerMonth: 2000,
-    maxKnowledgeSources: 100,
-    maxSeats: 5,
-    pdfIndexing: true,
-    telegram: true,
-    slack: true,
-    customTone: true,
-    customCss: true,
-    tools: true,
-  },
-};
+/** Maps stored plan ids, including pre-v2 "starter" and "standard", to a catalog plan. */
+export function normalizePlanId(stored: string): PlanId {
+  if (isPlanId(stored)) return stored;
+  return "business";
+}
+
+/** Entitlements for a subscription row; Enterprise reads its contract overrides. */
+export function entitlementsFor(sub: SubscriptionRow): Entitlements {
+  const plan = normalizePlanId(sub.plan);
+  const overrides = plan === "enterprise" ? parseLimitOverrides(sub.limitOverrides) : null;
+  const limits = planLimits(plan, overrides);
+  if (plan !== "enterprise" && limits.seats !== null) {
+    limits.seats += Math.max(0, sub.extraSeats);
+  }
+  return {
+    plan,
+    trialing: sub.status === "trialing",
+    limits,
+    features: PLANS[plan].features,
+  };
+}
+
+/** Monthly AI messages before packs; null means not enforced. Trials are capped. */
+export function messageAllowance(entitlements: Entitlements): number | null {
+  const limit = entitlements.limits.aiMessagesPerMonth;
+  if (!entitlements.trialing) return limit;
+  return limit === null ? TRIAL_AI_MESSAGES : Math.min(limit, TRIAL_AI_MESSAGES);
+}
 
 // ─── Price Map Builder ────────────────────────────────────────────────────────
 
@@ -78,46 +78,19 @@ interface PriceMapping {
 
 function buildPriceMaps(env: AppEnv) {
   const entries: Array<{
-    priceId: string;
+    priceId: string | undefined;
     plan: Plan;
     interval: BillingInterval;
   }> = [
-    {
-      priceId: env.STRIPE_STARTER_MONTHLY_PRICE_ID,
-      plan: "starter",
-      interval: "monthly",
-    },
-    {
-      priceId: env.STRIPE_STARTER_ANNUAL_PRICE_ID,
-      plan: "starter",
-      interval: "annual",
-    },
-    {
-      priceId: env.STRIPE_STANDARD_MONTHLY_PRICE_ID,
-      plan: "standard",
-      interval: "monthly",
-    },
-    {
-      priceId: env.STRIPE_STANDARD_ANNUAL_PRICE_ID,
-      plan: "standard",
-      interval: "annual",
-    },
-    {
-      priceId: env.STRIPE_BUSINESS_MONTHLY_PRICE_ID,
-      plan: "business",
-      interval: "monthly",
-    },
-    {
-      priceId: env.STRIPE_BUSINESS_ANNUAL_PRICE_ID,
-      plan: "business",
-      interval: "annual",
-    },
+    { priceId: env.STRIPE_BUSINESS_MONTHLY_PRICE_ID, plan: "business", interval: "monthly" },
+    { priceId: env.STRIPE_BUSINESS_ANNUAL_PRICE_ID, plan: "business", interval: "annual" },
   ];
 
   const priceToMapping = new Map<string, PriceMapping>();
   const planIntervalToPrice = new Map<string, string>();
 
   for (const entry of entries) {
+    if (!entry.priceId) continue;
     priceToMapping.set(entry.priceId, {
       plan: entry.plan,
       interval: entry.interval,
@@ -125,7 +98,23 @@ function buildPriceMaps(env: AppEnv) {
     planIntervalToPrice.set(`${entry.plan}:${entry.interval}`, entry.priceId);
   }
 
-  return { priceToMapping, planIntervalToPrice };
+  const packPrices = new Map<MessagePack["id"], string>();
+  const packEnv: Record<MessagePack["id"], string | undefined> = {
+    pack_500: env.STRIPE_PACK_500_PRICE_ID,
+    pack_1100: env.STRIPE_PACK_1100_PRICE_ID,
+    pack_5500: env.STRIPE_PACK_5500_PRICE_ID,
+  };
+  for (const pack of MESSAGE_PACKS) {
+    const priceId = packEnv[pack.id];
+    if (priceId) packPrices.set(pack.id, priceId);
+  }
+
+  const seatPrices = new Map<BillingInterval, string>([
+    ["monthly", env.STRIPE_SEAT_MONTHLY_PRICE_ID],
+    ["annual", env.STRIPE_SEAT_ANNUAL_PRICE_ID],
+  ]);
+
+  return { priceToMapping, planIntervalToPrice, packPrices, seatPrices };
 }
 
 // ─── Billing Service ──────────────────────────────────────────────────────────
@@ -134,6 +123,8 @@ export class BillingService {
   private stripe: Stripe;
   private priceToMapping: Map<string, PriceMapping>;
   private planIntervalToPrice: Map<string, string>;
+  private packPrices: Map<MessagePack["id"], string>;
+  private seatPrices: Map<BillingInterval, string>;
   private conversationStore: PublicConversationStore;
 
   constructor(
@@ -147,6 +138,8 @@ export class BillingService {
     const maps = buildPriceMaps(env);
     this.priceToMapping = maps.priceToMapping;
     this.planIntervalToPrice = maps.planIntervalToPrice;
+    this.packPrices = maps.packPrices;
+    this.seatPrices = maps.seatPrices;
     this.conversationStore = conversationStore ??
       createPublicConversationStore({ db, env });
   }
@@ -161,11 +154,6 @@ export class BillingService {
     return this.planIntervalToPrice.get(`${plan}:${interval}`) ?? null;
   }
 
-  // ─── Plan Limits ──────────────────────────────────────────────────────────
-
-  static getPlanLimits(plan: Plan): PlanLimits {
-    return PLAN_LIMITS[plan];
-  }
 
   // ─── Stripe Customer ─────────────────────────────────────────────────────
 
@@ -294,6 +282,7 @@ export class BillingService {
         | "currentPeriodStart"
         | "currentPeriodEnd"
         | "cancelAtPeriodEnd"
+        | "extraSeats"
       >
     >,
   ): Promise<void> {
@@ -309,7 +298,7 @@ export class BillingService {
     userId: string,
     email: string,
     name: string | null,
-    plan: Plan,
+    plan: Exclude<Plan, "enterprise">,
     interval: BillingInterval,
     successUrl: string,
     cancelUrl: string,
@@ -335,6 +324,60 @@ export class BillingService {
       cancel_url: cancelUrl,
       metadata: { userId, plan, interval },
     });
+  }
+
+  async createPackCheckoutSession(
+    userId: string,
+    email: string,
+    name: string | null,
+    packId: MessagePack["id"],
+    successUrl: string,
+    cancelUrl: string,
+  ): Promise<Stripe.Checkout.Session> {
+    const priceId = this.packPrices.get(packId);
+    if (!priceId) throw new Error(`Pack not configured: ${packId}`);
+    const stripeCustomerId = await this.getOrCreateStripeCustomer(userId, email, name);
+    return this.stripe.checkout.sessions.create({
+      customer: stripeCustomerId,
+      mode: "payment",
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      metadata: { userId, kind: "message_pack", packId },
+    });
+  }
+
+  /** Ends a trial now so the plan is charged and the full allowance unlocks. */
+  async startPlanNow(sub: SubscriptionRow): Promise<void> {
+    if (sub.status !== "trialing" || !sub.stripeSubscriptionId) return;
+    await this.stripe.subscriptions.update(sub.stripeSubscriptionId, { trial_end: "now" });
+  }
+
+  /**
+   * Sets the number of seats bought on top of the plan. The seat item uses the
+   * plan's interval, and Stripe prorates the change on the next invoice.
+   */
+  async setExtraSeats(sub: SubscriptionRow, extraSeats: number): Promise<void> {
+    if (!sub.stripeSubscriptionId) throw new Error("No Stripe subscription");
+    const seatPriceIds = new Set(this.seatPrices.values());
+    const stripeSub = await this.stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
+    const seatItem = stripeSub.items.data.find((item) => seatPriceIds.has(item.price.id));
+
+    if (extraSeats === 0) {
+      if (seatItem) await this.stripe.subscriptionItems.del(seatItem.id);
+    } else if (seatItem) {
+      await this.stripe.subscriptionItems.update(seatItem.id, { quantity: extraSeats });
+    } else {
+      const price = this.seatPrices.get(sub.interval);
+      if (!price) throw new Error(`Seat price not configured: ${sub.interval}`);
+      await this.stripe.subscriptionItems.create({
+        subscription: sub.stripeSubscriptionId,
+        price,
+        quantity: extraSeats,
+      });
+    }
+
+    await this.updateSubscription(sub.id, { extraSeats });
   }
 
   async createPortalSession(
@@ -391,8 +434,13 @@ export class BillingService {
   private async handleCheckoutCompleted(
     session: Stripe.Checkout.Session,
   ): Promise<void> {
+    if (session.metadata?.kind === "message_pack") {
+      await this.grantMessagePack(session);
+      return;
+    }
     const userId = session.metadata?.userId;
-    const plan = session.metadata?.plan as Plan | undefined;
+    const metadataPlan = session.metadata?.plan;
+    const plan = isPlanId(metadataPlan) ? metadataPlan : undefined;
     const interval = session.metadata?.interval as BillingInterval | undefined;
     if (!userId || !plan || !interval) return;
 
@@ -471,9 +519,11 @@ export class BillingService {
     const existing = await this.getSubscriptionByStripeId(stripeSub.id);
     if (!existing) return;
 
-    // Resolve plan/interval from the current price
-    const priceId = stripeSub.items.data[0]?.price.id;
-    const mapping = priceId ? this.resolvePriceId(priceId) : null;
+    // Resolve plan/interval from the plan item; the seat item only sets a quantity.
+    const seatPriceIds = new Set(this.seatPrices.values());
+    const planItem = stripeSub.items.data.find((item) => !seatPriceIds.has(item.price.id));
+    const seatItem = stripeSub.items.data.find((item) => seatPriceIds.has(item.price.id));
+    const mapping = planItem ? this.resolvePriceId(planItem.price.id) : null;
 
     const statusMap: Record<string, SubscriptionRow["status"]> = {
       trialing: "trialing",
@@ -489,9 +539,14 @@ export class BillingService {
     const newStatus = statusMap[stripeSub.status] ?? "active";
     const wasActive = this.isSubscriptionActive(existing);
 
+    // Self-serve prices map to a plan. Contract prices are not in the map, so an
+    // Enterprise row keeps its plan unless the subscription metadata says otherwise.
+    const metadataPlan = stripeSub.metadata?.plan;
+    const plan = mapping?.plan ?? (isPlanId(metadataPlan) ? metadataPlan : existing.plan);
+
     await this.updateSubscription(existing.id, {
       status: newStatus,
-      plan: mapping?.plan ?? existing.plan,
+      plan,
       interval: mapping?.interval ?? existing.interval,
       trialEndsAt: stripeSub.trial_end
         ? new Date(stripeSub.trial_end * 1000)
@@ -499,6 +554,7 @@ export class BillingService {
       currentPeriodStart: periodDates.start,
       currentPeriodEnd: periodDates.end,
       cancelAtPeriodEnd: stripeSub.cancel_at_period_end,
+      extraSeats: seatItem?.quantity ?? 0,
     });
 
     // Notify user if subscription became inactive
@@ -586,6 +642,82 @@ export class BillingService {
     await this.updateSubscription(existing.id, { status: "past_due" });
 
     await this.notifySubscriptionInactive(existing.userId, "payment_failed");
+  }
+
+  // ─── Message Packs ────────────────────────────────────────────────────────
+
+  private async grantMessagePack(session: Stripe.Checkout.Session): Promise<void> {
+    const userId = session.metadata?.userId;
+    const pack = MESSAGE_PACKS.find((p) => p.id === session.metadata?.packId);
+    const paymentIntentId =
+      typeof session.payment_intent === "string"
+        ? session.payment_intent
+        : session.payment_intent?.id;
+    if (!userId || !pack || !paymentIntentId || session.payment_status !== "paid") return;
+
+    const purchasedAt = new Date();
+    const expiresAt = new Date(purchasedAt);
+    expiresAt.setUTCMonth(expiresAt.getUTCMonth() + MESSAGE_PACK_VALID_MONTHS);
+    await this.db
+      .insert(messageCreditGrants)
+      .values({
+        id: crypto.randomUUID(),
+        userId,
+        packId: pack.id,
+        messages: pack.messages,
+        remaining: pack.messages,
+        stripePaymentIntentId: paymentIntentId,
+        purchasedAt,
+        expiresAt,
+      })
+      .onConflictDoNothing({ target: messageCreditGrants.stripePaymentIntentId });
+  }
+
+  async listMessagePacks(userId: string): Promise<MessageCreditGrantRow[]> {
+    return this.db
+      .select()
+      .from(messageCreditGrants)
+      .where(eq(messageCreditGrants.userId, userId))
+      .orderBy(asc(messageCreditGrants.expiresAt));
+  }
+
+  async getPackBalance(userId: string): Promise<number> {
+    const rows = await this.db
+      .select({ total: sql<number>`coalesce(sum(${messageCreditGrants.remaining}), 0)` })
+      .from(messageCreditGrants)
+      .where(
+        and(
+          eq(messageCreditGrants.userId, userId),
+          gt(messageCreditGrants.remaining, 0),
+          gt(messageCreditGrants.expiresAt, new Date()),
+        ),
+      );
+    return Number(rows[0]?.total ?? 0);
+  }
+
+  /** Spends one message from the oldest unexpired pack; returns its id, or null if none. */
+  private async spendFromPack(userId: string): Promise<string | null> {
+    const candidates = await this.db
+      .select({ id: messageCreditGrants.id })
+      .from(messageCreditGrants)
+      .where(
+        and(
+          eq(messageCreditGrants.userId, userId),
+          gt(messageCreditGrants.remaining, 0),
+          gt(messageCreditGrants.expiresAt, new Date()),
+        ),
+      )
+      .orderBy(asc(messageCreditGrants.expiresAt))
+      .limit(3);
+    for (const candidate of candidates) {
+      const updated = await this.db
+        .update(messageCreditGrants)
+        .set({ remaining: sql`${messageCreditGrants.remaining} - 1` })
+        .where(and(eq(messageCreditGrants.id, candidate.id), gt(messageCreditGrants.remaining, 0)))
+        .returning({ id: messageCreditGrants.id });
+      if (updated.length > 0) return candidate.id;
+    }
+    return null;
   }
 
   // ─── Usage Tracking ───────────────────────────────────────────────────────
@@ -703,6 +835,18 @@ export class BillingService {
       .returning({ messageId: messageUsageCredits.messageId });
     const current = await this.getUsage(userId, subscription);
     const count = current?.messagesUsed ?? 0;
+    if (inserted.length > 0 && subscription) {
+      const allowance = messageAllowance(entitlementsFor(subscription));
+      if (allowance !== null && count > allowance) {
+        const grantId = await this.spendFromPack(userId);
+        if (grantId) {
+          await this.db
+            .update(messageUsageCredits)
+            .set({ grantId })
+            .where(eq(messageUsageCredits.messageId, messageId));
+        }
+      }
+    }
     if (inserted.length > 0 && current) {
       await this.checkAndSendUsageAlerts(
         userId,
@@ -725,19 +869,22 @@ export class BillingService {
     if (!subscription) return;
 
     try {
-      const limits = BillingService.getPlanLimits(subscription.plan as Plan);
-      const max = limits.maxMessagesPerMonth;
+      const entitlements = entitlementsFor(subscription);
+      const max = messageAllowance(entitlements);
+      if (max === null) return;
       const threshold80 = Math.floor(max * 0.8);
 
-      // 100% alert
-      if (currentCount >= max && !usageRow.alerted100) {
+      // "Limit reached" means nothing left: the allowance is used and no pack remains.
+      const outOfMessages =
+        currentCount >= max && (await this.getPackBalance(userId)) === 0;
+      if (outOfMessages && !usageRow.alerted100) {
         await this.db
           .update(usage)
           .set({ alerted100: true })
           .where(eq(usage.id, usageRow.id));
         this.sendUsageAlert(
           userId,
-          subscription.plan as Plan,
+          entitlements.plan,
           currentCount,
           max,
           "limit_reached",
@@ -752,7 +899,7 @@ export class BillingService {
           .where(eq(usage.id, usageRow.id));
         this.sendUsageAlert(
           userId,
-          subscription.plan as Plan,
+          entitlements.plan,
           currentCount,
           max,
           "warning",
@@ -786,7 +933,7 @@ export class BillingService {
         await emailService.sendUsageWarningEmail(
           user.email,
           name,
-          plan,
+          PLANS[plan].name,
           used,
           max,
         );
@@ -794,7 +941,7 @@ export class BillingService {
         await emailService.sendUsageLimitReachedEmail(
           user.email,
           name,
-          plan,
+          PLANS[plan].name,
           max,
         );
       }
@@ -807,48 +954,43 @@ export class BillingService {
 
   async checkProjectLimit(
     userId: string,
-  ): Promise<{ allowed: boolean; current: number; max: number }> {
+  ): Promise<{ allowed: boolean; current: number; max: number | null }> {
     const sub = await this.getSubscriptionByUserId(userId);
     if (!sub) return { allowed: false, current: 0, max: 0 };
 
-    const limits = BillingService.getPlanLimits(sub.plan as Plan);
+    const max = entitlementsFor(sub).limits.projects;
     const userProjects = await this.db
       .select({ id: projects.id })
       .from(projects)
       .where(eq(projects.userId, userId));
 
     return {
-      allowed: userProjects.length < limits.maxProjects,
+      allowed: max === null || userProjects.length < max,
       current: userProjects.length,
-      max: limits.maxProjects,
+      max,
     };
   }
 
   async checkMessageLimit(
     userId: string,
     prefetchedSub?: SubscriptionRow | null,
-  ): Promise<{ allowed: boolean; used: number; max: number }> {
+  ): Promise<{ allowed: boolean; used: number; max: number | null; packBalance: number }> {
     const sub =
       prefetchedSub !== undefined
         ? prefetchedSub
         : await this.getSubscriptionByUserId(userId);
-    if (!sub) return { allowed: false, used: 0, max: 0 };
+    if (!sub) return { allowed: false, used: 0, max: 0, packBalance: 0 };
 
-    const limits = BillingService.getPlanLimits(sub.plan as Plan);
+    const entitlements = entitlementsFor(sub);
+    const max = messageAllowance(entitlements);
     const currentUsage = await this.getUsage(userId, sub);
     const used = currentUsage?.messagesUsed ?? 0;
-
-    return {
-      allowed: used < limits.maxMessagesPerMonth,
-      used,
-      max: limits.maxMessagesPerMonth,
-    };
-  }
-
-  checkFeatureAccess(plan: Plan, feature: keyof PlanLimits): boolean {
-    const limits = BillingService.getPlanLimits(plan);
-    const value = limits[feature];
-    return typeof value === "boolean" ? value : true;
+    if (max === null || used < max) {
+      return { allowed: true, used, max, packBalance: 0 };
+    }
+    // Packs are not sold during a trial; a leftover balance still does not lift the cap.
+    const packBalance = entitlements.trialing ? 0 : await this.getPackBalance(userId);
+    return { allowed: packBalance > 0, used, max, packBalance };
   }
 
   isSubscriptionActive(sub: SubscriptionRow | null): boolean {

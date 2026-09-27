@@ -15,6 +15,11 @@ import {
   resolveHelpCustomUrl,
   rewriteHelpUrlIfNeeded,
 } from "../helpdesk-render/build-help-url";
+import {
+  KnowledgeUsageService,
+  trackKnowledgeBucket,
+} from "./knowledge-usage-service";
+import { knowledgePagesForChars } from "../../shared/plans";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -32,10 +37,16 @@ export interface SourceReference {
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 export class ResourceService {
+  private r2: R2Bucket;
+  private knowledge: KnowledgeUsageService;
+
   constructor(
     private db: DrizzleD1Database<Record<string, unknown>>,
-    private r2: R2Bucket,
-  ) {}
+    r2: R2Bucket,
+  ) {
+    this.r2 = trackKnowledgeBucket(r2, db);
+    this.knowledge = new KnowledgeUsageService(db);
+  }
 
   // ─── Basic CRUD ─────────────────────────────────────────────────────────────
 
@@ -61,6 +72,8 @@ export class ResourceService {
   async createResource(
     data: Omit<NewResourceRow, "id" | "createdAt" | "updatedAt">,
   ): Promise<ResourceRow> {
+    const adding = data.type === "faq" ? knowledgePagesForChars(data.content?.length ?? 0) : 0;
+    await this.knowledge.assertCanAdd(data.projectId, adding);
     const id = crypto.randomUUID();
     await this.db.insert(resources).values({ id, ...data });
     return (await this.getResourceById(id, data.projectId))!;
@@ -362,13 +375,19 @@ export class ResourceService {
       updates.description = description;
     }
 
+    const effectiveTitle = title ?? resource.title;
+    await this.knowledge.assertCanWrite(
+      this.r2,
+      `${projectId}/${id}.md`,
+      this.faqPairsToMarkdown(effectiveTitle, pairs),
+    );
+
     await this.db
       .update(resources)
       .set(updates)
       .where(and(eq(resources.id, id), eq(resources.projectId, projectId)));
 
     // Re-ingest to R2 for AI Search
-    const effectiveTitle = title ?? resource.title;
     await this.ingestFaqFromPairs(projectId, id, effectiveTitle, pairs);
 
     return this.getResourceById(id, projectId);
@@ -386,6 +405,14 @@ export class ResourceService {
     const updates: Record<string, unknown> = { content };
     if (title) {
       updates.title = title;
+    }
+
+    if (resource.type === "pdf") {
+      await this.knowledge.assertCanWrite(
+        this.r2,
+        `${projectId}/${id}-text.md`,
+        `# ${title ?? resource.title}\n\n${content}`,
+      );
     }
 
     await this.db

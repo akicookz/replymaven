@@ -1,6 +1,7 @@
-import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 import {
   CreditCard,
   Loader2,
@@ -13,6 +14,8 @@ import {
   ArrowDown,
   ArrowUpDown,
   MessageSquare,
+  Minus,
+  Plus,
   ChevronLeft,
   ChevronRight,
   X,
@@ -26,9 +29,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useSubscription } from "@/hooks/use-subscription";
-import { formatPlanName, usagePercent, getTrialDaysRemaining } from "@/lib/plan";
 import { MobileMenuButton } from "@/components/PageHeader";
+import { useSubscription, type MessagePackGrant } from "@/hooks/use-subscription";
+import { formatPlanName, usagePercent, getTrialDaysRemaining } from "@/lib/plan";
+import { EXTRA_SEAT_PRICE_USD, MESSAGE_PACKS, type MessagePack } from "../../shared/plans";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -53,7 +57,8 @@ function UsageBar({
 }: {
   label: string;
   used: number;
-  max: number;
+  /** null = no limit. */
+  max: number | null;
 }) {
   const percent = usagePercent(used, max);
   const isWarning = percent >= 80;
@@ -64,7 +69,9 @@ function UsageBar({
       <div className="flex items-center justify-between text-sm">
         <span className="text-muted-foreground">{label}</span>
         <span className="font-medium text-foreground">
-          {used.toLocaleString()} / {max.toLocaleString()}
+          {max === null
+            ? used.toLocaleString()
+            : `${used.toLocaleString()} / ${max.toLocaleString()}`}
         </span>
       </div>
       <div className="h-2 rounded-full bg-glass-button overflow-hidden">
@@ -460,10 +467,237 @@ function UsageLog() {
   );
 }
 
+// ─── Add-ons ──────────────────────────────────────────────────────────────────
+
+function formatShortDate(dateStr: string) {
+  return new Date(dateStr).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function AddOns({
+  balance,
+  grants,
+  canBuy,
+  isTrialing,
+}: {
+  balance: number;
+  grants: MessagePackGrant[];
+  canBuy: boolean;
+  isTrialing: boolean;
+}) {
+  const buyMutation = useMutation({
+    mutationFn: async (packId: MessagePack["id"]) => {
+      const returnUrl = `${window.location.origin}/app/account/billing`;
+      const res = await fetch("/api/billing/packs/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          packId,
+          successUrl: `${returnUrl}?pack=success`,
+          cancelUrl: returnUrl,
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+      if (!res.ok || !body.url) throw new Error(body.error ?? "Could not start checkout");
+      return body.url;
+    },
+    onSuccess: (url) => {
+      window.location.href = url;
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+
+  const now = Date.now();
+  const activeGrants = grants.filter(
+    (grant) => grant.remaining > 0 && new Date(grant.expiresAt).getTime() > now,
+  );
+
+  return (
+    <div className="glass-card rounded-lg p-6 space-y-4">
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-lg font-semibold text-foreground">Add-ons</h2>
+        <p className="text-sm text-muted-foreground">
+          {balance.toLocaleString()} extra messages left
+        </p>
+      </div>
+
+      {activeGrants.length > 0 && (
+        <ul className="space-y-2">
+          {activeGrants.map((grant) => (
+            <li
+              key={grant.id}
+              className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2 text-sm"
+            >
+              <span className="text-foreground">
+                {grant.remaining.toLocaleString()} of {grant.messages.toLocaleString()} left
+              </span>
+              <span className="text-xs text-muted-foreground">
+                Expires {formatShortDate(grant.expiresAt)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {canBuy && (
+        <div className="grid gap-2 sm:grid-cols-3">
+          {MESSAGE_PACKS.map((pack) => (
+            <Button
+              key={pack.id}
+              variant="outline"
+              className="h-auto justify-between py-3"
+              disabled={isTrialing || buyMutation.isPending}
+              onClick={() => buyMutation.mutate(pack.id)}
+            >
+              <span>{pack.messages.toLocaleString()} messages</span>
+              {buyMutation.isPending && buyMutation.variables === pack.id ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <span className="text-muted-foreground">${pack.priceUsd}</span>
+              )}
+            </Button>
+          ))}
+        </div>
+      )}
+
+      {canBuy && (
+        <p className="text-xs text-muted-foreground">
+          {isTrialing
+            ? "Start your plan to buy extra messages."
+            : "Used after your monthly messages run out. Valid for 12 months."}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ─── Extra Seats ──────────────────────────────────────────────────────────────
+
+function ExtraSeats({
+  included,
+  extra,
+  inUse,
+  interval,
+}: {
+  included: number;
+  extra: number;
+  inUse: number;
+  interval: string;
+}) {
+  const queryClient = useQueryClient();
+  const [target, setTarget] = useState(extra);
+  const minExtra = Math.max(0, inUse - included);
+  const unitPrice = interval === "annual" ? EXTRA_SEAT_PRICE_USD.annual : EXTRA_SEAT_PRICE_USD.monthly;
+  const unitLabel = interval === "annual" ? "yr" : "mo";
+
+  const seatsMutation = useMutation({
+    mutationFn: async (extraSeats: number) => {
+      const res = await fetch("/api/billing/seats", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ extraSeats }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? "Could not update seats");
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["subscription"] });
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+      setTarget(extra);
+    },
+  });
+
+  return (
+    <div className="glass-card rounded-lg p-6 space-y-4">
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-lg font-semibold text-foreground">Seats</h2>
+        <p className="text-sm text-muted-foreground">
+          {included} included · ${unitPrice}/{unitLabel} per extra seat
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-1">
+          <Button
+            size="icon"
+            variant="outline"
+            aria-label="Remove a seat"
+            disabled={target <= minExtra || seatsMutation.isPending}
+            onClick={() => setTarget((n) => Math.max(minExtra, n - 1))}
+          >
+            <Minus className="w-4 h-4" />
+          </Button>
+          <span className="w-24 text-center text-sm font-medium tabular-nums text-foreground">
+            {target} extra
+          </span>
+          <Button
+            size="icon"
+            variant="outline"
+            aria-label="Add a seat"
+            disabled={seatsMutation.isPending}
+            onClick={() => setTarget((n) => n + 1)}
+          >
+            <Plus className="w-4 h-4" />
+          </Button>
+        </div>
+        <span className="text-sm text-muted-foreground">
+          {(included + target).toLocaleString()} seats total
+        </span>
+        <Button
+          className="ml-auto"
+          disabled={target === extra || seatsMutation.isPending}
+          onClick={() => seatsMutation.mutate(target)}
+        >
+          {seatsMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+          Update seats
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Billing Page ─────────────────────────────────────────────────────────────
 
 function Billing() {
   const { data, isLoading } = useSubscription();
+  const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  useEffect(() => {
+    if (searchParams.get("pack") !== "success") return;
+    toast.success("Extra messages added");
+    setSearchParams({}, { replace: true });
+    // Stripe confirms the payment through the webhook a moment after redirect.
+    const timer = window.setTimeout(() => {
+      void queryClient.invalidateQueries({ queryKey: ["subscription"] });
+    }, 2000);
+    return () => window.clearTimeout(timer);
+  }, [searchParams, setSearchParams, queryClient]);
+
+  const startPlanMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/billing/start-plan-now", { method: "POST" });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? "Could not start your plan");
+    },
+    onSuccess: () => {
+      toast.success("Your plan has started");
+      // The webhook updates the subscription row a moment after Stripe charges.
+      window.setTimeout(() => {
+        void queryClient.invalidateQueries({ queryKey: ["subscription"] });
+      }, 2000);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
 
   const portalMutation = useMutation({
     mutationFn: async () => {
@@ -491,7 +725,6 @@ function Billing() {
   }
 
   const sub = data?.subscription;
-  const limits = data?.limits;
   const usage = data?.usage;
   const seats = data?.seats;
   const isOwner = data?.role === "owner";
@@ -567,16 +800,30 @@ function Billing() {
 
       {/* Trial Banner */}
       {sub.status === "trialing" && trialDays > 0 && (
-        <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-blue-500/10">
-          <Clock className="w-5 h-5 text-blue-400 shrink-0" />
-          <div>
-            <p className="text-sm font-medium text-foreground">
-              {trialDays} day{trialDays !== 1 ? "s" : ""} left in your trial
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Your card will be charged when the trial ends.
-            </p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center px-4 py-3 rounded-2xl bg-blue-500/10">
+          <div className="flex items-start gap-3 flex-1">
+            <Clock className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-foreground">
+                {trialDays} day{trialDays !== 1 ? "s" : ""} left in your trial
+              </p>
+              <p className="text-xs text-muted-foreground">
+                The trial includes {data?.messageAllowance ?? 0} AI messages. Start now to get your full plan.
+              </p>
+            </div>
           </div>
+          {isOwner && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => startPlanMutation.mutate()}
+              disabled={startPlanMutation.isPending || startPlanMutation.isSuccess}
+              className="w-full sm:w-auto shrink-0"
+            >
+              {startPlanMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              Start plan now
+            </Button>
+          )}
         </div>
       )}
 
@@ -633,7 +880,7 @@ function Billing() {
       </div>
 
       {/* Usage */}
-      {limits && (
+      {data?.limits && (
         <div className="glass-card rounded-lg p-6 space-y-4">
           <div className="flex items-baseline justify-between">
             <h2 className="text-lg font-semibold text-foreground">Usage</h2>
@@ -647,18 +894,41 @@ function Billing() {
           </div>
 
           <UsageBar
-            label="Messages this period"
+            label="AI messages this period"
             used={usage?.messagesUsed ?? 0}
-            max={limits.maxMessagesPerMonth}
+            max={data.messageAllowance}
+          />
+
+          <UsageBar
+            label="Knowledge pages"
+            used={data.knowledgePages.used}
+            max={data.knowledgePages.max}
           />
 
           <UsageBar
             label="Seats"
             used={seats?.current ?? 1}
-            max={limits.maxSeats}
+            max={seats?.max ?? null}
           />
         </div>
       )}
+
+      {isOwner && seats && seats.included !== null && (
+        <ExtraSeats
+          key={seats.extra}
+          included={seats.included}
+          extra={seats.extra}
+          inUse={seats.current}
+          interval={sub.interval}
+        />
+      )}
+
+      <AddOns
+        balance={data?.packs.balance ?? 0}
+        grants={data?.packs.grants ?? []}
+        canBuy={isOwner}
+        isTrialing={sub.status === "trialing"}
+      />
 
       {/* Usage Log */}
       <UsageLog />

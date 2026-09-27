@@ -160,7 +160,8 @@ function InviteForm({
 }: {
   onClose: () => void;
   projects: ProjectLite[];
-  maxInvites: number;
+  /** null = no limit. */
+  maxInvites: number | null;
 }) {
   const [invites, setInvites] = useState<Array<{ id: string; email: string; role: "admin" | "member" }>>([
     { id: crypto.randomUUID(), email: "", role: "member" },
@@ -238,7 +239,7 @@ function InviteForm({
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <Label htmlFor={`invite-email-${invites[0]?.id}`}>Email addresses</Label>
-          <Button type="button" variant="ghost" size="sm" disabled={invites.length >= maxInvites} onClick={() => setInvites((rows) => [...rows, { id: crypto.randomUUID(), email: "", role: "member" }])} className="-mr-2 text-muted-foreground hover:text-foreground">
+          <Button type="button" variant="ghost" size="sm" disabled={maxInvites !== null && invites.length >= maxInvites} onClick={() => setInvites((rows) => [...rows, { id: crypto.randomUUID(), email: "", role: "member" }])} className="-mr-2 text-muted-foreground hover:text-foreground">
             <Plus /> Add email
           </Button>
         </div>
@@ -276,7 +277,7 @@ function InviteForm({
           onClick={() => inviteMutation.mutate()}
           disabled={
             invites.some((invite) => !invite.email.trim()) ||
-            invites.length > maxInvites ||
+            (maxInvites !== null && invites.length > maxInvites) ||
             new Set(invites.map((invite) => invite.email.trim().toLowerCase())).size !== invites.length ||
             inviteMutation.isPending ||
             (scoped && access.projectIds.length === 0)
@@ -650,8 +651,9 @@ function Team() {
   const members = teamData?.members ?? [];
   const ownerId = teamData?.ownerId;
   const isOwner = session?.user?.id === ownerId;
-  const seatMax = subData?.limits?.maxSeats ?? 1;
+  const seatMax = subData?.seats?.max ?? null;
   const seatCurrent = subData?.seats?.current ?? 1;
+  const atSeatLimit = seatMax !== null && seatCurrent >= seatMax;
 
   return (
     <div className="space-y-6">
@@ -663,7 +665,7 @@ function Team() {
             </SheetHeaderContent>
             <SheetCloseButton />
           </SheetHeader>
-          {showInvite && <InviteForm onClose={() => setShowInvite(false)} projects={projectList} maxInvites={Math.max(0, seatMax - seatCurrent)} />}
+          {showInvite && <InviteForm onClose={() => setShowInvite(false)} projects={projectList} maxInvites={seatMax === null ? null : Math.max(0, seatMax - seatCurrent)} />}
         </SheetContent>
       </Sheet>
 
@@ -674,14 +676,16 @@ function Team() {
             <MobileMenuButton />
             <TeamTitle />
             <span className="shrink-0 text-xs text-muted-foreground">
-              {seatCurrent} of {seatMax} seat{seatMax !== 1 ? "s" : ""} used
+              {seatMax === null
+                ? `${seatCurrent} seat${seatCurrent !== 1 ? "s" : ""} used`
+                : `${seatCurrent} of ${seatMax} seat${seatMax !== 1 ? "s" : ""} used`}
             </span>
           </div>
           {isOwner && (
             <Button
               size="sm"
               onClick={() => setShowInvite(true)}
-              disabled={seatCurrent >= seatMax}
+              disabled={atSeatLimit}
               className="shrink-0"
             >
               <UserPlus />
@@ -743,21 +747,21 @@ function Team() {
         </table>
       </div>
 
-      {seatCurrent >= seatMax && (
+      {atSeatLimit && (
         <div className="flex items-center gap-3 rounded-2xl bg-primary/5 px-4 py-3">
           <Lock className="w-4 h-4 text-primary shrink-0" />
           <div className="flex-1">
             <p className="text-sm font-medium text-foreground">Seat limit reached</p>
             <p className="text-xs text-muted-foreground">
-              You&apos;re using all {seatMax} seat{seatMax !== 1 ? "s" : ""} on your current plan. Upgrade to invite more team members.
+              {seatCurrent} of {seatMax} seats in use. Add a seat or remove a member to invite more.
             </p>
           </div>
           <Button
             size="sm"
             variant="outline"
-            onClick={() => { window.location.href = "/app/onboarding?step=4"; }}
+            onClick={() => { window.location.href = "/app/account/billing"; }}
           >
-            Upgrade
+            Add seats
           </Button>
         </div>
       )}

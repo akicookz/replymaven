@@ -2,6 +2,7 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { getAgentByName, routeAgentRequest } from "agents";
 import { cors } from "hono/cors";
+import { HTTPException } from "hono/http-exception";
 import { except } from "hono/combine";
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq, isNotNull } from "drizzle-orm";
@@ -12,7 +13,7 @@ import {
   type HelpArticleRow,
 } from "./db/schema";
 import { createAuth } from "./auth";
-import { type AppEnv, type HonoAppContext, type Plan } from "./types";
+import { type AppEnv, type HonoAppContext } from "./types";
 import { ProjectService } from "./services/project-service";
 import {
   MAX_GREETINGS_PER_PROJECT,
@@ -195,7 +196,16 @@ import {
   maskHeaders,
   isEncrypted,
 } from "./services/encryption-service";
-import { BillingService } from "./services/billing-service";
+import {
+  BillingService,
+  entitlementsFor,
+  messageAllowance,
+} from "./services/billing-service";
+import {
+  KnowledgeLimitError,
+  KnowledgeUsageService,
+} from "./services/knowledge-usage-service";
+import { PLANS } from "../shared/plans";
 import {
   addProjectAccessToMembers,
   TeamService,
@@ -320,6 +330,8 @@ import {
   submitContactFormSchema,
   testToolSchema,
   createCheckoutSchema,
+  createPackCheckoutSchema,
+  setExtraSeatsSchema,
   inviteTeamMemberSchema,
   bulkInviteTeamMembersSchema,
   updateTeamMemberRoleSchema,
@@ -2966,7 +2978,7 @@ const app = new Hono<HonoAppContext>()
 
     // Set billing + active-team context defaults
     c.set("subscription", null);
-    c.set("planLimits", null);
+    c.set("entitlements", null);
     c.set("effectiveUserId", null);
     c.set("activeRole", null);
     c.set("activeAccessAllProjects", true);
@@ -2991,10 +3003,7 @@ const app = new Hono<HonoAppContext>()
       c.set("subscription", subscription);
 
       if (subscription) {
-        c.set(
-          "planLimits",
-          BillingService.getPlanLimits(subscription.plan as Plan),
-        );
+        c.set("entitlements", entitlementsFor(subscription));
       }
     }
 
@@ -3604,6 +3613,116 @@ const app = new Hono<HonoAppContext>()
     }
   })
 
+  // ─── Buy an AI Message Pack ──────────────────────────────────────────────────
+  .post("/api/billing/packs/checkout", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    if (c.get("activeRole") !== "owner") {
+      return c.json({ error: "Only the account owner can change billing" }, 403);
+    }
+
+    const subscription = c.get("subscription");
+    if (!subscription || subscription.status !== "active") {
+      return c.json(
+        { error: "Message packs are available once your plan is active." },
+        400,
+      );
+    }
+
+    const body = await c.req.json();
+    const parsed = validate(createPackCheckoutSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const billingService = new BillingService(db, c.env);
+
+    try {
+      const session = await billingService.createPackCheckoutSession(
+        user.id,
+        user.email,
+        user.name,
+        parsed.data.packId,
+        parsed.data.successUrl,
+        parsed.data.cancelUrl,
+      );
+      return c.json({ url: session.url });
+    } catch (err) {
+      console.error("Pack checkout session error:", err);
+      return c.json({ error: "Failed to create checkout session" }, 500);
+    }
+  })
+
+  // ─── Extra Seats ────────────────────────────────────────────────────────────
+  .post("/api/billing/seats", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    if (c.get("activeRole") !== "owner") {
+      return c.json({ error: "Only the account owner can change billing" }, 403);
+    }
+
+    const subscription = c.get("subscription");
+    if (
+      !subscription ||
+      !(subscription.status === "active" || subscription.status === "trialing")
+    ) {
+      return c.json({ error: "No active subscription" }, 400);
+    }
+    if (entitlementsFor(subscription).plan === "enterprise") {
+      return c.json({ error: "Seats on Enterprise are set by contract." }, 400);
+    }
+
+    const body = await c.req.json();
+    const parsed = validate(setExtraSeatsSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const effectiveUserId = c.get("effectiveUserId") ?? user.id;
+    const included = PLANS.business.limits.seats ?? 0;
+    const seatCount = await new TeamService(db).getSeatCount(effectiveUserId);
+    if (included + parsed.data.extraSeats < seatCount) {
+      return c.json(
+        {
+          error: `You have ${seatCount} seats in use. Remove members before going below that.`,
+          code: "seats_in_use",
+        },
+        400,
+      );
+    }
+
+    try {
+      await new BillingService(db, c.env).setExtraSeats(subscription, parsed.data.extraSeats);
+      return c.json({ extraSeats: parsed.data.extraSeats });
+    } catch (err) {
+      console.error("Set extra seats error:", err);
+      return c.json({ error: "Failed to update seats" }, 500);
+    }
+  })
+
+  // ─── End the Trial and Start Billing ────────────────────────────────────────
+  .post("/api/billing/start-plan-now", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    if (c.get("activeRole") !== "owner") {
+      return c.json({ error: "Only the account owner can change billing" }, 403);
+    }
+
+    const subscription = c.get("subscription");
+    if (!subscription || subscription.status !== "trialing") {
+      return c.json({ error: "No trial to end" }, 400);
+    }
+
+    const db = c.get("db");
+    const billingService = new BillingService(db, c.env);
+
+    try {
+      await billingService.startPlanNow(subscription);
+      return c.json({ ok: true });
+    } catch (err) {
+      console.error("Start plan now error:", err);
+      return c.json({ error: "Failed to start your plan" }, 500);
+    }
+  })
+
   // ─── Get Current Subscription + Usage ───────────────────────────────────────
   .get("/api/billing/subscription", async (c) => {
     const user = c.get("user");
@@ -3640,20 +3759,29 @@ const app = new Hono<HonoAppContext>()
         usagePeriodStart: null,
         usagePeriodEnd: null,
         limits: null,
-        seats: { current: 1, max: 0 },
+        features: [],
+        messageAllowance: 0,
+        packs: { balance: 0, grants: [] },
+        knowledgePages: { used: 0, max: 0 },
+        seats: { current: 1, max: 0, extra: 0, included: 0 },
         role: activeRole,
         pendingInvite: pendingInvite ? { id: pendingInvite.id } : null,
       });
     }
 
-    const limits = BillingService.getPlanLimits(subscription.plan as Plan);
+    const entitlements = entitlementsFor(subscription);
     const usagePeriodStart = billingService.getUsagePeriodStart(subscription);
     const usagePeriodEnd = billingService.getUsagePeriodEnd(subscription);
+    const [packBalance, packGrants, knowledgeUsage] = await Promise.all([
+      billingService.getPackBalance(effectiveUserId),
+      billingService.listMessagePacks(effectiveUserId),
+      new KnowledgeUsageService(db).getAccountUsage(effectiveUserId),
+    ]);
 
     return c.json({
       subscription: {
         id: subscription.id,
-        plan: subscription.plan,
+        plan: entitlements.plan,
         interval: subscription.interval,
         status: subscription.status,
         trialEndsAt: subscription.trialEndsAt,
@@ -3666,10 +3794,26 @@ const app = new Hono<HonoAppContext>()
       },
       usagePeriodStart,
       usagePeriodEnd,
-      limits,
+      limits: entitlements.limits,
+      features: [...entitlements.features],
+      messageAllowance: messageAllowance(entitlements),
+      packs: {
+        balance: packBalance,
+        grants: packGrants.map((grant) => ({
+          id: grant.id,
+          packId: grant.packId,
+          messages: grant.messages,
+          remaining: grant.remaining,
+          purchasedAt: grant.purchasedAt,
+          expiresAt: grant.expiresAt,
+        })),
+      },
+      knowledgePages: knowledgeUsage,
       seats: {
         current: seatCount,
-        max: limits.maxSeats,
+        max: entitlements.limits.seats,
+        extra: subscription.extraSeats,
+        included: PLANS[entitlements.plan].limits.seats,
       },
       role: activeRole,
       pendingInvite: pendingInvite ? { id: pendingInvite.id } : null,
@@ -4062,12 +4206,12 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "No active subscription" }, 403);
     }
 
-    const limits = BillingService.getPlanLimits(subscription.plan as Plan);
+    const maxSeats = entitlementsFor(subscription).limits.seats;
     const seatCount = await teamService.getSeatCount(effectiveUserId);
-    if (seatCount >= limits.maxSeats) {
+    if (maxSeats !== null && seatCount >= maxSeats) {
       return c.json(
         {
-          error: "Seat limit reached. Upgrade your plan for more seats.",
+          error: `Seat limit reached (${seatCount} of ${maxSeats}). Remove members or upgrade your plan.`,
           code: "seat_limit_reached",
         },
         403,
@@ -4146,7 +4290,7 @@ const app = new Hono<HonoAppContext>()
     const ownerId = c.get("effectiveUserId") ?? user.id;
     const subscription = c.get("subscription");
     if (!subscription) return c.json({ error: "No active subscription" }, 403);
-    const limits = BillingService.getPlanLimits(subscription.plan as Plan);
+    const maxSeats = entitlementsFor(subscription).limits.seats;
     const accessAllProjects = parsed.data.accessAllProjects ?? true;
     const requestedProjectIds = accessAllProjects ? [] : parsed.data.projectIds ?? [];
     const projectIds = await teamService.filterOwnedProjectIds(
@@ -4163,7 +4307,7 @@ const app = new Hono<HonoAppContext>()
         parsed.data.invites,
         accessAllProjects,
         projectIds,
-        limits.maxSeats,
+        maxSeats,
       );
       const emailService = new EmailService(c.env.RESEND_API_KEY);
       const results = await Promise.all(members.map(async (member) => {
@@ -4778,15 +4922,15 @@ const app = new Hono<HonoAppContext>()
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
     // Feature gate: custom tone
-    const planLimits = c.get("planLimits");
+    const entitlements = c.get("entitlements");
     if (
       parsed.data.toneOfVoice === "custom" &&
-      planLimits &&
-      !planLimits.customTone
+      entitlements &&
+      !entitlements.features.has("custom_tone")
     ) {
       return c.json(
         {
-          error: "Custom tone is available on Pro and Business plans.",
+          error: "Custom tone is not included in your plan.",
           code: "feature_not_available",
         },
         403,
@@ -4827,28 +4971,6 @@ const app = new Hono<HonoAppContext>()
     if (helpCustomCss) {
       const violation = findCustomCssViolation(helpCustomCss);
       if (violation) return c.json({ error: violation }, 400);
-      if (planLimits?.customCss !== true) {
-        return c.json(
-          {
-            error: "Custom CSS is available on the Business plan.",
-            code: "feature_not_available",
-          },
-          403,
-        );
-      }
-    }
-    if (
-      parsed.data.helpAnalytics &&
-      parsed.data.helpAnalytics.length > 0 &&
-      planLimits?.customCss !== true
-    ) {
-      return c.json(
-        {
-          error: "Help analytics embeds are available on the Business plan.",
-          code: "feature_not_available",
-        },
-        403,
-      );
     }
 
     const db = c.get("db");
@@ -5057,19 +5179,9 @@ const app = new Hono<HonoAppContext>()
       customCss = null;
     }
 
-    const planLimits = c.get("planLimits");
     if (customCss) {
       const violation = findCustomCssViolation(customCss);
       if (violation) return c.json({ error: violation }, 400);
-      if (planLimits && !planLimits.customCss) {
-        return c.json(
-          {
-            error: "Custom CSS is available on the Business plan.",
-            code: "feature_not_available",
-          },
-          403,
-        );
-      }
     }
 
     const db = c.get("db");
@@ -5327,11 +5439,11 @@ const app = new Hono<HonoAppContext>()
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
     // Feature gate: tools
-    const planLimits = c.get("planLimits");
-    if (planLimits && !planLimits.tools) {
+    const entitlements = c.get("entitlements");
+    if (entitlements && !entitlements.features.has("http_tools")) {
       return c.json(
         {
-          error: "Tools are available on Pro and Business plans.",
+          error: "Tools are not included in your plan.",
           code: "feature_not_available",
         },
         403,
@@ -5647,15 +5759,15 @@ const app = new Hono<HonoAppContext>()
     const resourceService = new ResourceService(db, c.env.UPLOADS);
 
     // Feature gate: PDF indexing
-    const planLimits = c.get("planLimits");
+    const entitlements = c.get("entitlements");
     if (
       contentType.includes("multipart/form-data") &&
-      planLimits &&
-      !planLimits.pdfIndexing
+      entitlements &&
+      !entitlements.features.has("knowledge_pdf")
     ) {
       return c.json(
         {
-          error: "PDF indexing is available on Pro and Business plans.",
+          error: "PDFs are not included in your plan.",
           code: "feature_not_available",
         },
         403,
@@ -7044,6 +7156,7 @@ const app = new Hono<HonoAppContext>()
       }
       return c.json(created, 201);
     } catch (err) {
+      if (err instanceof KnowledgeLimitError) throw err;
       const message =
         err instanceof Error ? err.message : "Failed to create article";
       return c.json({ error: message }, 400);
@@ -7115,6 +7228,7 @@ const app = new Hono<HonoAppContext>()
       );
       return c.json(updated);
     } catch (err) {
+      if (err instanceof KnowledgeLimitError) throw err;
       const code = (err as { code?: string }).code;
       const message =
         err instanceof Error ? err.message : "Failed to update article";
@@ -8259,11 +8373,11 @@ const app = new Hono<HonoAppContext>()
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
     // Feature gate: telegram
-    const planLimits = c.get("planLimits");
-    if (planLimits && !planLimits.telegram) {
+    const entitlements = c.get("entitlements");
+    if (entitlements && !entitlements.features.has("telegram")) {
       return c.json(
         {
-          error: "Telegram integration is available on Pro and Business plans.",
+          error: "Telegram is not included in your plan.",
           code: "feature_not_available",
         },
         403,
@@ -8357,11 +8471,11 @@ const app = new Hono<HonoAppContext>()
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-    const planLimits = c.get("planLimits");
-    if (planLimits && !planLimits.slack) {
+    const entitlements = c.get("entitlements");
+    if (entitlements && !entitlements.features.has("slack")) {
       return c.json(
         {
-          error: "Slack integration is available on Pro and Business plans.",
+          error: "Slack is not included in your plan.",
           code: "feature_not_available",
         },
         403,
@@ -8700,6 +8814,18 @@ const app = new Hono<HonoAppContext>()
     return new Response(obj.body, { headers });
   });
 
+app.onError((err, c) => {
+  if (err instanceof KnowledgeLimitError) {
+    return c.json({ error: err.message, code: err.code }, 403);
+  }
+  if (err instanceof HTTPException) {
+    const res = err.getResponse();
+    return c.newResponse(res.body, res);
+  }
+  console.error(err);
+  return c.text("Internal Server Error", 500);
+});
+
 // ─── Queue Consumer ───────────────────────────────────────────────────────────
 
 // After this many delivery attempts a page is marked failed instead of
@@ -8818,6 +8944,12 @@ function handleScheduled(
 ): void {
   ctx.waitUntil(runArchivedConversationRetention(env));
   ctx.waitUntil(runTelegramSecretMigration(env));
+  ctx.waitUntil(runKnowledgeUsageRecompute(env));
+}
+
+async function runKnowledgeUsageRecompute(env: AppEnv): Promise<void> {
+  const result = await new KnowledgeUsageService(drizzle(env.DB)).recomputeAll(env.UPLOADS);
+  console.log("Knowledge usage recompute completed", result);
 }
 
 // ─── Own docs re-dispatch ───────────────────────────────────────────────────

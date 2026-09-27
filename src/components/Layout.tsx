@@ -441,7 +441,7 @@ function Layout() {
   
           {/* Usage — bare bar + count above the user button; links to billing.
               Trial and past-due states surface as a quiet suffix on the count. */}
-          {subData?.subscription && subData.limits && !collapsed && (
+          {subData?.subscription && subData.messageAllowance !== null && !collapsed && (
             <div className="px-2">
               <Link
                 to={currentProject ? `/app/projects/${currentProject.id}/settings?tab=billing` : "/app/account/billing"}
@@ -451,19 +451,19 @@ function Layout() {
                   <div
                     className={cn(
                       "h-full rounded-full transition-all",
-                      usagePercent(subData.usage.messagesUsed, subData.limits.maxMessagesPerMonth) >= 90
+                      usagePercent(subData.usage.messagesUsed, subData.messageAllowance) >= 90
                         ? "bg-destructive"
-                        : usagePercent(subData.usage.messagesUsed, subData.limits.maxMessagesPerMonth) >= 70
+                        : usagePercent(subData.usage.messagesUsed, subData.messageAllowance) >= 70
                           ? "bg-yellow-500"
                           : "bg-primary",
                     )}
                     style={{
-                      width: `${usagePercent(subData.usage.messagesUsed, subData.limits.maxMessagesPerMonth)}%`,
+                      width: `${usagePercent(subData.usage.messagesUsed, subData.messageAllowance)}%`,
                     }}
                   />
                 </div>
                 <p className="mt-1.5 text-[10px] text-ink-7 transition-colors group-hover:text-ink-4">
-                  {subData.usage.messagesUsed}/{subData.limits.maxMessagesPerMonth} messages
+                  {subData.usage.messagesUsed}/{subData.messageAllowance} messages
                   {subData.subscription.status === "trialing" &&
                     ` · ${getTrialDaysRemaining(subData.subscription.trialEndsAt)}d trial`}
                   {subData.subscription.status === "past_due" && " · past due"}
