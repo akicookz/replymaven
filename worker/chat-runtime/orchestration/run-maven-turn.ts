@@ -289,6 +289,11 @@ export async function runMavenTurn(options: {
           image: options.image,
           tools: registry.tools,
           abortSignal: options.dependencies.abortSignal,
+          usageContext: {
+            projectId: options.context.projectId,
+            conversationId: options.context.conversationId,
+            channel: options.context.channel,
+          },
         },
       );
       return primeAgentStream({

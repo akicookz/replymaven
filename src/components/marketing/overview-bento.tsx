@@ -170,7 +170,7 @@ export function OverviewBento() {
           <BentoCard
             sky={SKY.notify}
             href="/docs/integrations/telegram"
-            title="Alerts where you are"
+            title="Handle support wherever you work"
             body="Telegram, Slack, or email, with a summary. Reply from there."
           >
             <NotifyTray />

@@ -22,6 +22,8 @@ export interface MavenAgentStreamOptions {
   image?: SupportAgentImage | null;
   tools: ToolSet;
   abortSignal?: AbortSignal;
+  /** Identifies the turn in the usage log. */
+  usageContext?: { projectId: string; conversationId: string; channel: string };
 }
 
 type LanguageModelV3 = Extract<
@@ -143,6 +145,23 @@ export async function streamMavenAgent(
   const result = await agent.stream({
     messages: [...messages, { role: "user", content: userContent }],
     abortSignal: options.abortSignal,
+    onFinish(event) {
+      // Content-free token usage per public turn, for pricing and cost tracking.
+      const usage = event.totalUsage;
+      console.log(JSON.stringify({
+        event: "maven_turn_usage",
+        model: dependencies.modelConfig.model,
+        projectId: options.usageContext?.projectId ?? null,
+        conversationId: options.usageContext?.conversationId ?? null,
+        channel: options.usageContext?.channel ?? null,
+        steps: event.steps.length,
+        inputTokens: usage.inputTokens ?? null,
+        cachedInputTokens: usage.inputTokenDetails?.cacheReadTokens ?? null,
+        outputTokens: usage.outputTokens ?? null,
+        reasoningTokens: usage.outputTokenDetails?.reasoningTokens ?? null,
+        totalTokens: usage.totalTokens ?? null,
+      }));
+    },
   });
 
   return {
