@@ -67,6 +67,19 @@ function ContactSales() {
     path: "/contact-sales",
   });
   const containerRef = useRef<HTMLDivElement>(null);
+  // The iframe shrinks to fit the thank-you view; hold the tallest height so the page does not jump.
+  const [formHeight, setFormHeight] = useState(0);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const sizes = new ResizeObserver((entries) => {
+      const height = Math.round(entries[0]?.contentRect.height ?? 0);
+      setFormHeight((prev) => Math.max(prev, height));
+    });
+    sizes.observe(container);
+    return () => sizes.disconnect();
+  }, []);
   const [authOpen, setAuthOpen] = useState(false);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
 
@@ -126,7 +139,10 @@ function ContactSales() {
           </div>
 
           {/* The form goes two-column from 768px; bleed by its iframe padding (24px, 40px from md) so fields align with the text. */}
-          <div className="-mx-6 min-h-[28rem] max-w-[53rem] md:-mx-10 xl:-mt-14">
+          <div
+            className="-mx-6 flex min-h-[28rem] max-w-[53rem] flex-col justify-center md:-mx-10 xl:-mt-14"
+            style={formHeight ? { minHeight: formHeight } : undefined}
+          >
             {status === "loading" && (
               <div className="flex h-[27rem] items-center justify-center">
                 <Loader2 className="size-5 animate-spin text-ink-6" />
