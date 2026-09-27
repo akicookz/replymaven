@@ -174,17 +174,17 @@ export function HelpCenterVisual() {
   );
 }
 
-const integrations = [
+const integrations: { name: string; logo: string; invert?: boolean }[] = [
   { name: "Attio", logo: "/integrations/attio.svg" },
   { name: "Linear", logo: "/integrations/linear.svg" },
-  { name: "GitHub", logo: "/integrations/github.svg" },
+  { name: "PostHog", logo: "/integrations/posthog.svg" },
   { name: "Slack", logo: "/integrations/slack.svg" },
   { name: "Telegram", logo: "/integrations/telegram.svg" },
   { name: "Stripe", logo: "/integrations/stripe.svg" },
-  { name: "ChatGPT", logo: "/integrations/openai.svg" },
-  { name: "Claude", logo: "/integrations/claude.svg" },
-  { name: "PostHog", logo: "/integrations/posthog.svg" },
-] as const;
+  { name: "Cloudflare Observability", logo: "/integrations/cloudflare.svg" },
+  { name: "Vercel Logs", logo: "/integrations/vercel.svg", invert: true },
+  { name: "Sentry", logo: "/integrations/sentry.svg", invert: true },
+];
 
 export function ActionsVisual() {
   return (
@@ -196,15 +196,15 @@ export function ActionsVisual() {
         {integrations.map((integration) => (
           <li
             key={integration.name}
-            className="flex min-h-32 flex-col justify-between rounded-2xl bg-white/[0.035] p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.065)] last:col-span-2 sm:min-h-36 sm:p-6 sm:last:col-span-1"
+            className="glass-card flex min-h-32 flex-col justify-between rounded-lg p-5 last:col-span-2 sm:min-h-36 sm:p-6 sm:last:col-span-1"
           >
-            <span className="flex size-12 items-center justify-center rounded-[14px] bg-white/[0.045] shadow-[0_0_0_1px_rgba(255,255,255,0.07)] sm:size-14 sm:rounded-2xl">
+            <span className="glass-button flex size-12 items-center justify-center rounded-lg sm:size-14">
               <img
                 src={integration.logo}
                 alt=""
                 width={28}
                 height={28}
-                className="size-6 sm:size-7"
+                className={cn("size-6 sm:size-7", integration.invert && "invert")}
               />
             </span>
             <p className="text-pretty text-sm font-semibold text-ink-2 sm:text-base">

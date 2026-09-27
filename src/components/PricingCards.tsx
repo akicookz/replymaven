@@ -21,7 +21,7 @@ const pricingPlans = [
     highlighted: false,
     features: [
       "1 project",
-      "100 messages / month",
+      "100 AI messages / month",
       "50 knowledge sources",
       "1 seat",
       "Web page & FAQ indexing",
@@ -40,7 +40,7 @@ const pricingPlans = [
     features: [
       "Everything in Starter",
       "3 projects",
-      "500 messages / month",
+      "500 AI messages / month",
       "3 seats",
       "PDF indexing",
       "Telegram live agent handoff",
@@ -58,7 +58,7 @@ const pricingPlans = [
     features: [
       "Everything in Standard",
       "5 projects",
-      "2,000 messages / month",
+      "2,000 AI messages / month",
       "5 seats",
       "Auto canned response drafts",
       "Custom CSS & branding",

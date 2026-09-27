@@ -248,6 +248,16 @@ html.help-nav-open .help-menu-icon-close { display: inline-flex; }
 .help-top-nav-button {
   border-radius: var(--help-top-nav-button-radius);
 }
+/* Button preset matches the dashboard Button (.glow-surface): accent fill, light edge, top highlight. */
+.help-topbar .help-top-nav-button {
+  background: var(--brand);
+  border: 1px solid rgb(255 255 255 / 0.35);
+  box-shadow: inset 0 6px 14px -6px rgb(255 255 255 / 0.3);
+  color: #fff;
+}
+.help-topbar .help-top-nav-button:hover {
+  background: color-mix(in oklch, var(--brand), #fff 12%);
+}
 .help-sidebar-search:hover {
   background: var(--muted);
   color: var(--foreground);
@@ -811,7 +821,7 @@ html.help-page-home .help-shell {
 }
 
 .help-category-card-icon-mark {
-  color: color-mix(in oklch, var(--brand), var(--foreground) 25%);
+  color: var(--muted-foreground);
   width: 24px;
   height: 24px;
   display: inline-flex;
