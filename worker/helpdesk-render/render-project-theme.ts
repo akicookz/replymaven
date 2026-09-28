@@ -69,7 +69,7 @@ export function renderProjectTheme(widgetConfig: WidgetConfigRow | null): string
   // (it adds `.dark` on <html>). Radii + fonts are theme-independent.
   // Body and headings use the same widget font. No Inter/Switzer split.
   return `:root {
-${palette({ bg: "#ffffff", fg: "#0a0a0a", primary, code: "#f6f8fa", codeFg: "#1f2328", mutedFg: 35, border: 88 })}
+${palette({ bg: "#ffffff", fg: "#0a0a0a", primary, code: "#f6f6f7", codeFg: "#1f1f23", mutedFg: 35, border: 88 })}
   --radius: ${radius};
   --help-search-radius: ${searchRadii.box};
   --help-search-trigger-radius: ${searchRadii.trigger};
@@ -79,7 +79,7 @@ ${palette({ bg: "#ffffff", fg: "#0a0a0a", primary, code: "#f6f8fa", codeFg: "#1f
   --font-heading: ${fontStack};
 }
 .dark {
-${palette({ bg: "#08080a", fg: "#f0f0f5", primary, code: "#0d1117", codeFg: "#e6edf3", mutedFg: 45, border: 90, brandLift: 30 })}
+${palette({ bg: "#08080a", fg: "#f0f0f5", primary, code: "#131316", codeFg: "#e6e6ea", mutedFg: 45, border: 90, brandLift: 30 })}
 }`;
 }
 

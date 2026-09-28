@@ -5,8 +5,7 @@ import type { HelpTopNavItem } from "../lib/help-top-nav";
 import { buildHelpUrl } from "./build-help-url";
 import type { HelpNav } from "./help-tabs";
 import { HelpIcon } from "./icons";
-import { isHelpIconName, isImageIcon } from "../../shared/help-icons";
-import { resolveHelpUploadUrl } from "./resolve-help-upload-url";
+import { isHelpIconName } from "../../shared/help-icons";
 import { HelpTabLinks } from "./tab-links";
 import { HelpTopNavLinks } from "./top-nav-links";
 
@@ -151,23 +150,9 @@ export function HelpSidebar(props: HelpSidebarProps) {
   );
 }
 
+// Image icons read as noise at 16px, so the sidebar shows the book mark for them.
 function renderCategoryIcon(icon: string | null) {
-  if (!icon) return <HelpIcon name="BookOpen" />;
-  if (isImageIcon(icon)) {
-    const iconSrc = resolveHelpUploadUrl(icon);
-    if (!iconSrc) return <HelpIcon name="BookOpen" />;
-    return (
-      <img
-        src={iconSrc}
-        alt=""
-        class="help-sidebar-group-icon-img"
-        role="presentation"
-        loading="lazy"
-        decoding="async"
-      />
-    );
-  }
-  if (isHelpIconName(icon)) {
+  if (icon && isHelpIconName(icon)) {
     return <HelpIcon name={icon} />;
   }
   return <HelpIcon name="BookOpen" />;
