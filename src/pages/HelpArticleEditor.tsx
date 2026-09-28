@@ -602,23 +602,24 @@ function HelpArticleEditorPage() {
             </Link>
           </Button>
           <span className="text-muted-foreground hidden md:inline">/</span>
-          <span className="text-sm text-muted-foreground truncate hidden md:inline">
-            {form.title || (isNew ? "New article" : "Untitled article")}
-          </span>
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="text-sm font-medium text-foreground truncate hidden md:inline">
+              {form.title || (isNew ? "New article" : "Untitled article")}
+            </span>
+            <span
+              className={cn(
+                "shrink-0 text-xs font-medium px-2 py-1 rounded-[6px]",
+                form.status === "published"
+                  ? "bg-green-500/15 text-green-700 dark:text-green-300"
+                  : "bg-glass-button text-muted-foreground",
+              )}
+            >
+              {form.status === "published" ? "Published" : "Draft"}
+            </span>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
-          <span
-            className={cn(
-              "text-xs font-medium px-2 py-1 rounded-[6px]",
-              form.status === "published"
-                ? "bg-green-500/15 text-green-700 dark:text-green-300"
-                : "bg-glass-button text-muted-foreground",
-            )}
-          >
-            {form.status === "published" ? "Published" : "Draft"}
-          </span>
-
           <Button
             type="button"
             variant="outline"
