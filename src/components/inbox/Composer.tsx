@@ -407,6 +407,18 @@ export default function Composer(props: ComposerProps) {
   );
   const publicSidechatLabel = commandLabel(sidechatCommand, "Sidechat");
 
+  function getSendButtonTitle() {
+    if (emailTarget) return "Send email (⌘↵)";
+    if (isPrivate) return "Send to Maven (Enter)";
+    return "Send (⌘↵)";
+  }
+
+  function getSendButtonLabel() {
+    if (emailTarget) return "Send email";
+    if (isPrivate) return "Send to Maven";
+    return "Send reply";
+  }
+
   return (
     <div
       className={cn(
@@ -416,6 +428,15 @@ export default function Composer(props: ComposerProps) {
           : "sticky bottom-0 z-[5] px-4 pt-3 pb-4",
       )}
     >
+      {emailTarget && (
+        <div className="mb-1.5 flex min-w-0 translate-y-0.5 items-center gap-1.5 px-[18px] text-[12px] text-ink-6">
+          <Mail size={12} className="shrink-0" aria-hidden="true" />
+          <span className="truncate">
+            To {emailTarget.to}
+            {emailTarget.subject && ` · Re: ${emailTarget.subject}`}
+          </span>
+        </div>
+      )}
       <div
         className="relative rounded-[20px] border border-hairline-strong glass-bar p-[14px_14px_11px_18px] motion-safe:transition-[border-color] motion-safe:duration-150 focus-within:border-ink-6/50"
         onDragEnter={handleDragEnter}
@@ -464,16 +485,6 @@ export default function Composer(props: ComposerProps) {
                 <Loader2 size={15} className="animate-spin" />
               </div>
             ))}
-          </div>
-        )}
-
-        {emailTarget && (
-          <div className="mb-2 flex min-w-0 items-center gap-1.5 text-[12px] text-ink-6">
-            <Mail size={12} className="shrink-0" aria-hidden="true" />
-            <span className="truncate">
-              To {emailTarget.to}
-              {emailTarget.subject && ` · Re: ${emailTarget.subject}`}
-            </span>
           </div>
         )}
 
@@ -573,34 +584,18 @@ export default function Composer(props: ComposerProps) {
             )}
 
             {/* Send button */}
-            {emailTarget && (
-              <button
-                type="button"
-                className="group flex min-h-10 shrink-0 items-center justify-center disabled:opacity-40 motion-safe:transition-transform motion-safe:duration-150 motion-safe:active:scale-[0.96]"
-                onClick={send}
-                disabled={!canSend}
-                title="Send email (⌘↵)"
-              >
-                <span className="flex h-8 items-center gap-1.5 rounded-md bg-bubble-sent px-3 text-[13px] font-medium text-white transition-opacity group-hover:opacity-90">
-                  <Mail size={14} aria-hidden="true" />
-                  Send email
-                </span>
-              </button>
-            )}
-            {!emailTarget && (
-              <button
-                type="button"
-                className="group flex size-10 shrink-0 items-center justify-center disabled:opacity-40 motion-safe:transition-transform motion-safe:duration-150 motion-safe:active:scale-[0.96]"
-                onClick={send}
-                disabled={!canSend}
-                title={isPrivate ? "Send to Maven (Enter)" : "Send (⌘↵)"}
-                aria-label={isPrivate ? "Send to Maven" : "Send reply"}
-              >
-                <span className="flex size-8 items-center justify-center rounded-full bg-bubble-sent text-white transition-opacity group-hover:opacity-90">
-                  <ArrowUp size={15} strokeWidth={2.5} />
-                </span>
-              </button>
-            )}
+            <button
+              type="button"
+              className="group flex size-10 shrink-0 items-center justify-center disabled:opacity-40 motion-safe:transition-transform motion-safe:duration-150 motion-safe:active:scale-[0.96]"
+              onClick={send}
+              disabled={!canSend}
+              title={getSendButtonTitle()}
+              aria-label={getSendButtonLabel()}
+            >
+              <span className="flex size-8 items-center justify-center rounded-full bg-bubble-sent text-white transition-opacity group-hover:opacity-90">
+                <ArrowUp size={15} strokeWidth={2.5} aria-hidden="true" />
+              </span>
+            </button>
           </div>
         </div>
       </div>
