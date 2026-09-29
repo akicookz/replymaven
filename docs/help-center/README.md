@@ -1,6 +1,6 @@
 # Help-center documentation source
 
-These Markdown files are local source files. They are not live help-center records, and a Git commit does not publish them.
+These Markdown files are the reviewed local sources for the help center. The 49 article bodies were published through MCP on 2026-09-30. A Git commit alone does not publish article content.
 
 Article files use `category/slug.md`. Keep the category and slug aligned with the live article URL. Use one H1 for the article title. For an update, preserve its category, URL slug, draft or published status, and SEO fields unless the change asks for them.
 

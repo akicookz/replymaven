@@ -1,0 +1,6 @@
+{
+  "mcp/mcp-permissions.md": "The five OAuth scopes an MCP client can be granted, and what each allows.",
+  "conversations/agent-handoff.md": "How Maven requests team help, how a teammate takes over, and how ownership returns to Maven.",
+  "knowledge-base/faqs.md": "Add structured question-and-answer pairs to your knowledge sources.",
+  "knowledge-base/help-articles-as-knowledge.md": "Published help articles are queued for indexing so Maven can use them in answers."
+}
