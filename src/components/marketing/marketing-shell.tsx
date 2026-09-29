@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowUpRight, Heart } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LogoIcon } from "@/components/Logo";
 import { useSession } from "@/lib/auth-client";
@@ -74,7 +74,7 @@ export function MarketingFooter() {
   return (
     <footer className="px-6 pt-16 pb-10">
       <div className="max-w-6xl mx-auto">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-14">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
           <div className="col-span-2 md:col-span-2 space-y-3">
             <div className="flex items-center gap-2">
               <LogoIcon className="h-5 w-auto text-foreground shrink-0" />
@@ -94,12 +94,6 @@ export function MarketingFooter() {
               </ul>
             </div>
           ))}
-        </div>
-        <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <p className="text-sm text-ink-7">&copy; 2026 ReplyMaven. All rights reserved.</p>
-          <a href="https://launchfast.shop/" target="_blank" className="text-sm text-ink-7 flex items-center gap-2 hover:text-ink-4 transition-colors">
-            <Heart className="w-4 h-4" /> LaunchFast.shop product
-          </a>
         </div>
       </div>
     </footer>
