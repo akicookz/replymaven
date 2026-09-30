@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { formLabelSlug } from "../shared/form-labels";
 import {
   FAQ_DESCRIPTION_MAX_CHARS,
   FAQ_PAIR_MAX_CHARS,
@@ -441,6 +442,26 @@ export const updateCustomerSchema = z
   })
   .strict();
 
+// The JSON adapter exposes existing email/customer inputs, not another thread model.
+export const inboundMessageSchema = z.object({
+  email: z.string().trim().email().max(320).transform((value) => value.toLowerCase()),
+  name: customerCoreFields.name,
+  phone: customerCoreFields.phone,
+  externalId: z.string().trim().min(1).max(255).optional(),
+  customerId: z.string().trim().min(1).max(100).optional(),
+  customFields: customerCustomFieldsSchema.optional(),
+  text: z.string().trim().min(1).max(20_000),
+  messageId: z.string().trim().min(1).max(100).optional(),
+  conversationId: z.string().uuid().optional(),
+  replyToMessageId: z.string().trim().min(1).max(200).optional(),
+  subject: z.string().trim().max(200).optional(),
+  form: z.object({
+    label: z.string().trim().min(1).max(100),
+    fields: z.record(z.string().min(1).max(100), z.string().max(5000))
+      .refine((fields) => Object.keys(fields).length <= 10, "Maximum 10 form fields"),
+  }).strict().optional(),
+}).strict();
+
 export const conversationCustomerSchema = z.discriminatedUnion("action", [
   z
     .object({
@@ -665,7 +686,8 @@ export const onboardingWidgetSchema = z.object({
 
 // ─── Contact Form ─────────────────────────────────────────────────────────
 export const ticketFieldSchema = z.object({
-  label: z.string().min(1, "Label is required").max(100),
+  label: z.string().min(1, "Label is required").max(100)
+    .refine((label) => Boolean(formLabelSlug(label)), "Label must contain a letter or number"),
   type: z.enum(["text", "textarea"]),
   required: z.boolean().default(false),
 });
@@ -676,10 +698,12 @@ export const updateTicketConfigSchema = z.object({
   fields: z
     .array(ticketFieldSchema)
     .max(10, "Maximum 10 fields allowed")
+    .refine((fields) => new Set(fields.map((field) => formLabelSlug(field.label))).size === fields.length, "Field labels must have different slugs")
     .optional(),
 });
 
 export const submitContactFormSchema = z.object({
+  formId: z.string().min(1).max(100).optional(),
   visitorId: z.string().min(1).max(100).optional(),
   visitorName: z.string().max(100).optional(),
   visitorEmail: z.string().email().optional(),

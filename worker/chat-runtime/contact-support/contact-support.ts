@@ -15,6 +15,7 @@ export function buildContactFormMessage(
   formData: Record<string, string>,
   visitorName: string | null,
   visitorEmail: string | null,
+  formLabel?: string,
 ): string {
   const enrichedData = { ...formData };
 
@@ -25,7 +26,7 @@ export function buildContactFormMessage(
     enrichedData["Visitor email"] = visitorEmail;
   }
 
-  const lines = ["Contact form submission"];
+  const lines = [formLabel ? `Contact form submission: ${formLabel}` : "Contact form submission"];
   for (const [key, value] of Object.entries(enrichedData)) {
     const trimmedValue = value.trim();
     if (trimmedValue) lines.push(`${key}: ${trimmedValue}`);

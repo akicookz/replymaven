@@ -13,6 +13,7 @@
  * window.ReplyMaven.track((event, properties) => posthog.capture(event, properties))
  */
 
+import { contactFormLabels, formLabelSlug } from "../shared/form-labels";
 import { renderMarkdown } from "../shared/chat-markdown";
 import {
   parseMessageImageUrls,
@@ -3070,6 +3071,14 @@ import {
 
   let greetingsList: GreetingPublic[] = [];
   let hasTicketForm = false;
+  let configReady = false;
+  let selectedFormLabel = "Contact form";
+  let availableFormLabels: string[] = [];
+  let formFieldInputs: Array<{
+    label: string;
+    input: HTMLInputElement | HTMLTextAreaElement;
+    required: boolean;
+  }> = [];
   const greetingTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const greetingDurationTimers = new Map<
     string,
@@ -3563,7 +3572,6 @@ import {
     inlineBarExpanded = false;
     inlineBar.classList.remove("expanded");
     container.classList.remove("inline-width-expanded");
-    inlineBarInput.value = "";
     inlineBarInput.placeholder = "";
     inlineBarInput.blur();
     inlineBarPlaceholder.style.display = "";
@@ -3622,7 +3630,7 @@ import {
   function sendFromInlineBar() {
     const text = inlineBarInput.value.trim();
     if (!text || isSending) return;
-    inlineBarInput.value = "";
+    setChatDraft("");
     // Keep the inline bar expanded — it IS the input
     // Open the chat window above it and send the message
     showChatScreen();
@@ -3641,6 +3649,8 @@ import {
   });
 
   inlineBarInput.addEventListener("input", () => {
+    input.value = inlineBarInput.value;
+    input.dispatchEvent(new Event("input"));
     updateInlineBarBtn();
   });
 
@@ -3651,7 +3661,7 @@ import {
       if (isOpen && isInlineBarVariant) {
         const text = inlineBarInput.value.trim();
         if (!text || isSending) return;
-        inlineBarInput.value = "";
+        setChatDraft("");
         handleSendMessage(text);
       } else {
         sendFromInlineBar();
@@ -3665,7 +3675,7 @@ import {
     if (isOpen && isInlineBarVariant) {
       const text = inlineBarInput.value.trim();
       if (!text || isSending) return;
-      inlineBarInput.value = "";
+      setChatDraft("");
       handleSendMessage(text);
     } else if (inlineBarInput.value.trim()) {
       sendFromInlineBar();
@@ -3801,7 +3811,8 @@ import {
     renderGreetings({ force: true });
   }
 
-  function showFormScreen() {
+  function showFormScreen(label?: string) {
+    if (label) selectedFormLabel = label;
     // The form body is only built when the project configured one, so without
     // it this screen would be an empty panel.
     if (!hasTicketForm) {
@@ -3900,7 +3911,7 @@ import {
       e.preventDefault();
       if (!isSending && (input.value.trim() || pendingImageFile)) {
         handleSendMessage(input.value.trim());
-        input.value = "";
+        setChatDraft("");
         input.style.height = "auto";
       }
     }
@@ -3908,6 +3919,7 @@ import {
 
   // Auto-resize textarea on input
   input.addEventListener("input", () => {
+    inlineBarInput.value = input.value;
     input.style.height = "auto";
     input.style.height = `${Math.min(input.scrollHeight, 120)}px`;
     input.style.overflow = input.scrollHeight > 120 ? "auto" : "hidden";
@@ -3916,7 +3928,7 @@ import {
   sendBtn.addEventListener("click", () => {
     if (!isSending && (input.value.trim() || pendingImageFile)) {
       handleSendMessage(input.value.trim());
-      input.value = "";
+      setChatDraft("");
       input.style.height = "auto";
     }
   });
@@ -4397,6 +4409,9 @@ import {
         showOnHome: boolean;
       }> = loadedConfig.quickActions || [];
 
+      availableFormLabels = contactFormLabels(allActions);
+      selectedFormLabel = availableFormLabels[0];
+
       const homeActions = allActions.filter((a) => a.showOnHome);
 
       if (homeActions.length > 0) {
@@ -4436,7 +4451,7 @@ import {
             if (qa.type === "link") {
               window.open(qa.action, "_blank", "noopener,noreferrer");
             } else if (qa.type === "inquiry") {
-              showFormScreen();
+              showFormScreen(qa.label);
             } else if (qa.type === "prompt") {
               showChatScreen();
               requestAnimationFrame(() => {
@@ -4477,11 +4492,8 @@ import {
         // Build form fields
         formBody.innerHTML = "";
 
-        const fieldInputs: Array<{
-          label: string;
-          input: HTMLInputElement | HTMLTextAreaElement;
-          required: boolean;
-        }> = [];
+        formFieldInputs = [];
+        const fieldInputs = formFieldInputs;
 
         for (const field of cf.fields) {
           const fieldContainer = document.createElement("div");
@@ -4573,6 +4585,7 @@ import {
                 signal: identitySession.signal,
                 body: JSON.stringify({
                   visitorId: requestVisitorId,
+                  formId: formLabelSlug(selectedFormLabel),
                   visitorName: requestVisitorInfo.name,
                   visitorEmail: requestVisitorInfo.email,
                   data,
@@ -4805,7 +4818,7 @@ import {
               } else if (qa.type === "inquiry") {
                 showChatScreen();
                 openChatWidget();
-                setTimeout(() => showFormScreen(), 100);
+                setTimeout(() => showFormScreen(qa.label), 100);
               } else if (qa.type === "prompt") {
                 showChatScreen();
                 openChatWidget();
@@ -4828,6 +4841,7 @@ import {
         inlineBar.classList.add("ready");
       }
 
+      configReady = true;
       // Show the widget now that config is applied
       trigger.classList.add("ready");
       container.classList.add("ready");
@@ -5213,7 +5227,7 @@ import {
         // Failed before anything rendered (e.g. transport unavailable):
         // restore the draft so the typed message is not lost, and never
         // touch the previous message's status element.
-        input.value = text;
+        setChatDraft(text);
       }
     } finally {
       if (optimisticMessageId) {
@@ -7104,10 +7118,53 @@ import {
   }
 
   /** true when the call did what it says; false when it was refused. */
-  function openScreen(screenInput?: WidgetScreen, args?: ScreenArgs): boolean {
+  function prefillFailure(code: string): false {
+    console.warn(`[ReplyMaven] Prefill rejected: ${code}`);
+    return false;
+  }
+
+  function setChatDraft(value: string): void {
+    input.value = value;
+    inlineBarInput.value = value;
+    input.dispatchEvent(new Event("input"));
+    updateInlineBarBtn();
+  }
+
+  function openScreen(
+    screenInput?: WidgetScreen,
+    args?: ScreenArgs | { message: string } | string,
+    fields?: Record<string, string>,
+  ): boolean {
     const screen = readScreen(screenInput);
     if (screen === "greetings") {
-      return args?.id ? openGreetingById(args.id) : openGreetingStack();
+      const id = args && typeof args === "object" && "id" in args ? args.id : undefined;
+      return id ? openGreetingById(id) : openGreetingStack();
+    }
+    if (screen === "form" && args !== undefined) {
+      if (!configReady) return prefillFailure("not_ready");
+      if (!hasTicketForm) return prefillFailure("form_disabled");
+      if (typeof args !== "string") return prefillFailure("invalid_form_id");
+      const labels = availableFormLabels.filter((label) => formLabelSlug(label) === args);
+      if (labels.length !== 1) return prefillFailure("unknown_or_ambiguous_form");
+      if (fields !== undefined && (!fields || typeof fields !== "object" || Array.isArray(fields))) {
+        return prefillFailure("invalid_fields");
+      }
+      const updates: Array<{ input: HTMLInputElement | HTMLTextAreaElement; value: string }> = [];
+      for (const [key, value] of Object.entries(fields ?? {})) {
+        const matches = formFieldInputs.filter((field) => formLabelSlug(field.label) === key);
+        if (matches.length !== 1) return prefillFailure("unknown_or_ambiguous_field");
+        if (typeof value !== "string" || value.length > 5000) return prefillFailure("invalid_value");
+        updates.push({ input: matches[0].input, value });
+      }
+      selectedFormLabel = labels[0];
+      for (const update of updates) update.input.value = update.value;
+    } else if (screen === "chat" && args !== undefined) {
+      if (!configReady) return prefillFailure("not_ready");
+      if (!args || typeof args !== "object" || !("message" in args) ||
+        typeof args.message !== "string" || args.message.length > 20_000) {
+        return prefillFailure("invalid_message");
+      }
+      setChatDraft(args.message);
     }
     openChatWidget(screen);
     return isOpen;
@@ -7142,6 +7199,7 @@ import {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).ReplyMaven = {
     open: openScreen,
+    ready: () => initialization,
     toggle: toggleScreen,
     close: closeScreen,
     expand: (args?: ScreenArgs) => setExpanded(true, args),
@@ -7193,11 +7251,13 @@ import {
   // ─── Initialize ─────────────────────────────────────────────────────────────
   // The stack waits for customer activity too, so a card the customer
   // dismissed on another device does not show here first.
-  Promise.all([
+  const initialization = Promise.all([
     loadConfig(),
     loadCustomerActivity(identitySessions.capture()),
   ]).then(() => {
-    // After config is loaded, try to restore an existing conversation
-    restoreConversation();
+    if (!configReady) throw new Error("ReplyMaven configuration could not be loaded");
+    return restoreConversation();
   });
+  // ready() callers receive rejection; loading without a caller stays quiet.
+  void initialization.catch(() => {});
 })();
