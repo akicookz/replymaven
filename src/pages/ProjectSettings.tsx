@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ProjectApiKeys } from "@/components/settings/ProjectApiKeys";
 import { SettingsPage } from "@/components/settings/SettingsPage";
 import { WidgetSectionCard } from "@/components/WidgetSettings";
 import { useSubscription } from "@/hooks/use-subscription";
@@ -218,6 +219,10 @@ export default function ProjectSettings() {
           </Button>
         </div>
       </WidgetSectionCard>
+
+      {projectId && (isOwner || subData?.role === "admin") && (
+        <ProjectApiKeys key={projectId} projectId={projectId} />
+      )}
 
       {isOwner && (
         <div className="glass-card flex flex-col gap-4 rounded-lg p-6 sm:flex-row sm:items-center sm:justify-between">

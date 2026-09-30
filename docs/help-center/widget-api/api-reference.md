@@ -4,7 +4,8 @@ The widget adds these methods to `window.ReplyMaven` after its script loads. The
 
 | Method | Description | Return value |
 | --- | --- | --- |
-| `open(screen?, args?)` | Open the widget on a screen. For `"greetings"`, `args` can be `{ id }` to open one card. | `boolean`: true when the panel is open or the greeting request succeeds. |
+| `ready()` | Wait for configuration, controls, and stored-conversation restoration. Rejects if configuration fails. | `Promise<void>`. |
+| `open(screen?, args?, fields?)` | Open a screen. Chat accepts `{ message }` as a draft. Form accepts a label slug and field values. Greetings accepts `{ id }`. | `boolean`: false if prefilling is rejected; otherwise the panel-open or greeting result. |
 | `close(screen?, args?)` | Close the panel. With `screen: "greetings"`, dismiss the card stack or the card in `args.id`. | No value. |
 | `toggle(screen?, args?)` | Toggle the panel or greeting stack/card. | `boolean`: current panel-open state for panel calls; greeting calls report whether the request opened it. |
 | `expand(args?)` | Expand the panel, or the greeting card in `args.id`. | `boolean`: true when the request is accepted. |
@@ -24,7 +25,7 @@ Use optional chaining if your code can run before the widget script:
 window.ReplyMaven?.open("chat");
 ```
 
-The API is not ready until the script has loaded. `open("form")` opens the configured contact form. There are no `openInquiryForm()` or `openTicketForm()` methods.
+The API exists after the script loads. Await `ReplyMaven.ready()` before prefilling. `open("form")` opens the configured contact form. There are no `openInquiryForm()` or `openTicketForm()` methods.
 
 ## Guides
 

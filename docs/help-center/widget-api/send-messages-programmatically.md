@@ -21,3 +21,16 @@ window.ReplyMaven?.sendMessage(`I got error ${errorCode} while saving`);
 ```
 
 Set [page context](https://replymaven.com/docs/widget-api/page-context) first if Maven needs app state that is not in the current URL.
+
+## Fill a draft without sending
+
+After the script loads:
+
+```javascript
+await ReplyMaven.ready();
+ReplyMaven.open("chat", { message: "Help with order ORD-123" });
+```
+
+This fills the chat composer, including the inline layout. It creates no conversation and sends nothing. The visitor can edit the text before sending. Supplied text replaces the current draft; an empty string clears it. The limit is 20,000 characters.
+
+The call returns `false` without changing the draft if configuration is not ready or the value is invalid. Closing and reopening retains the draft. `reset()` clears it.
