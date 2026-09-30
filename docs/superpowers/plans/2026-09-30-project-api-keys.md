@@ -129,6 +129,8 @@ Verified against an isolated local Worker with synthetic owner/admin/member acco
 
 Forced TypeScript and widget build passed. After the final layout correction, the app build and lint passed again (zero errors, 17 existing warnings). Browser checks confirmed left-aligned headers, equal two-column buttons above 480px, and one column at 375px. Create key uses the existing section header action slot. The profile setup dialog title, description, and avatar were left-aligned at the user's request and checked in the browser.
 
-Remaining verification limits: live Maven generation and email delivery were not run. The full disposable-conversation matrix above (thread references, reopening, teammate routing, and retries across keys) has not been exercised through HTTP. Shared processing was traced in source; do not represent those paths as live delivery checks. No new tests, migrations, push, or deployment.
+Follow-up end-to-end verification completed on 2026-09-30 with the real local Worker, real Maven generation, and real Resend calls to designated test recipients. Customer creation/update, thread references, fallback, reopening, replacement-key deduplication, sender/identity rejection, blocking, archiving, teammate public/private routing, joined-human delivery, customerless forwarding, and key revocation passed. Resend reported the customer and teammate emails as delivered. See `docs/api/inbound-messages.md` for the complete observed results, delivery IDs, fixture correction, and remaining limits. No application code changes were needed for this verification.
+
+Limits: Resend test recipients simulate mailbox delivery. Normal mailbox placement, production deployment, provider webhook round-trips, concurrent exactly-once execution, and all time/rate boundaries were not verified. No new tests, migrations, push, or deployment.
 
 The original uncommitted widget and inbound implementation is included in the checkpoint commits rather than discarded.

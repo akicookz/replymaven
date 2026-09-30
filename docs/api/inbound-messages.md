@@ -80,6 +80,32 @@ Duplicate requests return HTTP 200 with `ok: true, duplicate: true`. A transcrip
 
 Errors use `{ "error": "..." }`: 400 invalid input, 401 missing/invalid/revoked key or wrong project, 403 sender permission or blocked customer, 404 customer not found, 409 identity conflict, 410 archived conversation, 413 oversized body, 429 request/creation/message limit, 503 inactive subscription or missing email configuration. The request limit is 30/minute per project and key; email's new-conversation limit is eight/hour per sender and project.
 
-## Local verification
+## Verification, 2026-09-30
 
-Forced TypeScript, app build, widget build, lint, and browser draft checks are recorded in the implementation plan. Live Maven generation and outbound email delivery have not been exercised for this endpoint. No production requests, migrations, or deployment are part of this change.
+Ran the real built Worker locally with isolated D1, KV, R2, and conversation Agents. The database contained only synthetic projects, accounts, and customer data. Maven used the configured real Gemini model. Email used the real Resend API and its [documented test recipients](https://resend.com/docs/dashboard/emails/send-test-emails), `delivered+inbound-customer@resend.dev` and `delivered+inbound-owner@resend.dev`. Resend simulates mailbox delivery for these addresses; this does not prove delivery to a normal Gmail or Outlook inbox.
+
+| Check | Observed result |
+| --- | --- |
+| Initial inbound request with email, name, phone, external ID, custom fields, and form context | 202; one customer and public conversation created; visitor message stored with the form label, order number, and API marker. |
+| Maven response and outbound email | Real model reply stored and marked emailed; Resend reported `delivered`. |
+| Reply using the returned public message ID | 202 in the same conversation; Maven correctly recalled `SYNTHETIC-123` from the original form; its second email was delivered. |
+| Retry using the same event ID under a replacement API key | 200 with `duplicate: true`; no extra visitor message or Maven reply. |
+| Recent-email fallback, explicit conversation ID, and body reference | All returned the existing conversation ID. |
+| Customer update | Name changed; explicit null cleared phone; supplied custom fields replaced the object; later omitted fields remained unchanged. |
+| Unrelated sender on an existing conversation | 403; no message added. |
+| Conflicting customer ID and email | 409; no profile reassignment. |
+| Human ownership | Customer messages stored without Maven replies. A closed thread reopened with its human assignment retained. |
+| Human takeover during an in-flight Maven turn | The ownership check suppressed the pending public bot reply. |
+| Teammate plain reply | Stored as an agent message with the verified teammate user ID; existing Sidechat offered email delivery privately. |
+| Named teammate command | With the bot name configured, `@Maven` entered Sidechat, stayed out of the public transcript, and received a delivered private email. Customer name and custom fields were unchanged. |
+| Joined-human forwarding | A later customer message was delivered by email to the joined synthetic teammate; Maven did not answer publicly. |
+| Teammate starting a thread | Created a customerless conversation with an empty public transcript; Sidechat handled the note and sent a delivered private response. |
+| Blocked visitor | 403. |
+| Explicit archived reference | 410. A later message without the archived reference created a new conversation for the same customer. |
+| Revocation cleanup | Both verification keys revoked; a valid inbound payload using the revoked key returned 401. |
+
+Delivery evidence: initial customer reply `01a0f242-2dad-72bd-9fa1-f31566e00b9e`; context follow-up `01a0f243-25f9-77c0-9c77-83d98c5831bf`; private teammate reply `01a0f246-628b-7608-a7b9-434e6cbe1a06`; joined-human forward `01a0f247-389f-7dbf-a554-fe8d598fe204`; customerless-thread reply `01a0f247-5550-7627-980a-7c1b86c59c75`. Each was retrieved from Resend with `last_event: delivered` and the expected recipient, content, subject, and conversation reply address. Public reply records also retained their resolved RFC message IDs.
+
+Fixture correction: the clean database initially omitted default project settings. Setting a bot name against that missing row did not persist it, so the first `@Maven` checks followed the ordinary human-reply path. After adding the default settings rows created by normal project setup, the named-command check passed. No application code change was needed.
+
+This run did not verify production deployment, normal mailbox placement, provider webhook round-trips back into the local Worker, concurrent exactly-once execution, or all time/rate-limit boundaries. No production customer records were used. No migrations, deployment, or new automated tests were part of this run.

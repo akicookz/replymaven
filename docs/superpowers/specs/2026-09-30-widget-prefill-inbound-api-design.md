@@ -2,7 +2,7 @@
 
 > **Authentication plan update:** The OAuth choice for the new inbound endpoint is superseded by `docs/superpowers/plans/2026-09-30-project-api-keys.md`. Project API-key authentication and owner/admin key management are implemented locally. MCP OAuth is unchanged.
 
-Status: Implemented locally on 2026-09-30. Not deployed. The JSON adapter reuses project API-key authentication and inbound email processing. See `docs/api/inbound-messages.md` for the implemented request and response contract. Live API-to-Maven/email delivery remains unverified.
+Status: Implemented locally on 2026-09-30. Not deployed. The JSON adapter reuses project API-key authentication and inbound email processing. See `docs/api/inbound-messages.md` for the implemented request and response contract. API-to-Maven processing and real Resend delivery to designated test recipients were verified locally on 2026-09-30; see the API document for evidence and limits.
 
 ## Outcome
 
