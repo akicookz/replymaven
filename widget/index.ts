@@ -3073,7 +3073,6 @@ import {
   let hasTicketForm = false;
   let configReady = false;
   let selectedFormLabel = "Contact form";
-  let availableFormLabels: string[] = [];
   let formFieldInputs: Array<{
     label: string;
     input: HTMLInputElement | HTMLTextAreaElement;
@@ -4409,8 +4408,7 @@ import {
         showOnHome: boolean;
       }> = loadedConfig.quickActions || [];
 
-      availableFormLabels = contactFormLabels(allActions);
-      selectedFormLabel = availableFormLabels[0];
+      selectedFormLabel = contactFormLabels(allActions)[0];
 
       const homeActions = allActions.filter((a) => a.showOnHome);
 
@@ -7132,8 +7130,7 @@ import {
 
   function openScreen(
     screenInput?: WidgetScreen,
-    args?: ScreenArgs | { message: string } | string,
-    fields?: Record<string, string>,
+    args?: ScreenArgs | { message: string } | Record<string, string>,
   ): boolean {
     const screen = readScreen(screenInput);
     if (screen === "greetings") {
@@ -7143,20 +7140,16 @@ import {
     if (screen === "form" && args !== undefined) {
       if (!configReady) return prefillFailure("not_ready");
       if (!hasTicketForm) return prefillFailure("form_disabled");
-      if (typeof args !== "string") return prefillFailure("invalid_form_id");
-      const labels = availableFormLabels.filter((label) => formLabelSlug(label) === args);
-      if (labels.length !== 1) return prefillFailure("unknown_or_ambiguous_form");
-      if (fields !== undefined && (!fields || typeof fields !== "object" || Array.isArray(fields))) {
+      if (!args || typeof args !== "object" || Array.isArray(args)) {
         return prefillFailure("invalid_fields");
       }
       const updates: Array<{ input: HTMLInputElement | HTMLTextAreaElement; value: string }> = [];
-      for (const [key, value] of Object.entries(fields ?? {})) {
+      for (const [key, value] of Object.entries(args)) {
         const matches = formFieldInputs.filter((field) => formLabelSlug(field.label) === key);
         if (matches.length !== 1) return prefillFailure("unknown_or_ambiguous_field");
         if (typeof value !== "string" || value.length > 5000) return prefillFailure("invalid_value");
         updates.push({ input: matches[0].input, value });
       }
-      selectedFormLabel = labels[0];
       for (const update of updates) update.input.value = update.value;
     } else if (screen === "chat" && args !== undefined) {
       if (!configReady) return prefillFailure("not_ready");

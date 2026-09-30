@@ -5,7 +5,7 @@ The widget adds these methods to `window.ReplyMaven` after its script loads. The
 | Method | Description | Return value |
 | --- | --- | --- |
 | `ready()` | Wait for configuration, controls, and stored-conversation restoration. Rejects if configuration fails. | `Promise<void>`. |
-| `open(screen?, args?, fields?)` | Open a screen. Chat accepts `{ message }` as a draft. Form accepts a label slug and field values. Greetings accepts `{ id }`. | `boolean`: false if prefilling is rejected; otherwise the panel-open or greeting result. |
+| `open(screen?, args?)` | Open a screen. Chat accepts `{ message }` as a draft. Form accepts an object mapping field-label slugs to values. Greetings accepts `{ id }`. | `boolean`: false if prefilling is rejected; otherwise the panel-open or greeting result. |
 | `close(screen?, args?)` | Close the panel. With `screen: "greetings"`, dismiss the card stack or the card in `args.id`. | No value. |
 | `toggle(screen?, args?)` | Toggle the panel or greeting stack/card. | `boolean`: current panel-open state for panel calls; greeting calls report whether the request opened it. |
 | `expand(args?)` | Expand the panel, or the greeting card in `args.id`. | `boolean`: true when the request is accepted. |

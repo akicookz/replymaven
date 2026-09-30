@@ -21,7 +21,7 @@ Required email. Validate project API keys against the existing api_keys table. P
 
 ## Checkpoint 2: Widget prefill
 
-- Extend `open("chat", { message })` and `open("form", formLabelSlug, fieldValues)` in `widget/index.ts`.
+- Extend `open("chat", { message })` and `open("form", fieldValues)` in `widget/index.ts`.
 - Derive form labels from existing inquiry quick actions; derive field keys from labels. Reuse all existing controls and submission paths. No new UI controls.
 - Add `ready()`, validate all prefill inputs before mutation, replace only supplied values, clear on reset, preserve drafts on close/failure.
 - Include selected form label in existing form message content, resolved on the server from configuration.

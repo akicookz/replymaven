@@ -14,7 +14,7 @@ Confirmed: Maven answers inbound messages when allowed, using the same rules as 
 
 - `open()` selects a widget screen. Its current extra argument selects a greeting; it cannot prefill fields.
 - `sendMessage()` sends immediately. A draft needs a separate behavior.
-- The project has one configured contact form. Fields currently use labels as keys. The proposed API derives form and field identifiers from their labels.
+- The project has one configured contact form. Fields currently use labels as keys. The API derives field keys from their labels; opening the single form needs no form ID.
 - Form submissions become public visitor messages. The text includes submitted labels and values, but there is no structured form name or form identity in the message context.
 - Customers already have project-scoped `externalId`, name, email, phone, and `customFields`. Email and external ID conflicts are detected by the customer identity service.
 - Conversation creation generates internal IDs. There is no general external thread/message mapping.
@@ -79,7 +79,7 @@ ReplyMaven.open("chat", {
   message: "I need help with order ORD-123",
 });
 
-ReplyMaven.open("form", "order-support", {
+ReplyMaven.open("form", {
   name: "Sam Lee",
   email: "sam@example.com",
   "order-number": "ORD-123",
@@ -91,7 +91,7 @@ ReplyMaven.open("form", "order-support", {
 
 `open("chat", { message })` fills the active chat composer, including the inline layout. It does not submit, create a customer or thread, notify the team, or start Maven. The visitor can edit the draft and press Send. `sendMessage(text)` retains its existing immediate-send behavior.
 
-`open("form", formId, fields)` fills the configured contact form. `formId` is the slugified form label. The fields object directly maps slugified field labels to values, with no `fields` wrapper. Values are strings. Omitted fields stay unchanged. Partial prefilling is valid even when other required fields are empty. Required-field checks run when the visitor submits.
+`open("form", fields)` fills the single configured contact form. No form ID is required. The fields object directly maps slugified field labels to values, with no `fields` wrapper. Values are strings. Omitted fields stay unchanged. Partial prefilling is valid even when other required fields are empty. Required-field checks run when the visitor submits.
 
 Both calls keep the current boolean return type. Validate before changing any draft or screen. Return `false` for a disabled form, unknown key, invalid value, or unavailable configuration. Emit one diagnostic with an error code and field keys, never field values. Return `true` after opening and applying all values.
 
@@ -105,11 +105,11 @@ Existing `open()`, greeting `{ id }`, `toggle()`, `close()`, `identify()`, and `
 
 Use labels as the source of identifiers. Do not add editable IDs, persistent field keys, or customer-field mapping controls.
 
-- Form label `Order support` becomes form ID `order-support`.
+- The public `open()` call needs no form ID. The existing submission path retains the configured form label for Maven.
 - Field label `Order number` becomes field key `order-number`.
 - Use the same slug function in configuration, the widget, and the server: normalize Unicode with NFKC, trim, lowercase, replace runs of characters other than Unicode letters or numbers with one hyphen, and remove leading/trailing hyphens.
 - Reject empty slugs and duplicate field slugs within a form when saving configuration. Do not silently add suffixes.
-- Renaming a label changes its identifier. Existing integration calls must use the new slug. Reordering fields does not change identifiers.
+- Renaming a field label changes its key. Existing integration calls must use the new field slug. Reordering fields does not change identifiers.
 - Use the existing contact-form quick-action label, default `Contact form` when no such action exists. Keep the existing description and field type/required settings. This does not add a multi-form builder.
 - The server derives identifiers and resolves labels from configuration. Store labels and values with each submission so later edits do not change old messages.
 - Browser-entered profile details remain unverified. A supplied email must not link the visitor to another customer's history. Keep existing profile extraction behavior; no new mapping setting.
