@@ -616,7 +616,7 @@ export const updateInboundAddressSchema = z.object({
 
 // ─── API Keys ─────────────────────────────────────────────────────────────────
 export const createApiKeySchema = z.object({
-  label: z.string().min(1, "Label is required").max(100),
+  label: z.string().trim().min(1, "Label is required").max(100),
 });
 
 // ─── Onboarding ───────────────────────────────────────────────────────────────

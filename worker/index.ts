@@ -6,6 +6,7 @@ import { HTTPException } from "hono/http-exception";
 import { except } from "hono/combine";
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq, isNotNull } from "drizzle-orm";
+import { handleListApiKeys, handleCreateApiKey, handleRevokeApiKey } from "./routes/api-key-handlers";
 import { users } from "./db/auth.schema";
 import {
   projectSettings as projectSettingsTable,
@@ -4853,6 +4854,11 @@ const app = new Hono<HonoAppContext>()
   // ─── Per-project access enforcement (scoped team members) ────────────────────
   .use("/api/projects/:id", projectAccessMiddleware)
   .use("/api/projects/:id/*", projectAccessMiddleware)
+
+  // ─── Project API keys ──────────────────────────────────────────────────────
+  .get("/api/projects/:id/api-keys", handleListApiKeys)
+  .post("/api/projects/:id/api-keys", handleCreateApiKey)
+  .delete("/api/projects/:id/api-keys/:keyId", handleRevokeApiKey)
 
   // ─── Customers ─────────────────────────────────────────────────────────────
   .get("/api/projects/:id/customers", async (c) => {
