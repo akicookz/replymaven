@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronsUpDown, Users } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useTeams } from "@/hooks/use-teams";
 import { cn } from "@/lib/utils";
@@ -54,13 +54,14 @@ export function TeamSwitcher({
           disabled={isSwitching}
           aria-label={`Switch team, current team ${name}`}
           className={cn(
-            "flex h-8 min-w-0 max-w-64 items-center gap-1 rounded-glass px-2 text-sm transition-colors disabled:opacity-60",
+            "flex h-8 min-w-0 max-w-64 items-center gap-1.5 rounded-glass px-2 text-sm transition-colors disabled:opacity-60",
             variant === "title" &&
               "-ml-2 font-semibold text-ink-1 hover:bg-glass-button",
             variant === "toolbar" &&
               "font-medium text-muted-foreground hover:bg-glass-button hover:text-foreground",
           )}
         >
+          <Users className="size-3.5 shrink-0 text-ink-5" strokeWidth={1.75} />
           <span className="truncate">{name}</span>
           <ChevronsUpDown className="size-3.5 shrink-0 text-ink-5" strokeWidth={1.5} />
         </button>
