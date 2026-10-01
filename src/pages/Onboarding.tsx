@@ -37,6 +37,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Segmented } from "@/components/ui/segmented";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Logo, LogoIcon } from "@/components/Logo";
+import { TeamSwitcher } from "@/components/team-switcher";
 import { useSubscription } from "@/hooks/use-subscription";
 import {
   buildPreviewHtml,
@@ -196,6 +197,8 @@ function OnboardingHeader({ canExit }: { canExit: boolean }) {
   return (
     <header className="flex items-center justify-between px-6 py-4">
       <Logo size="sm" />
+      <div className="flex items-center gap-2">
+      <TeamSwitcher variant="toolbar" align="end" />
       {canExit ? (
         <Button variant="ghost" size="sm" onClick={() => navigate("/app")} className="text-muted-foreground hover:text-foreground">
           <X className="w-4 h-4 mr-2" />
@@ -207,6 +210,7 @@ function OnboardingHeader({ canExit }: { canExit: boolean }) {
           Sign out
         </Button>
       )}
+      </div>
     </header>
   );
 }

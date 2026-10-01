@@ -1,8 +1,6 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ChevronsUpDown,
   UserPlus,
   Loader2,
   Shield,
@@ -66,6 +64,7 @@ import {
 import { formatProjectAccessLabel } from "@/lib/team-permissions";
 import { cn } from "@/lib/utils";
 import { MobileMenuButton } from "@/components/PageHeader";
+import { TeamSwitcher } from "@/components/team-switcher";
 
 // ─── Project access types & helpers ─────────────────────────────────────────────
 
@@ -548,87 +547,14 @@ function MemberRow({
 // ─── Team Page ────────────────────────────────────────────────────────────────
 
 function TeamTitle() {
-  const [open, setOpen] = useState(false);
-  const [isSwitching, setIsSwitching] = useState(false);
   const { data } = useTeams();
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const teams = data?.teams ?? [];
-  const activeTeam = teams.find((team) => team.isActive) ?? teams[0];
-  const name = activeTeam?.name ?? "Team";
-
-  if (teams.length <= 1) {
-    return (
-      <h2 className="min-w-0 truncate text-sm font-semibold text-ink-1">
-        {name}
-      </h2>
-    );
-  }
-
-  async function switchTeam(teamId: string) {
-    setOpen(false);
-    if (isSwitching || teamId === data?.activeTeamId) return;
-
-    setIsSwitching(true);
-    try {
-      const response = await fetch("/api/teams/switch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ teamId }),
-      });
-      if (!response.ok) throw new Error("Failed to switch team");
-
-      queryClient.clear();
-      navigate("/app");
-    } finally {
-      setIsSwitching(false);
-    }
-  }
-
+  if (teams.length > 1) return <TeamSwitcher variant="title" />;
+  const name = (teams.find((team) => team.isActive) ?? teams[0])?.name ?? "Team";
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          disabled={isSwitching}
-          aria-label={`Switch team, current team ${name}`}
-          className="-ml-2 flex h-8 min-w-0 max-w-64 items-center gap-1 rounded-md px-2 text-sm font-semibold text-ink-1 transition-colors hover:bg-glass-button disabled:opacity-60"
-        >
-          <span className="truncate">{name}</span>
-          <ChevronsUpDown className="size-3.5 shrink-0 text-ink-5" strokeWidth={1.5} />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-60 p-1">
-        <div className="space-y-0.5">
-          {teams.map((team) => (
-            <button
-              key={team.id}
-              type="button"
-              onClick={() => switchTeam(team.id)}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors",
-                team.isActive
-                  ? "bg-glass-button font-medium text-ink-1"
-                  : "text-ink-5 hover:bg-glass-button hover:text-ink-1",
-              )}
-            >
-              <span className="flex-1 truncate">
-                {team.name}
-                {team.own && (
-                  <span className="text-muted-foreground"> (you)</span>
-                )}
-              </span>
-              <span className="shrink-0 text-[11px] capitalize text-muted-foreground">
-                {team.role}
-              </span>
-              {team.isActive && (
-                <Check className="h-4 w-4 shrink-0 text-primary" />
-              )}
-            </button>
-          ))}
-        </div>
-      </PopoverContent>
-    </Popover>
+    <h2 className="min-w-0 truncate text-sm font-semibold text-ink-1">
+      {name}
+    </h2>
   );
 }
 
