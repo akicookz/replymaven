@@ -1864,12 +1864,12 @@ const app = new Hono<HonoAppContext>()
         slug: project?.slug ?? "",
         name: project?.name ?? "Support",
       },
-      actorUserId: project?.userId ?? "",
       db,
       chatService,
       env: c.env,
-      getAgentModeConversations: () =>
-        chatService.listAgentMode(projectId),
+      unknownAuthorHint:
+        `Your Telegram account is not linked to ReplyMaven. Send "@${botName?.trim() || "Maven"} link" here once to link it.`,
+      recordTeammateMessage: telegramMessageRecorder(c.env, projectId),
       findByChannelThread: async (messageId) => {
         const found = await telegramParent.findConversationByChannelThread(
           "telegram",
@@ -1973,6 +1973,7 @@ const app = new Hono<HonoAppContext>()
     );
     // Slack authors resolve by email: linked once, then remembered.
     let slackInbound = inbound.inbound;
+    let slackEmailScopeMissing = false;
     const slackUserId = inbound.inbound.author.externalId;
     if (project && slackUserId) {
       const identities = new ChannelIdentityService(db);
@@ -2004,6 +2005,7 @@ const app = new Hono<HonoAppContext>()
             });
           }
         } else {
+          slackEmailScopeMissing = lookup.error === "missing_scope";
           // Remembered for an hour: logged once, and the Tools page asks the
           // owner to reinstall the app with users:read.email.
           const flagKey = `slack-scope-missing:${projectId}`;
@@ -2042,12 +2044,12 @@ const app = new Hono<HonoAppContext>()
         slug: project?.slug ?? "",
         name: project?.name ?? "Support",
       },
-      actorUserId: project?.userId ?? "",
       db,
       chatService,
       env: c.env,
-      getAgentModeConversations: () =>
-        chatService.listAgentMode(projectId),
+      unknownAuthorHint: slackEmailScopeMissing
+        ? "Reinstall the ReplyMaven Slack app so it can look up your email, then write again."
+        : "Your Slack email does not match a teammate on this project.",
       findByChannelThread: async (threadId) => {
         const found = await parent.findConversationByChannelThread(
           "slack",
@@ -2495,6 +2497,7 @@ const app = new Hono<HonoAppContext>()
         : null;
     let headers: Record<string, string> = {};
     let inboundAttachments = parseInboundAttachments(payload.data?.attachments);
+    let rawEmailUrl: string | null = null;
     try {
       const received = await resend.emails.receiving.get(emailId);
       if (received.error || !received.data) {
@@ -2520,6 +2523,7 @@ const app = new Hono<HonoAppContext>()
       subject = emailData.subject ?? subject;
       rfcMessageId = emailData.message_id ?? rfcMessageId;
       inboundAttachments = parseInboundAttachments(emailData.attachments);
+      rawEmailUrl = emailData.raw?.download_url ?? null;
     } catch (err) {
       logError("inbound_email.fetch_failed", err, { emailId, projectSlug });
       return c.json({ error: "Could not read the inbound email" }, 502);
@@ -2556,7 +2560,7 @@ const app = new Hono<HonoAppContext>()
       project, emailId, senderEmail, senderName, envelopeRecipient,
       emailText, cleanedText, headers, subject, rfcMessageId,
       inboundAttachments, originatingAddress, inboundAddress, idempotencyKey,
-      checkRateLimit, broadcastCustomerChanges,
+      rawEmailUrl, checkRateLimit, broadcastCustomerChanges,
     });
   })
 

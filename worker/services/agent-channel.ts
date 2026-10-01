@@ -4,9 +4,11 @@
 
 export type AgentChannelId = "telegram" | "slack" | "email";
 
+// "targeted" names a customer conversation or a teammate thread. "new_thread"
+// is a teammate addressing Maven outside any thread: it opens their own.
 export type AgentChannelResolve =
   | { kind: "targeted"; conversationId: string }
-  | { kind: "ambiguous"; hint: string }
+  | { kind: "new_thread" }
   | { kind: "none"; reason: string };
 
 export interface AgentChannelAuthor {
@@ -32,9 +34,11 @@ export interface AgentChannelPost {
   text: string;
   // Where to reply on the channel. null starts a new thread.
   threadId: string | null;
+  // Empty for a teammate thread, which has no dashboard page.
   conversationLink: string;
-  // Email only.
-  recipient?: string | null;
+  // Email only. Teammates to answer; empty or missing sends to everyone who
+  // gets new threads.
+  recipients?: string[] | null;
   subject?: string | null;
 }
 
@@ -54,7 +58,6 @@ export interface AgentChannelAdapter {
   readonly channel: AgentChannelId;
   resolveConversation(input: {
     inbound: AgentChannelInbound;
-    getAgentModeConversations(): Promise<Array<{ id: string }>>;
     findByChannelThread(threadId: string): Promise<string | null>;
   }): Promise<AgentChannelResolve>;
   // Returns the thread id to reply under next time, or null when unknown.

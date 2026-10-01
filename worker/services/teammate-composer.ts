@@ -58,9 +58,6 @@ export async function handleTeammateComposerText(input: {
   if (started.accepted) {
     return { handled: true, confirmation: `${botLabel} is looking into that.` };
   }
-  if (started.reason === "busy") {
-    return { handled: true, confirmation: `${botLabel} is already working on this.` };
-  }
   return {
     handled: true,
     confirmation: `${botLabel} could not start that. Open Sidechat in the dashboard.`,

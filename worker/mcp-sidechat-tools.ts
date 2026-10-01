@@ -34,7 +34,6 @@ export function registerSidechatTools(
 
 function askMavenConfirmation(result: StartSidechatTurnResult): string {
   if (result.accepted) return "Maven is looking into that.";
-  if (result.reason === "busy") return "Maven is already working on this.";
   return "Maven could not start that. Open Sidechat in the dashboard.";
 }
 

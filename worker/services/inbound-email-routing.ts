@@ -4,6 +4,11 @@ const PLUS_ADDRESS = new RegExp(
   `^([^@+]+)\\+c(${UUID})@${EMAIL_DOMAIN.replace(/\./g, "\\.")}$`,
   "i",
 );
+// A teammate thread's reply-to address: +s instead of +c.
+const THREAD_ADDRESS = new RegExp(
+  `^([^@+]+)\\+s(${UUID})@${EMAIL_DOMAIN.replace(/\./g, "\\.")}$`,
+  "i",
+);
 const SLUG_ADDRESS = new RegExp(
   `^([^@+]+)@${EMAIL_DOMAIN.replace(/\./g, "\\.")}$`,
   "i",
@@ -36,6 +41,8 @@ export interface InboundEnvelopeRecipient {
   raw: string;
   slug: string;
   conversationId: string | null;
+  // Set when the mail answers Maven in a teammate thread.
+  sidechatThreadId?: string | null;
 }
 
 export interface InboundEmailAttachmentRef {
@@ -99,6 +106,15 @@ export function parseEnvelopeRecipient(
   for (const raw of toAddresses) {
     const address = extractEmailAddress(raw);
     if (!address) continue;
+    const thread = address.match(THREAD_ADDRESS);
+    if (thread?.[1] && thread[2]) {
+      return {
+        raw: address,
+        slug: thread[1].toLowerCase(),
+        conversationId: null,
+        sidechatThreadId: thread[2].toLowerCase(),
+      };
+    }
     const plus = address.match(PLUS_ADDRESS);
     if (plus?.[1] && plus[2]) {
       return {
@@ -283,4 +299,101 @@ export function extractEmailAddress(value: string): string | null {
 function extractEmailAddresses(value: string): string[] {
   const matches = value.match(ADDRESS_IN_TEXT) ?? [];
   return matches.map((address) => address.toLowerCase());
+}
+
+// ─── Teammate sender check ───────────────────────────────────────────────────
+// Resend receives mail through Amazon SES, which writes its verdict at the top
+// of the message. Everything below the second Received header came from the
+// sender, who can write a fake Authentication-Results there, so only the
+// block SES added is read.
+
+const MAX_RAW_HEADER_BYTES = 256 * 1024;
+
+function unfoldHeaders(block: string): Array<{ name: string; value: string }> {
+  const headers: Array<{ name: string; value: string }> = [];
+  for (const line of block.split(/\r?\n/)) {
+    if (/^[ \t]/.test(line) && headers.length > 0) {
+      headers[headers.length - 1]!.value += ` ${line.trim()}`;
+      continue;
+    }
+    const colon = line.indexOf(":");
+    if (colon <= 0) continue;
+    headers.push({
+      name: line.slice(0, colon).trim().toLowerCase(),
+      value: line.slice(colon + 1).trim(),
+    });
+  }
+  return headers;
+}
+
+export function readSesAuthenticationResults(rawHeaderBlock: string): string | null {
+  let received = 0;
+  for (const header of unfoldHeaders(rawHeaderBlock)) {
+    if (header.name === "received") {
+      received += 1;
+      if (received >= 2) return null;
+      continue;
+    }
+    if (
+      header.name === "authentication-results" &&
+      /^amazonses\.com\s*;/i.test(header.value)
+    ) {
+      return header.value;
+    }
+  }
+  return null;
+}
+
+function alignedWith(senderDomain: string, signingDomain: string): boolean {
+  return senderDomain === signingDomain ||
+    senderDomain.endsWith(`.${signingDomain}`);
+}
+
+// DMARC pass for the sender's domain, or a DKIM pass signed by it (covers
+// domains that publish no DMARC record).
+export function isAuthenticatedSender(
+  rawHeaderBlock: string,
+  senderEmail: string,
+): boolean {
+  const results = readSesAuthenticationResults(rawHeaderBlock);
+  const senderDomain = senderEmail.split("@")[1]?.trim().toLowerCase();
+  if (!results || !senderDomain) return false;
+  for (const clause of results.split(";").map((part) => part.trim().toLowerCase())) {
+    if (/^dmarc=pass\b/.test(clause)) {
+      const from = clause.match(/header\.from=([^\s;]+)/)?.[1];
+      if (from && alignedWith(senderDomain, from)) return true;
+    }
+    if (/^dkim=pass\b/.test(clause)) {
+      const signer = clause.match(/header\.i=@?([^\s;]+)/)?.[1] ??
+        clause.match(/header\.d=([^\s;]+)/)?.[1];
+      if (signer && alignedWith(senderDomain, signer.replace(/^.*@/, ""))) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Only the header block is read; the body is not downloaded. Throws when the
+// download fails, so the webhook can be retried.
+export async function fetchRawHeaderBlock(url: string): Promise<string | null> {
+  const response = await fetch(url);
+  if (!response.ok || !response.body) {
+    throw new Error(`Raw email download failed: ${response.status}`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  try {
+    while (text.length < MAX_RAW_HEADER_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+      const end = text.search(/\r?\n\r?\n/);
+      if (end !== -1) return text.slice(0, end);
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  return null;
 }

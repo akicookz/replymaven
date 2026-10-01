@@ -240,9 +240,27 @@ export interface SidechatUserMeta {
   replyRecipient: string | null;
 }
 
+export interface SidechatConversationBrief {
+  conversationId: string;
+  customerName: string | null;
+  customerEmail: string | null;
+  status: string;
+  assignee: string | null;
+  subject: string | null;
+  lastMessage: string | null;
+  lastActivityAt: number;
+}
+
 export interface SidechatCustomerContext {
   projectId: string;
   conversationId: string;
+  // "customer": this Sidechat belongs to one customer conversation.
+  // "teammate": a teammate's own thread with no customer conversation.
+  thread: "customer" | "teammate";
+  // Teammate threads only: the most relevant open conversations, and how many
+  // the inbox holds. Everything else is found with search_conversations.
+  openConversations: SidechatConversationBrief[];
+  inboxCounts: { needsYou: number; open: number; snoozed: number } | null;
   conversationStatus: string;
   archivedAt: number | null;
   origin: SidechatMessageOrigin;

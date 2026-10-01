@@ -18,7 +18,6 @@ export function readConversationIdFromReplyText(
 
 export function resolveTelegramConversation(input: {
   inbound: AgentChannelInbound;
-  agentModeConversationIds: string[];
   botName: string | null | undefined;
   repliedConversationId?: string | null;
 }): AgentChannelResolve {
@@ -32,28 +31,10 @@ export function resolveTelegramConversation(input: {
   if (conversationId) {
     return { kind: "targeted", conversationId };
   }
-
-  const isCommand = parseAgentBotNameCommand(
-    input.inbound.text,
-    input.botName,
-  ).isCommand;
-  if (isCommand && !input.inbound.replyToText) {
-    if (input.agentModeConversationIds.length === 1) {
-      return {
-        kind: "targeted",
-        conversationId: input.agentModeConversationIds[0]!,
-      };
-    }
-    if (input.agentModeConversationIds.length > 1) {
-      const botName = input.botName?.trim() || "BotName";
-      return {
-        kind: "ambiguous",
-        hint:
-          `Multiple active conversations. Please reply directly to a forwarded visitor message or notification to use @${botName} commands.`,
-      };
-    }
+  // Addressing Maven outside a known thread opens the teammate's own thread.
+  if (parseAgentBotNameCommand(input.inbound.text, input.botName).isCommand) {
+    return { kind: "new_thread" };
   }
-
   if (input.inbound.replyToExternalId) {
     return { kind: "none", reason: "no_conversation_id_in_replied_message" };
   }
@@ -95,13 +76,11 @@ export function createTelegramAgentChannel(input: {
     channel: "telegram",
     async resolveConversation(fields) {
       const repliedTo = fields.inbound.replyToExternalId;
-      const [agentMode, repliedConversationId] = await Promise.all([
-        fields.getAgentModeConversations(),
-        repliedTo ? fields.findByChannelThread(repliedTo) : Promise.resolve(null),
-      ]);
+      const repliedConversationId = repliedTo
+        ? await fields.findByChannelThread(repliedTo)
+        : null;
       return resolveTelegramConversation({
         inbound: fields.inbound,
-        agentModeConversationIds: agentMode.map((row) => row.id),
         botName: input.botName,
         repliedConversationId,
       });

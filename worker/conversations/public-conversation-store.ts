@@ -1,3 +1,4 @@
+import type { ConversationSearchQuery } from "../agents/maven/conversation-directory";
 import type { ActiveHumanRoute } from "../chat-runtime/types";
 import type {
   PublicConversationRecord,
@@ -373,6 +374,11 @@ export interface PublicConversationStore {
     options?: { openOnly?: boolean; touchedSinceMs?: number },
   ): Promise<PublicConversationRecord | null>;
   list(query: PublicConversationListQuery): Promise<PublicConversationListResult>;
+  // Ranked lookup for picking one conversation: Maven and MCP list_conversations.
+  search(
+    projectId: string,
+    query: ConversationSearchQuery,
+  ): Promise<{ total: number; conversations: PublicConversationRecord[] }>;
   bulkApplyActions(projectId: string, conversationIds: string[], action: PublicConversationAction): Promise<PublicBulkConversationActionResult>;
   listNeedsReview(projectId: string, since: number): Promise<PublicConversationRecord[]>;
   listAgentMode(projectId: string): Promise<PublicConversationRecord[]>;

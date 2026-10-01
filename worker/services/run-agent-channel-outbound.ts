@@ -102,7 +102,7 @@ export async function forwardVisitorToJoinedHumans(input: {
               text: `${name}: ${content}`,
               threadId: null,
               conversationLink: input.conversationLink,
-              recipient: recipient.email,
+              recipients: [recipient.email],
             });
           })().catch((error: unknown) => {
             logError("joined_human_route.email_forward_failed", error, {

@@ -1,4 +1,5 @@
 import type {
+  SidechatConversationBrief,
   SidechatCustomerContext,
   SidechatMessageOrigin,
 } from "../../../shared/sidechat-agent";
@@ -176,6 +177,9 @@ export async function buildSidechatContext(
   return {
     projectId: options.projectId,
     conversationId: options.conversationId,
+    thread: "customer",
+    openConversations: [],
+    inboxCounts: null,
     conversationStatus: conversation.status,
     archivedAt: conversation.archivedAt,
     origin: options.turn.origin,
@@ -197,5 +201,71 @@ export async function buildSidechatContext(
     // Do not synthesize one or repurpose private handoff metadata here.
     publicSummary: null,
     recentPublicMessages,
+  };
+}
+
+// A teammate's own thread: no customer, no public transcript.
+export function buildTeammateThreadContext(input: {
+  projectId: string;
+  threadId: string;
+  archivedAt: number | null;
+  turn: SidechatTurnContextInput;
+  openConversations: SidechatConversationBrief[];
+  inboxCounts: { needsYou: number; open: number; snoozed: number };
+}): SidechatCustomerContext {
+  return {
+    projectId: input.projectId,
+    conversationId: input.threadId,
+    thread: "teammate",
+    openConversations: input.openConversations,
+    inboxCounts: input.inboxCounts,
+    conversationStatus: "teammate_thread",
+    archivedAt: input.archivedAt,
+    origin: input.turn.origin,
+    botName: input.turn.botName,
+    author: input.turn.author,
+    assignee: null,
+    humanOwned: false,
+    teammates: input.turn.teammates,
+    links: input.turn.links,
+    emailSubject: input.turn.emailSubject,
+    pendingApproval: input.turn.pendingApproval,
+    customer: null,
+    visitor: null,
+    publicSummary: null,
+    recentPublicMessages: [],
+  };
+}
+
+const MAX_BRIEF_TEXT_CHARS = 200;
+
+export function toConversationBrief(
+  summary: {
+    conversationId: string;
+    visitorName: string | null;
+    visitorEmail: string | null;
+    status: string;
+    assigneeId: string | null;
+    metadata: Record<string, unknown>;
+    lastMessagePreview: string | null;
+    lastActivityAt: number;
+  },
+  teammates: Array<{ id: string; name: string }>,
+): SidechatConversationBrief {
+  const subject = typeof summary.metadata.subject === "string"
+    ? summary.metadata.subject
+    : null;
+  return {
+    conversationId: summary.conversationId,
+    customerName: trimNullable(summary.visitorName, MAX_CUSTOMER_NAME_CHARS),
+    customerEmail: normalizeEmail(summary.visitorEmail),
+    status: summary.status,
+    assignee: summary.assigneeId
+      ? teammates.find((member) => member.id === summary.assigneeId)?.name ??
+        "a teammate"
+      : null,
+    subject: trimNullable(subject, MAX_BRIEF_TEXT_CHARS),
+    lastMessage: trimNullable(summary.lastMessagePreview, MAX_BRIEF_TEXT_CHARS),
+    lastActivityAt: summary.lastActivityAt,
   };
 }

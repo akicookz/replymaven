@@ -1,3 +1,7 @@
+import type {
+  ConversationSearchQuery,
+  ConversationSearchResult,
+} from "../agents/maven/conversation-directory";
 import type { ActiveHumanRoute } from "../chat-runtime/types";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { parseMessageImageUrls } from "../../shared/message-images";
@@ -262,6 +266,9 @@ interface PublicParentStub {
   listConversations(
     query: MavenConversationListQuery,
   ): Promise<MavenConversationListResult>;
+  searchConversations(
+    query: ConversationSearchQuery,
+  ): Promise<ConversationSearchResult>;
   getDashboardConversationPage(
     query: MavenConversationListQuery,
   ): Promise<{
@@ -557,6 +564,20 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     return {
       conversations: summaries.slice(offset, offset + limit)
         .map((summary) => summaryToConversation(summary, query.projectId)),
+    };
+  }
+
+  async search(
+    projectId: string,
+    query: ConversationSearchQuery,
+  ): Promise<{ total: number; conversations: PublicConversationRecord[] }> {
+    const parent = await getPublicParent(this.context, projectId);
+    const result = await parent.searchConversations(query);
+    return {
+      total: result.total,
+      conversations: result.matches.map((match) =>
+        summaryToConversation(match.summary, projectId)
+      ),
     };
   }
 

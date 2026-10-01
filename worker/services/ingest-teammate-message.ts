@@ -11,7 +11,10 @@ import type { AgentChannelAdapter, AgentChannelInbound } from "./agent-channel";
 import { readConversationChannelMetadata } from "../../shared/maven-conversation";
 import { assignConversation } from "./conversation-actions";
 import {
+  deriveTeammateThreadId,
+  isTeammateThread,
   startSidechatTurn,
+  startTeammateThreadTurn,
   type StartSidechatTurnResult,
 } from "./start-sidechat-turn";
 import type { AppEnv } from "../types";
@@ -38,43 +41,150 @@ function replyPostedTrigger(messageId: string): string {
 
 const FAILED_DELIVERY =
   "That reply did not reach the visitor. Open the conversation in the dashboard and send it from there.";
-const BUSY = "Maven is already working on this.";
+
+// Sent at most once a day to a channel account we cannot match to a teammate.
+const UNKNOWN_AUTHOR_HINT_TTL_SECONDS = 24 * 60 * 60;
+
+async function postUnknownAuthorHint(input: {
+  adapter: AgentChannelAdapter;
+  inbound: AgentChannelInbound;
+  hint: string | null | undefined;
+  cache: KVNamespace;
+}): Promise<void> {
+  const externalId = input.inbound.author.externalId;
+  if (!input.hint || !externalId) return;
+  const key = `link-hint:${input.inbound.channel}:${externalId}`;
+  if (await input.cache.get(key)) return;
+  await input.cache.put(key, "1", {
+    expirationTtl: UNKNOWN_AUTHOR_HINT_TTL_SECONDS,
+  });
+  await input.adapter.post({
+    conversationId: "",
+    text: input.hint,
+    threadId: input.inbound.externalMessageId,
+    conversationLink: "",
+  }).catch((error: unknown) => {
+    logError(`${input.inbound.channel}.unknown_author_hint_failed`, error);
+  });
+}
 
 // One entry for every channel message from a teammate. When Maven owns the
 // thread the message is a Sidechat turn; when a human owns it, plain text is a
-// reply to the customer and an @BotName prefix still reaches Maven.
+// reply to the customer and an @BotName prefix still reaches Maven. A message
+// to Maven outside any thread opens the teammate's own thread.
 export async function ingestTeammateMessage(input: {
   adapter: AgentChannelAdapter;
   inbound: AgentChannelInbound;
   botName: string | null | undefined;
   projectId: string;
   project: { id: string; slug: string; name: string };
-  // Access principal for Sidechat tools until the author is known.
-  actorUserId: string;
   db: DrizzleD1Database<Record<string, unknown>>;
   chatService: PublicConversationStore;
-  env: Pick<AppEnv, "MAVEN_PROJECT_AGENT" | "BETTER_AUTH_URL" | "RESEND_API_KEY">;
-  getAgentModeConversations(): Promise<Array<{ id: string }>>;
+  env: Pick<
+    AppEnv,
+    "MAVEN_PROJECT_AGENT" | "BETTER_AUTH_URL" | "RESEND_API_KEY" | "CONVERSATIONS_CACHE"
+  >;
   findByChannelThread(threadId: string): Promise<string | null>;
+  // Shown to a sender who is not a verified teammate.
+  unknownAuthorHint?: string | null;
+  // Telegram only: index this message so a reply to it finds its thread.
+  recordTeammateMessage?: (conversationId: string, messageId: string) => Promise<void>;
   startTurn?: typeof startSidechatTurn;
 }): Promise<void> {
   const { adapter, inbound } = input;
   const resolved = await adapter.resolveConversation({
     inbound,
-    getAgentModeConversations: input.getAgentModeConversations,
     findByChannelThread: input.findByChannelThread,
   });
-  if (resolved.kind === "ambiguous") {
-    await adapter.post({
-      conversationId: "",
-      text: resolved.hint,
-      threadId: inbound.externalMessageId,
-      conversationLink: "",
+  if (resolved.kind === "none") {
+    logWarn(`${inbound.channel}.reply_dropped`, { reason: resolved.reason });
+    return;
+  }
+  // Only a verified teammate reaches Maven or the customer, and Maven acts
+  // with that teammate's own access.
+  const authorUserId = inbound.author.userId;
+  if (!authorUserId) {
+    logWarn(`${inbound.channel}.unknown_author_dropped`, { kind: resolved.kind });
+    await postUnknownAuthorHint({
+      adapter,
+      inbound,
+      hint: input.unknownAuthorHint,
+      cache: input.env.CONVERSATIONS_CACHE,
     });
     return;
   }
-  if (resolved.kind === "none") {
-    logWarn(`${inbound.channel}.reply_dropped`, { reason: resolved.reason });
+  const mention = parseAgentBotNameCommand(inbound.text, input.botName);
+  const turnFields = {
+    projectId: input.projectId,
+    env: input.env,
+    origin: inbound.channel,
+    actorUserId: authorUserId,
+    authorUserId,
+    authorDisplayName: inbound.author.displayName,
+    channelMessageId: `${inbound.channel}:${inbound.externalMessageId}`,
+    replyThreadId: replyThreadFor(inbound),
+    replyRecipient: inbound.author.email,
+  };
+  const replyInThread = (text: string) =>
+    adapter.post({
+      conversationId: "",
+      text,
+      threadId: inbound.externalMessageId,
+      conversationLink: "",
+    }).catch((error: unknown) => {
+      logError(`${inbound.channel}.reply_post_failed`, error);
+      return null;
+    });
+
+  if (resolved.kind === "new_thread") {
+    const text = mention.commandText.trim();
+    if (!text) return;
+    const started = await startTeammateThreadTurn({
+      ...turnFields,
+      conversationId: await deriveTeammateThreadId(
+        input.projectId,
+        inbound.channel,
+        inbound.externalMessageId,
+      ),
+      text,
+      createdBy: authorUserId,
+      telegramRootId: inbound.channel === "telegram"
+        ? inbound.externalMessageId
+        : null,
+      slackRootTs: inbound.channel === "slack"
+        ? inbound.replyToExternalId ?? inbound.externalMessageId
+        : null,
+      emailThread: null,
+    });
+    if (!started.accepted && started.reason !== "duplicate") {
+      await replyInThread("Maven could not start that. Try again in a moment.");
+    }
+    return;
+  }
+
+  if (input.recordTeammateMessage) {
+    await input.recordTeammateMessage(
+      resolved.conversationId,
+      inbound.externalMessageId,
+    ).catch(() => undefined);
+  }
+  if (
+    await isTeammateThread({
+      projectId: input.projectId,
+      env: input.env,
+      threadId: resolved.conversationId,
+    })
+  ) {
+    const text = mention.isCommand ? mention.commandText.trim() : inbound.text.trim();
+    if (!text) return;
+    const started = await (input.startTurn ?? startSidechatTurn)({
+      ...turnFields,
+      conversationId: resolved.conversationId,
+      text,
+    });
+    if (!started.accepted && started.reason !== "duplicate") {
+      await replyInThread("Maven could not start that. Try again in a moment.");
+    }
     return;
   }
 
@@ -112,7 +222,6 @@ export async function ingestTeammateMessage(input: {
       conversation.status,
     ),
   });
-  const mention = parseAgentBotNameCommand(inbound.text, input.botName);
 
   if (chatState.aiParticipation === "human_only" && !mention.isCommand) {
     const appended = await input.chatService.appendHuman({
@@ -155,7 +264,7 @@ export async function ingestTeammateMessage(input: {
         conversationId: conversation.id,
         text: replyPostedTrigger(appended.id),
         origin: inbound.channel,
-        actorUserId: input.actorUserId,
+        actorUserId: authorUserId,
         authorUserId: inbound.author.userId,
         authorDisplayName: inbound.author.displayName,
         channelMessageId: `${inbound.channel}:${inbound.externalMessageId}:posted`,
@@ -196,7 +305,7 @@ export async function ingestTeammateMessage(input: {
     conversationId: conversation.id,
     text,
     origin: inbound.channel,
-    actorUserId: input.actorUserId,
+    actorUserId: authorUserId,
     authorUserId: inbound.author.userId,
     authorDisplayName: inbound.author.displayName,
     channelMessageId: `${inbound.channel}:${inbound.externalMessageId}`,
@@ -204,9 +313,5 @@ export async function ingestTeammateMessage(input: {
     replyRecipient: inbound.author.email,
   });
   if (started.accepted || started.reason === "duplicate") return;
-  if (started.reason === "busy") {
-    await reply(BUSY);
-    return;
-  }
   await reply(`Maven could not start that. Open the conversation: ${conversationLink}`);
 }

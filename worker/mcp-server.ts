@@ -46,6 +46,7 @@ import { registerHelpdeskTools } from "./mcp-helpdesk-tools";
 import { registerSidechatTools } from "./mcp-sidechat-tools";
 import { registerWidgetTools } from "./mcp-widget-tools";
 import { handleTeammateComposerText } from "./services/teammate-composer";
+import { MAVEN_ASSIGNEE_ID } from "../shared/maven-assignee";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -387,7 +388,7 @@ function registerListConversationsTool(
     {
       title: "List conversations",
       description:
-        "List recent conversations for a ReplyMaven project, optionally filtered by status or visitor search.",
+        "List conversations for a ReplyMaven project. With searchQuery, scope, assignee, or activeWithinDays, results are ranked: exact email, exact name, partial name or email, then subject or latest message.",
       inputSchema: {
         projectId: z.string().min(1).describe("ReplyMaven project ID."),
         status: z
@@ -396,9 +397,27 @@ function registerListConversationsTool(
           .describe("Conversation status filter. Defaults to open."),
         searchQuery: z
           .string()
+          .max(200)
+          .optional()
+          .describe(
+            "Words to match in the customer's name or email, the subject, or the latest message.",
+          ),
+        scope: z
+          .enum(["needs-you", "open", "snoozed", "resolved", "all"])
+          .optional()
+          .describe("Inbox view to search. Replaces status when given."),
+        assignee: z
+          .string()
           .max(100)
           .optional()
-          .describe("Optional visitor name or email search."),
+          .describe("me, unassigned, maven, or a teammate user ID."),
+        activeWithinDays: z
+          .number()
+          .int()
+          .min(1)
+          .max(365)
+          .optional()
+          .describe("Only conversations active in this many days."),
         limit: z
           .number()
           .int()
@@ -414,10 +433,34 @@ function registerListConversationsTool(
         openWorldHint: false,
       },
     },
-    async ({ projectId, status, searchQuery, limit }) => {
+    async ({
+      projectId,
+      status,
+      searchQuery,
+      scope,
+      assignee,
+      activeWithinDays,
+      limit,
+    }) => {
       requireScope(context, "projects:read");
 
       await getAccessibleProject(context, projectId);
+
+      if (searchQuery || scope || assignee || activeWithinDays) {
+        const result = await context.conversationStore.search(projectId, {
+          text: searchQuery,
+          scope: scope ?? searchScopeForStatus(status),
+          assigneeId: readAssigneeFilter(assignee, context.userId),
+          activeSince: activeWithinDays
+            ? Date.now() - activeWithinDays * 24 * 60 * 60 * 1_000
+            : undefined,
+          limit: Math.min(limit ?? 20, 20),
+        });
+        return textResult({
+          total: result.total,
+          conversations: result.conversations.map(summarizeConversation),
+        });
+      }
 
       const { conversations } = await context.conversationStore.list({
         projectId,
@@ -432,6 +475,28 @@ function registerListConversationsTool(
       });
     },
   );
+}
+
+function searchScopeForStatus(
+  status: "open" | "closed" | "all" | undefined,
+): "open" | "resolved" | "all" {
+  if (status === "closed") return "resolved";
+  if (status === "all") return "all";
+  return "open";
+}
+
+// undefined: anyone. null: nobody assigned.
+function readAssigneeFilter(
+  assignee: string | undefined,
+  userId: string,
+): string | null | undefined {
+  const value = assignee?.trim();
+  if (!value) return undefined;
+  const lower = value.toLowerCase();
+  if (lower === "me") return userId;
+  if (lower === "unassigned") return null;
+  if (lower === "maven") return MAVEN_ASSIGNEE_ID;
+  return value;
 }
 
 function registerGetConversationTool(

@@ -71,6 +71,80 @@ interface SortDefinition {
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
 const MAX_OFFSET = 10_000;
+const MAX_SEARCH_LIMIT = 20;
+const MAX_SEARCH_WORDS = 6;
+// Rows with an empty visitor id hold only a Sidechat: a teammate thread, or
+// a Sidechat registered before its conversation row arrived.
+const CUSTOMER_ROWS_ONLY = "visitor_id != ''";
+
+export type ConversationSearchScope =
+  | "needs-you"
+  | "open"
+  | "snoozed"
+  | "resolved"
+  | "all";
+
+export interface ConversationSearchQuery {
+  text?: string;
+  scope?: ConversationSearchScope;
+  // A user id, MAVEN_ASSIGNEE_ID, or null for unassigned. Omit for anyone.
+  assigneeId?: string | null;
+  activeSince?: number;
+  limit?: number;
+  now?: number;
+}
+
+export type ConversationMatchField = "email" | "name" | "subject" | "message";
+
+export interface ConversationSearchMatch {
+  summary: MavenConversationSummary;
+  matchedOn: ConversationMatchField | null;
+}
+
+export interface ConversationSearchResult {
+  total: number;
+  matches: ConversationSearchMatch[];
+}
+
+function escapeLike(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
+function readSubject(metadata: Record<string, unknown>): string | null {
+  return typeof metadata.subject === "string" ? metadata.subject : null;
+}
+
+function matchedField(
+  summary: MavenConversationSummary,
+  text: string,
+): ConversationMatchField | null {
+  const words = text.split(/\s+/).filter(Boolean);
+  const includesAny = (value: string | null) =>
+    value !== null && words.some((word) => value.toLowerCase().includes(word));
+  if (summary.visitorEmail?.trim().toLowerCase() === text) return "email";
+  if (summary.visitorName?.trim().toLowerCase() === text) return "name";
+  if (includesAny(summary.visitorEmail)) return "email";
+  if (includesAny(summary.visitorName)) return "name";
+  if (includesAny(readSubject(summary.metadata))) return "subject";
+  return "message";
+}
+
+function addSearchScope(
+  conditions: string[],
+  bindings: SqlBinding[],
+  scope: ConversationSearchScope,
+  now: number,
+): void {
+  if (scope === "open") {
+    conditions.push("status != 'closed'", "archived_at IS NULL");
+    return;
+  }
+  if (scope === "all") {
+    conditions.push("archived_at IS NULL");
+    return;
+  }
+  addInboxFilter(conditions, bindings, scope, now);
+}
 
 function parseMetadata(value: string): Record<string, unknown> {
   try {
@@ -246,7 +320,7 @@ export class ConversationDirectory {
     const now = query.now ?? Date.now();
     const limit = Math.max(1, Math.min(MAX_LIMIT, query.limit ?? DEFAULT_LIMIT));
     const offset = Math.max(0, Math.min(MAX_OFFSET, query.offset ?? 0));
-    const conditions: string[] = [];
+    const conditions: string[] = [CUSTOMER_ROWS_ONLY];
     const bindings: SqlBinding[] = [];
     if (query.filter !== undefined) {
       addInboxFilter(conditions, bindings, query.filter, now);
@@ -326,6 +400,127 @@ export class ConversationDirectory {
           })
         : null,
     };
+  }
+
+  // Ranked for picking one conversation out of many: exact email, exact
+  // name, partial name or email, then subject or latest message. Ties go to
+  // conversations waiting for a person, then the most recent.
+  searchConversations(query: ConversationSearchQuery): ConversationSearchResult {
+    const now = query.now ?? Date.now();
+    const limit = Math.max(1, Math.min(MAX_SEARCH_LIMIT, query.limit ?? 5));
+    const conditions: string[] = [CUSTOMER_ROWS_ONLY];
+    const bindings: SqlBinding[] = [];
+    addSearchScope(conditions, bindings, query.scope ?? "open", now);
+    if (query.assigneeId === null) {
+      conditions.push("assignee_id IS NULL");
+    } else if (query.assigneeId !== undefined) {
+      conditions.push("assignee_id = ?");
+      bindings.push(query.assigneeId);
+    }
+    if (query.activeSince !== undefined) {
+      conditions.push("last_activity_at >= ?");
+      bindings.push(query.activeSince);
+    }
+    const text = query.text?.trim().toLowerCase().replace(/\s+/g, " ") ?? "";
+    const words = text.split(" ").filter(Boolean).slice(0, MAX_SEARCH_WORDS);
+    for (const word of words) {
+      const like = `%${escapeLike(word)}%`;
+      conditions.push(
+        `(LOWER(COALESCE(visitor_name, '')) LIKE ? ESCAPE '\\'
+          OR LOWER(COALESCE(visitor_email, '')) LIKE ? ESCAPE '\\'
+          OR LOWER(COALESCE(json_extract(metadata_json, '$.subject'), '')) LIKE ? ESCAPE '\\'
+          OR LOWER(COALESCE(last_message_preview, '')) LIKE ? ESCAPE '\\')`,
+      );
+      bindings.push(like, like, like, like);
+    }
+    const rank = text
+      ? `CASE
+           WHEN LOWER(TRIM(COALESCE(visitor_email, ''))) = ? THEN 4
+           WHEN LOWER(TRIM(COALESCE(visitor_name, ''))) = ? THEN 3
+           WHEN LOWER(COALESCE(visitor_name, '')) LIKE ? ESCAPE '\\'
+             OR LOWER(COALESCE(visitor_email, '')) LIKE ? ESCAPE '\\' THEN 2
+           ELSE 1
+         END DESC,`
+      : "";
+    const rankBindings: SqlBinding[] = text
+      ? [text, text, `%${escapeLike(text)}%`, `%${escapeLike(text)}%`]
+      : [];
+    const where = conditions.join(" AND ");
+    const total = this.sql.execute<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM conversation_directory WHERE ${where}`,
+      bindings,
+    )[0]?.count ?? 0;
+    const rows = this.sql.execute<ConversationDirectoryRow>(
+      `SELECT * FROM conversation_directory
+       WHERE ${where}
+       ORDER BY ${rank}
+                CASE status WHEN 'waiting_agent' THEN 1 ELSE 0 END DESC,
+                last_activity_at DESC,
+                conversation_id DESC
+       LIMIT ?`,
+      [...bindings, ...rankBindings, limit],
+    );
+    return {
+      total,
+      matches: rows.map((row) => {
+        const summary = mapDirectoryRow(row);
+        return { summary, matchedOn: text ? matchedField(summary, text) : null };
+      }),
+    };
+  }
+
+  // ─── Teammate threads ───────────────────────────────────────────────────
+  // A private Sidechat with no customer conversation. It shares the row
+  // shape so status, child name, and channel lookups work unchanged.
+
+  createTeammateThread(input: {
+    threadId: string;
+    metadata: Record<string, unknown>;
+    telegramThreadId: string | null;
+    slackThreadId: string | null;
+    now?: number;
+  }): boolean {
+    const now = input.now ?? Date.now();
+    const rows = this.sql.execute<{ conversation_id: string }>(
+      `INSERT INTO conversation_directory (
+         conversation_id, public_child_name, sidechat_child_name,
+         sidechat_status, visitor_id, telegram_thread_id, slack_thread_id,
+         status, metadata_json, priority, visitor_presence, last_activity_at,
+         message_count, bot_message_count, child_revision, created_at,
+         updated_at
+       ) VALUES (?, ?, ?, 'idle', '', ?, ?, 'active', ?, 'medium', 'active',
+                 ?, 0, 0, 0, ?, ?)
+       ON CONFLICT(conversation_id) DO NOTHING
+       RETURNING conversation_id`,
+      [
+        input.threadId,
+        `pub_${input.threadId}`,
+        `sc_${input.threadId}`,
+        input.telegramThreadId,
+        input.slackThreadId,
+        serializeMetadata(input.metadata),
+        now,
+        now,
+        now,
+      ],
+    );
+    return rows.length === 1;
+  }
+
+  updateTeammateThreadMetadata(
+    threadId: string,
+    update: (metadata: Record<string, unknown>) => Record<string, unknown>,
+  ): boolean {
+    const current = this.getConversation(threadId);
+    if (!current || current.visitorId !== "") return false;
+    const rows = this.sql.execute<{ conversation_id: string }>(
+      `UPDATE conversation_directory
+       SET metadata_json = ?, updated_at = ?
+       WHERE conversation_id = ? AND visitor_id = ''
+       RETURNING conversation_id`,
+      [serializeMetadata(update(current.metadata)), Date.now(), threadId],
+    );
+    return rows.length === 1;
   }
 
   getConversation(conversationId: string): MavenConversationSummary | null {
@@ -629,7 +824,7 @@ export class ConversationDirectory {
       "archived",
       "flagged",
     ] as const) {
-      const conditions: string[] = [];
+      const conditions: string[] = [CUSTOMER_ROWS_ONLY];
       const bindings: SqlBinding[] = [];
       addInboxFilter(conditions, bindings, filter, now);
       const rows = this.sql.execute<{ count: number }>(

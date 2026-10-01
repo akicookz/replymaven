@@ -7,6 +7,8 @@ import {
   getCurrentAgent,
   type Connection,
   type ConnectionContext,
+  type FiberRecoveryContext,
+  type FiberRecoveryResult,
 } from "agents";
 import {
   convertToModelMessages,
@@ -200,6 +202,15 @@ import {
   type SidechatEmailResult,
   type SidechatReplyResult,
   EMAIL_CUSTOMER_TOOL_NAME,
+  buildConversationSearchTool,
+  buildTeammateThreadActionTools,
+  SEARCH_CONVERSATIONS_TOOL_NAME,
+  START_CUSTOMER_CONVERSATION_TOOL_NAME,
+  TEAMMATE_THREAD_APPROVAL_TOOL_NAMES,
+  type ConversationSearchInput,
+  type SidechatStartConversationResult,
+  type SidechatTarget,
+  type SidechatTargetCheck,
 } from "../sidechat/action-tools";
 import { NATIVE_TOOL_ICON } from "../../lib/connector-favicon";
 
@@ -276,12 +287,14 @@ interface SidechatTurnParent extends SidechatStatusUpdater {
       authorUserId: string;
       toolCallId: string;
       text: string;
+      target?: SidechatTarget | null;
     },
   ): Promise<SidechatReplyResult>;
   emailCustomerFromSidechat(
     input: SidechatGatewayContext & SidechatEmailInput & {
       authorUserId: string;
       toolCallId: string;
+      target?: SidechatTarget | null;
     },
   ): Promise<SidechatEmailResult>;
   assignConversationFromSidechat(
@@ -291,10 +304,14 @@ interface SidechatTurnParent extends SidechatStatusUpdater {
       origin: SidechatCustomerContext["origin"];
       assigneeId: string;
       instructions: string | null;
+      target?: SidechatTarget | null;
     },
   ): Promise<{ ok: true } | { error: string }>;
   closeConversationFromSidechat(
-    input: SidechatGatewayContext & { authorUserId: string },
+    input: SidechatGatewayContext & {
+      authorUserId: string;
+      target?: SidechatTarget | null;
+    },
   ): Promise<{ ok: true } | { error: string }>;
   setCustomerContactFromSidechat(
     input: SidechatGatewayContext & {
@@ -304,8 +321,30 @@ interface SidechatTurnParent extends SidechatStatusUpdater {
     },
   ): Promise<SidechatContactResult>;
   blockCustomerFromSidechat(
-    input: SidechatGatewayContext & { authorUserId: string; reason: string },
+    input: SidechatGatewayContext & {
+      authorUserId: string;
+      reason: string;
+      target?: SidechatTarget | null;
+    },
   ): Promise<{ ok: true } | { error: string }>;
+  verifySidechatActionTarget(
+    input: SidechatGatewayContext & { target: SidechatTarget },
+  ): Promise<SidechatTargetCheck>;
+  startCustomerConversationFromSidechat(
+    input: SidechatGatewayContext & {
+      authorUserId: string;
+      email: string;
+      name: string | null;
+      customerMessage: string;
+      subject: string | null;
+    },
+  ): Promise<SidechatStartConversationResult>;
+  searchConversationsForSidechat(
+    input: SidechatGatewayContext & {
+      authorUserId: string;
+      query: ConversationSearchInput;
+    },
+  ): Promise<unknown>;
   decidePendingAction(
     input: SidechatGatewayContext & {
       authorUserId: string;
@@ -317,7 +356,7 @@ interface SidechatTurnParent extends SidechatStatusUpdater {
     text: string;
     origin: SidechatCustomerContext["origin"];
     replyThreadId: string | null;
-    replyRecipient: string | null;
+    replyRecipients: string[];
   }): Promise<void>;
   searchSidechatProjectTools(
     input: SidechatGatewayContext & {
@@ -384,6 +423,140 @@ interface SidechatTurnAgent extends SidechatMessageStore {
 
 const SIDECHAT_MAX_TURN_STEPS = 24;
 const CONNECTION_ACTOR_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
+const SIDECHAT_SERVER_TURN_FIBER = "sidechat_server_turn";
+// Longest silence from the model before a server turn is stopped.
+const SIDECHAT_STREAM_STALL_MS = 90_000;
+const SIDECHAT_TURN_STOPPED =
+  "That stopped before it finished. Check the result before asking again.";
+
+// Lowercase, one space between words, and no "> " quote markers, so words
+// copied out of a quoted forward still match.
+function normalizeQuotedText(text: string): string {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(?:>\s?)+/, ""))
+    .join(" ")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Everything teammates wrote in this thread, for checking that an address or
+// a customer's words Maven quotes really came from them.
+function teammateThreadText(messages: UIMessage[]): string {
+  return normalizeQuotedText(
+    messages
+      .filter((message) => message.role === "user")
+      .flatMap((message) => message.parts)
+      .map((part) => (part.type === "text" ? part.text : ""))
+      .join("\n"),
+  );
+}
+
+// A send from a teammate thread is approved against the customer as stored,
+// not as Maven typed it, so the approval request names both.
+async function recipientOnRecord(
+  parent: SidechatTurnParent,
+  gatewayContext: SidechatGatewayContext,
+  call: { toolName: string; input: string },
+): Promise<string> {
+  if (!TEAMMATE_THREAD_APPROVAL_TOOL_NAMES.has(call.toolName)) return "";
+  // The input is a shortened JSON string, so read the two fields directly.
+  const readField = (key: string): string | null => {
+    const match = call.input.match(new RegExp(`"${key}":"((?:[^"\\\\]|\\\\.)*)"`));
+    if (!match?.[1]) return null;
+    try {
+      return JSON.parse(`"${match[1]}"`) as string;
+    } catch {
+      return null;
+    }
+  };
+  const conversationId = readField("conversationId");
+  const customer = readField("customer");
+  if (!conversationId || !customer) return "";
+  const check = await parent.verifySidechatActionTarget({
+    ...gatewayContext,
+    target: { conversationId, customer },
+  });
+  if (!("ok" in check)) return "";
+  const who = [check.customerName, check.customerEmail].filter(Boolean).join(", ");
+  return who ? ` (customer on record: ${who})` : "";
+}
+
+function buildTeammateThreadTools(input: {
+  parent: SidechatTurnParent;
+  gatewayContext: SidechatGatewayContext;
+  turnMeta: ReturnType<typeof readTriggeringUserMeta>;
+  pendingApproval: SidechatCustomerContext["pendingApproval"];
+  threadText: string;
+}): ToolSet {
+  const { parent, gatewayContext, turnMeta } = input;
+  const author = turnMeta.authorUserId;
+  return buildTeammateThreadActionTools({
+    verifyTarget: (target) =>
+      parent.verifySidechatActionTarget({ ...gatewayContext, target }),
+    replyToConversation: (target, text, toolCallId) =>
+      parent.replyToConversation({
+        ...gatewayContext,
+        authorUserId: author,
+        toolCallId,
+        text,
+        target,
+      }),
+    emailCustomer: (target, email, toolCallId) =>
+      parent.emailCustomerFromSidechat({
+        ...gatewayContext,
+        ...email,
+        authorUserId: author,
+        toolCallId,
+        target,
+      }),
+    assignConversation: (target, assigneeId, instructions) =>
+      parent.assignConversationFromSidechat({
+        ...gatewayContext,
+        authorUserId: author,
+        authorDisplayName: turnMeta.authorDisplayName,
+        origin: turnMeta.origin,
+        assigneeId,
+        instructions,
+        target,
+      }),
+    closeConversation: (target) =>
+      parent.closeConversationFromSidechat({
+        ...gatewayContext,
+        authorUserId: author,
+        target,
+      }),
+    blockCustomer: (target, reason) =>
+      parent.blockCustomerFromSidechat({
+        ...gatewayContext,
+        authorUserId: author,
+        reason,
+        target,
+      }),
+    async startCustomerConversation(request) {
+      if (!input.threadText.includes(request.email.trim().toLowerCase())) {
+        return { error: "address_not_in_thread" };
+      }
+      if (!input.threadText.includes(normalizeQuotedText(request.customerMessage))) {
+        return { error: "message_not_in_thread" };
+      }
+      return parent.startCustomerConversationFromSidechat({
+        ...gatewayContext,
+        authorUserId: author,
+        ...request,
+      });
+    },
+    decidePendingAction: input.pendingApproval
+      ? (decision) =>
+        parent.decidePendingAction({
+          ...gatewayContext,
+          authorUserId: author,
+          decision,
+        })
+      : undefined,
+  });
+}
 
 async function executeSidechatTurn(input: {
   agent: SidechatTurnAgent;
@@ -441,56 +614,71 @@ async function executeSidechatTurn(input: {
     input.agent.pendingKnowledgeChanges = knowledgeChangePreviews;
     const tools: ToolSet = {
       present_reply_draft: createReplyDraftTool(),
-      ...buildSidechatActionTools({
-        replyToConversation: (text, toolCallId) =>
-          input.parent.replyToConversation({
-            ...gatewayContext,
-            authorUserId: turnMeta.authorUserId,
-            toolCallId,
-            text,
-          }),
-        emailCustomer: (email, toolCallId) =>
-          input.parent.emailCustomerFromSidechat({
-            ...gatewayContext,
-            ...email,
-            authorUserId: turnMeta.authorUserId,
-            toolCallId,
-          }),
-        assignConversation: (assigneeId, instructions) =>
-          input.parent.assignConversationFromSidechat({
-            ...gatewayContext,
-            authorUserId: turnMeta.authorUserId,
-            authorDisplayName: turnMeta.authorDisplayName,
-            origin: turnMeta.origin,
-            assigneeId,
-            instructions,
-          }),
-        closeConversation: () =>
-          input.parent.closeConversationFromSidechat({
-            ...gatewayContext,
-            authorUserId: turnMeta.authorUserId,
-          }),
-        setCustomerContact: (contact) =>
-          input.parent.setCustomerContactFromSidechat({
-            ...gatewayContext,
-            authorUserId: turnMeta.authorUserId,
-            ...contact,
-          }),
-        blockCustomer: (reason) =>
-          input.parent.blockCustomerFromSidechat({
-            ...gatewayContext,
-            authorUserId: turnMeta.authorUserId,
-            reason,
-          }),
-        decidePendingAction: pendingApproval
-          ? (decision) =>
-            input.parent.decidePendingAction({
+      ...(context.thread === "teammate"
+        ? buildTeammateThreadTools({
+          parent: input.parent,
+          gatewayContext,
+          turnMeta,
+          pendingApproval,
+          threadText: teammateThreadText(input.agent.messages),
+        })
+        : buildSidechatActionTools({
+          replyToConversation: (text, toolCallId) =>
+            input.parent.replyToConversation({
               ...gatewayContext,
               authorUserId: turnMeta.authorUserId,
-              decision,
-            })
-          : undefined,
-      }),
+              toolCallId,
+              text,
+            }),
+          emailCustomer: (email, toolCallId) =>
+            input.parent.emailCustomerFromSidechat({
+              ...gatewayContext,
+              ...email,
+              authorUserId: turnMeta.authorUserId,
+              toolCallId,
+            }),
+          assignConversation: (assigneeId, instructions) =>
+            input.parent.assignConversationFromSidechat({
+              ...gatewayContext,
+              authorUserId: turnMeta.authorUserId,
+              authorDisplayName: turnMeta.authorDisplayName,
+              origin: turnMeta.origin,
+              assigneeId,
+              instructions,
+            }),
+          closeConversation: () =>
+            input.parent.closeConversationFromSidechat({
+              ...gatewayContext,
+              authorUserId: turnMeta.authorUserId,
+            }),
+          setCustomerContact: (contact) =>
+            input.parent.setCustomerContactFromSidechat({
+              ...gatewayContext,
+              authorUserId: turnMeta.authorUserId,
+              ...contact,
+            }),
+          blockCustomer: (reason) =>
+            input.parent.blockCustomerFromSidechat({
+              ...gatewayContext,
+              authorUserId: turnMeta.authorUserId,
+              reason,
+            }),
+          decidePendingAction: pendingApproval
+            ? (decision) =>
+              input.parent.decidePendingAction({
+                ...gatewayContext,
+                authorUserId: turnMeta.authorUserId,
+                decision,
+              })
+            : undefined,
+        })),
+      ...buildConversationSearchTool((query) =>
+        input.parent.searchConversationsForSidechat({
+          ...gatewayContext,
+          authorUserId: turnMeta.authorUserId,
+          query,
+        })
+      ),
       ...buildSidechatKnowledgeTools({
         list: (knowledgeInput) =>
           input.parent.listSidechatKnowledge({
@@ -570,7 +758,10 @@ async function executeSidechatTurn(input: {
       toolCount: Object.keys(tools).length,
     });
     const modelMessages = await convertToModelMessages(
-      selectSidechatModelMessages(input.agent.messages, input.continuation),
+      labelTeammateMessages(
+        selectSidechatModelMessages(input.agent.messages, input.continuation),
+        context.teammates,
+      ),
     );
     logInfo("sidechat_turn.model_view", {
       childName: input.agent.name,
@@ -741,8 +932,16 @@ async function executeSidechatTurn(input: {
     ) {
       const responseMessages = (await result.response).messages;
       const unanswered = stripUnansweredToolCalls(responseMessages);
-      const wrapUpInstruction = unanswered.pending.length > 0
-        ? `You just paused for approval before running: ${unanswered.pending.map((call) => `${call.toolName} with ${call.input}`).join("; ")}. Write the four-part approval request now. Do not call tools.`
+      const pendingCalls = await Promise.all(
+        unanswered.pending.map(async (call) => {
+          const recipient = context.thread === "teammate"
+            ? await recipientOnRecord(input.parent, gatewayContext, call)
+            : null;
+          return `${call.toolName} with ${call.input}${recipient}`;
+        }),
+      );
+      const wrapUpInstruction = pendingCalls.length > 0
+        ? `You just paused for approval before running: ${pendingCalls.join("; ")}. Write the four-part approval request now. Do not call tools.`
         : "Write a short chat reply now. Do not call tools.";
       const wrapUp = streamText({
         model,
@@ -867,6 +1066,32 @@ function cutAfterRespondedApproval(messages: UIMessage[]): UIMessage[] {
   return messages;
 }
 
+// Several teammates can write in one thread, and the model only sees text,
+// so each teammate message carries its author's name. The stored transcript
+// is not changed.
+function labelTeammateMessages(
+  messages: UIMessage[],
+  teammates: Array<{ id: string; name: string }>,
+): UIMessage[] {
+  return messages.map((message) => {
+    const meta = readSidechatUserMeta(message);
+    if (!meta || meta.origin === "system") return message;
+    const name = teammates.find((member) => member.id === meta.authorUserId)?.name ??
+      meta.authorDisplayName;
+    if (!name?.trim()) return message;
+    const textIndex = message.parts.findIndex((part) => part.type === "text");
+    if (textIndex === -1) return message;
+    return {
+      ...message,
+      parts: message.parts.map((part, index) =>
+        index === textIndex && part.type === "text"
+          ? { ...part, text: `[${name.trim()}] ${part.text}` }
+          : part
+      ),
+    };
+  });
+}
+
 export function selectSidechatModelMessages(
   messages: UIMessage[],
   continuation = false,
@@ -930,6 +1155,15 @@ export function readPendingApprovalScope(
   return null;
 }
 
+// Tools whose calls can wait for a teammate's approval.
+function isApprovalTool(part: UIMessage["parts"][number]): boolean {
+  if (!isToolUIPart(part)) return false;
+  const name = getToolName(part);
+  return name === "call_project_tool" ||
+    name === APPLY_KNOWLEDGE_CHANGE_TOOL_NAME ||
+    TEAMMATE_THREAD_APPROVAL_TOOL_NAMES.has(name);
+}
+
 export function approvedSidechatToolCallIds(
   messages: UIMessage[],
 ): ReadonlySet<string> {
@@ -939,8 +1173,7 @@ export function approvedSidechatToolCallIds(
     for (const part of message.parts) {
       if (
         isToolUIPart(part) &&
-        (getToolName(part) === "call_project_tool" ||
-          getToolName(part) === APPLY_KNOWLEDGE_CHANGE_TOOL_NAME) &&
+        isApprovalTool(part) &&
         part.state === "approval-responded" &&
         part.approval.approved
       ) {
@@ -961,11 +1194,9 @@ export function hasPendingSidechatApproval(messages: UIMessage[]): boolean {
       if (!part || !isToolUIPart(part)) continue;
       if (seenToolCalls.has(part.toolCallId)) continue;
       seenToolCalls.add(part.toolCallId);
-      if (
-        (getToolName(part) === "call_project_tool" ||
-          getToolName(part) === APPLY_KNOWLEDGE_CHANGE_TOOL_NAME) &&
-        part.state === "approval-requested"
-      ) return true;
+      if (isApprovalTool(part) && part.state === "approval-requested") {
+        return true;
+      }
     }
   }
   return false;
@@ -983,16 +1214,19 @@ function findPendingApprovalPart(
       if (!part || !isToolUIPart(part)) continue;
       if (seenToolCalls.has(part.toolCallId)) continue;
       seenToolCalls.add(part.toolCallId);
-      if (
-        (getToolName(part) === "call_project_tool" ||
-          getToolName(part) === APPLY_KNOWLEDGE_CHANGE_TOOL_NAME) &&
-        part.state === "approval-requested"
-      ) {
+      if (isApprovalTool(part) && part.state === "approval-requested") {
         return { messageIndex, partIndex };
       }
     }
   }
   return null;
+}
+
+function pendingApprovalLabel(toolName: string): string {
+  if (toolName === APPLY_KNOWLEDGE_CHANGE_TOOL_NAME) return "Knowledge change";
+  if (toolName === REPLY_TO_CONVERSATION_TOOL_NAME) return "Chat reply to the customer";
+  if (toolName === EMAIL_CUSTOMER_TOOL_NAME) return "Email to the customer";
+  return "Connected tool";
 }
 
 // What Maven may quote when it asks for approval: the tool's presentation and
@@ -1006,9 +1240,7 @@ function describePendingApproval(
   const part = message.parts[found.partIndex]!;
   if (!isToolUIPart(part)) return null;
   const toolCallId = part.toolCallId;
-  let label = getToolName(part) === APPLY_KNOWLEDGE_CHANGE_TOOL_NAME
-    ? "Knowledge change"
-    : "Connected tool";
+  let label = pendingApprovalLabel(getToolName(part));
   for (const candidate of message.parts) {
     const record = candidate as Record<string, unknown>;
     if (
@@ -1077,6 +1309,18 @@ function readTriggeringUserMeta(messages: UIMessage[]): {
   };
 }
 
+// Everyone who wrote in this thread by email: an email answer goes to all of
+// them, each in their own mail thread.
+function emailThreadParticipants(messages: UIMessage[]): string[] {
+  const addresses = new Set<string>();
+  for (const message of messages) {
+    const meta = readSidechatUserMeta(message);
+    if (meta?.origin !== "email" || !meta.replyRecipient) continue;
+    addresses.add(meta.replyRecipient.trim().toLowerCase());
+  }
+  return [...addresses];
+}
+
 const SIDECHAT_ACTION_TOOL_PRESENTATIONS: Array<
   [string, SidechatToolApprovalContext]
 > = [
@@ -1087,10 +1331,14 @@ const SIDECHAT_ACTION_TOOL_PRESENTATIONS: Array<
   BLOCK_CUSTOMER_TOOL_NAME,
   DECIDE_PENDING_ACTION_TOOL_NAME,
   SET_CUSTOMER_CONTACT_TOOL_NAME,
+  SEARCH_CONVERSATIONS_TOOL_NAME,
+  START_CUSTOMER_CONVERSATION_TOOL_NAME,
 ].map((name) => [
   name,
   {
-    safety: "write" as const,
+    safety: name === SEARCH_CONVERSATIONS_TOOL_NAME
+      ? "read" as const
+      : "write" as const,
     tool: {
       displayName: {
         [REPLY_TO_CONVERSATION_TOOL_NAME]: "Reply",
@@ -1100,6 +1348,8 @@ const SIDECHAT_ACTION_TOOL_PRESENTATIONS: Array<
         [BLOCK_CUSTOMER_TOOL_NAME]: "Block",
         [DECIDE_PENDING_ACTION_TOOL_NAME]: "Decide",
         [SET_CUSTOMER_CONTACT_TOOL_NAME]: "Customer",
+        [SEARCH_CONVERSATIONS_TOOL_NAME]: "Search",
+        [START_CUSTOMER_CONVERSATION_TOOL_NAME]: "Start conversation",
       }[name] ?? name,
       source: { kind: "http" as const, name: "Conversation", icon: NATIVE_TOOL_ICON },
     },
@@ -1216,6 +1466,10 @@ export class MavenChatAgent extends AIChatAgent<
   private publicTurnOutcomes?: PublicTurnOutcomeStore;
   private publicMutationTail: Promise<void> = Promise.resolve();
   private publicToolRateLimit = { count: 0, resetAt: 0 };
+  // Server Sidechat turns run one at a time; a message waits here unsaved
+  // until its turn starts, so each answer follows the message it answers.
+  private serverTurnTail: Promise<void> = Promise.resolve();
+  private queuedServerMessageIds = new Set<string>();
   pendingKnowledgeChanges = new Map<string, KnowledgeChangePreview>();
 
   constructor(ctx: DurableObjectState, env: AppEnv) {
@@ -1496,7 +1750,12 @@ export class MavenChatAgent extends AIChatAgent<
       return "rejected";
     }
     const id = input.channelMessageId ?? crypto.randomUUID();
-    if (this.messages.some((message) => message.id === id)) return "duplicate";
+    if (
+      this.queuedServerMessageIds.has(id) ||
+      this.messages.some((message) => message.id === id)
+    ) {
+      return "duplicate";
+    }
     const userMessage: SidechatUIMessage = {
       id,
       role: "user",
@@ -1512,13 +1771,26 @@ export class MavenChatAgent extends AIChatAgent<
         replyRecipient: input.replyRecipient ?? null,
       },
     };
-    await this.persistMessages([...this.messages, userMessage]);
-    this.ctx.waitUntil(this.runServerSidechatTurn({
-      actorUserId: input.actorUserId,
-      submittedMessageId: userMessage.id,
-      continuation: false,
-    }));
+    this.queuedServerMessageIds.add(id);
+    this.enqueueServerSidechatTurn(async () => {
+      this.queuedServerMessageIds.delete(id);
+      if (this.messages.some((message) => message.id === id)) return;
+      await this.persistMessages([...this.messages, userMessage]);
+      await this.runServerSidechatTurn({
+        actorUserId: input.actorUserId,
+        submittedMessageId: userMessage.id,
+        continuation: false,
+      });
+    });
     return "accepted";
+  }
+
+  private enqueueServerSidechatTurn(run: () => Promise<void>): void {
+    const next = this.serverTurnTail.then(run).catch((error: unknown) => {
+      logError("sidechat_turn.queue_failed", error, { childName: this.name });
+    });
+    this.serverTurnTail = next;
+    this.ctx.waitUntil(next);
   }
 
   // Flip the newest pending approval to responded. The approved tool runs at
@@ -1579,7 +1851,7 @@ export class MavenChatAgent extends AIChatAgent<
         text,
         origin: meta.origin,
         replyThreadId: triggerMeta?.replyThreadId ?? null,
-        replyRecipient: triggerMeta?.replyRecipient ?? null,
+        replyRecipients: emailThreadParticipants(this.messages),
       });
     } catch (error) {
       logError("sidechat_mirror.call_failed", error, {
@@ -1655,7 +1927,38 @@ export class MavenChatAgent extends AIChatAgent<
     if (resumeMessage) {
       this.continuationBase.set(resumeMessage.id, resumeMessage.parts.length);
     }
+    // The fiber keeps this Agent alive for the whole turn and lets the next
+    // start find a turn a deploy cut off (onFiberRecovered).
+    await this.runFiber(SIDECHAT_SERVER_TURN_FIBER, () =>
+      this.streamServerSidechatTurn({
+        ...input,
+        conversationId,
+        parent,
+        resumeIndex,
+        resumeMessage,
+      })
+    );
+  }
+
+  private async streamServerSidechatTurn(input: {
+    actorUserId: string;
+    submittedMessageId: string | null;
+    continuation: boolean;
+    conversationId: string;
+    parent: DurableObjectStub<MavenProjectAgent>;
+    resumeIndex: number;
+    resumeMessage: SidechatUIMessage | undefined;
+  }): Promise<void> {
+    const { conversationId, parent, resumeIndex, resumeMessage } = input;
+    const childName = this.name;
+    const stall = new AbortController();
+    let stallTimer: ReturnType<typeof setTimeout> | undefined;
+    const armStallTimer = () => {
+      if (stallTimer !== undefined) clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => stall.abort(), SIDECHAT_STREAM_STALL_MS);
+    };
     try {
+      armStallTimer();
       const stream = createUIMessageStream<SidechatUIMessage>({
         originalMessages: (resumeIndex === -1
           ? this.messages
@@ -1677,7 +1980,7 @@ export class MavenChatAgent extends AIChatAgent<
             actorUserId: input.actorUserId,
             submittedMessageId: input.submittedMessageId,
             continuation: input.continuation,
-            abortSignal: undefined,
+            abortSignal: stall.signal,
             onFinish: async () => undefined,
           });
         },
@@ -1687,11 +1990,15 @@ export class MavenChatAgent extends AIChatAgent<
         const message of readUIMessageStream({ message: resumeMessage, stream })
       ) {
         last = message;
+        armStallTimer();
+      }
+      if (stall.signal.aborted) {
+        logWarn("sidechat_turn.stalled", { childName, conversationId });
+        await this.reportStoppedServerTurn(parent, conversationId);
+        return;
       }
       if (!last) {
-        if (await parent.isSidechatOperational(this.name, conversationId)) {
-          await parent.updateSidechatSummary(conversationId, "failed");
-        }
+        await this.reportStoppedServerTurn(parent, conversationId);
         return;
       }
       const persisted = this.messages.some((message) => message.id === last.id)
@@ -1711,10 +2018,57 @@ export class MavenChatAgent extends AIChatAgent<
         childName: this.name,
         conversationId,
       });
-      if (await parent.isSidechatOperational(this.name, conversationId)) {
-        await parent.updateSidechatSummary(conversationId, "failed");
-      }
+      await this.reportStoppedServerTurn(parent, conversationId);
+    } finally {
+      if (stallTimer !== undefined) clearTimeout(stallTimer);
     }
+  }
+
+  // A server turn that ended without an answer: mark the thread failed and
+  // tell the teammate on the channel they wrote from. Escalation turns post
+  // the plain team note instead.
+  private async reportStoppedServerTurn(
+    parent: DurableObjectStub<MavenProjectAgent>,
+    conversationId: string,
+  ): Promise<void> {
+    if (!await parent.isSidechatOperational(this.name, conversationId)) return;
+    await parent.updateSidechatSummary(conversationId, "failed");
+    const meta = readTriggeringUserMeta(this.messages);
+    if (meta.origin === "system") {
+      await this.mirrorTeamNoteFallback();
+      return;
+    }
+    const trigger = [...this.messages].reverse().find((m) => m.role === "user");
+    const triggerMeta = trigger ? readSidechatUserMeta(trigger) : null;
+    await parent.mirrorSidechatReply({
+      conversationId,
+      text: SIDECHAT_TURN_STOPPED,
+      origin: meta.origin,
+      replyThreadId: triggerMeta?.replyThreadId ?? null,
+      replyRecipients: emailThreadParticipants(this.messages),
+    }).catch((error: unknown) => {
+      logError("sidechat_turn.stop_notice_failed", error, {
+        childName: this.name,
+        conversationId,
+      });
+    });
+  }
+
+  override async onFiberRecovered(
+    ctx: FiberRecoveryContext,
+  ): Promise<void | FiberRecoveryResult> {
+    if (ctx.name !== SIDECHAT_SERVER_TURN_FIBER) {
+      return super.onFiberRecovered(ctx);
+    }
+    logWarn("sidechat_turn.interrupted", {
+      childName: this.name,
+      startedAt: ctx.createdAt,
+    });
+    const parent = await this.parentAgent(MavenProjectAgent);
+    await this.reportStoppedServerTurn(
+      parent,
+      conversationIdFromChildName(this.name),
+    );
   }
 
   private async handlePublicChatMessage(
@@ -2230,11 +2584,13 @@ export class MavenChatAgent extends AIChatAgent<
       // lets the SDK record the denial so the call does not dangle.
       if (!result.continuation && decided !== null) {
         const meta = readTriggeringUserMeta(this.messages);
-        this.ctx.waitUntil(this.runServerSidechatTurn({
-          actorUserId: meta.actorUserId,
-          submittedMessageId: null,
-          continuation: true,
-        }));
+        this.enqueueServerSidechatTurn(() =>
+          this.runServerSidechatTurn({
+            actorUserId: meta.actorUserId,
+            submittedMessageId: null,
+            continuation: true,
+          })
+        );
       }
     } catch (error) {
       logError("sidechat_turn.complete_failed", error, {

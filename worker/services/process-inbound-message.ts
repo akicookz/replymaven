@@ -1,19 +1,16 @@
 import type { CustomerInput } from "../../shared/customer-types";
 import type { Context } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
 import { Resend } from "resend";
 import type { HonoAppContext } from "../types";
 import type { ProjectRow } from "../db/schema";
-import { users } from "../db/auth.schema";
 import { createPublicConversationStore } from "../conversations/create-public-conversation-store";
 import type { PublicConversationRecord } from "../../shared/maven-conversation";
 import { readConversationChannelMetadata } from "../../shared/maven-conversation";
 import { ProjectService } from "./project-service";
 import { CustomerIdentityService } from "./customer-identity-service";
-import { ChannelIdentityService } from "./channel-identity-service";
+import { ChannelIdentityService, type ResolvedTeammate } from "./channel-identity-service";
 import { VisitorBanService } from "./visitor-ban-service";
-import { TeamService } from "./team-service";
 import { InboundAddressService } from "./inbound-address-service";
 import { EmailService, parseEmailMessageId } from "./email-service";
 import { TelegramService } from "./telegram-service";
@@ -23,7 +20,8 @@ import { buildEmailChannelEnablement, buildEmailInbound, createEmailAgentChannel
 import { ingestTeammateMessage } from "./ingest-teammate-message";
 import { forwardVisitorToJoinedHumans } from "./run-agent-channel-outbound";
 import { skippedAttachmentNote, storeInboundAttachments } from "./inbound-attachment-service";
-import { emailVisitorId, parseReplyMavenRef, parseConversationReference, resolveInboundConversation, OPEN_INBOUND_THREAD_MS, type InboundEnvelopeRecipient, type InboundEmailAttachmentRef } from "./inbound-email-routing";
+import { emailVisitorId, fetchRawHeaderBlock, isAuthenticatedSender, parseReplyMavenRef, parseConversationReference, resolveInboundConversation, OPEN_INBOUND_THREAD_MS, type InboundEnvelopeRecipient, type InboundEmailAttachmentRef } from "./inbound-email-routing";
+import { deriveTeammateThreadId, startTeammateThreadTurn } from "./start-sidechat-turn";
 import { touchLinkedCustomerAfterVisitorMessage } from "../chat-runtime/customer-last-seen";
 import { runChannelTurn } from "../chat-runtime/orchestration/run-channel-turn";
 import { logError, logWarn } from "../observability";
@@ -44,6 +42,8 @@ export interface InboundMessageInput {
   originatingAddress: string | null;
   inboundAddress: string;
   idempotencyKey: string;
+  // Resend's link to the raw message; read only to check a teammate sender.
+  rawEmailUrl?: string | null;
   checkRateLimit(key: string, limit: number, windowMs: number): boolean;
   broadcastCustomerChanges(c: Context<HonoAppContext>, projectId: string, customerIds: string[]): void;
   api?: {
@@ -67,6 +67,18 @@ export async function processInboundMessage(
   const projectService = new ProjectService(db);
   const resend = new Resend(c.env.RESEND_API_KEY);
   let acceptedMessageId: string | null = null;
+  // ─── Teammates first ─────────────────────────────────────────────────
+  // A teammate is never treated as a customer. API messages always come
+  // from customers.
+  if (!input.api) {
+    const teammate = await new ChannelIdentityService(db).resolveByEmail({
+      projectId: project.id,
+      ownerId: project.userId,
+      email: senderEmail,
+    });
+    if (teammate) return handleTeammateEmail(c, input, teammate);
+  }
+
   // ─── Locate the conversation ─────────────────────────────────────────
   const chatService = createPublicConversationStore({ db, env: c.env });
   const referencedMessageId = input.replyToMessageId ??
@@ -123,34 +135,7 @@ export async function processInboundMessage(
   if (decision.kind === "drop") {
     return input.api ? c.json({ error: "Conversation is archived" }, 410) : c.json({ ok: true });
   }
-  // A teammate forwarding a customer's mail starts a conversation with no
-  // customer yet; the mail (quoted part included) becomes their first
-  // message to Maven, who reads the customer off the forwarded headers.
-  const forwardingTeammate = decision.kind === "create"
-    ? await new ChannelIdentityService(db).resolveByEmail({
-      projectId: project.id,
-      ownerId: project.userId,
-      email: senderEmail,
-    })
-    : null;
-  if (decision.kind === "create" && forwardingTeammate) {
-    if (!checkRateLimit(`inbound-create:${project.id}:${senderEmail}`, 8, 60 * 60 * 1000)) {
-      return input.api ? c.json({ error: "Conversation creation limit reached" }, 429) : c.json({ ok: true });
-    }
-    conversation = await chatService.create({
-      projectId: project.id,
-      customerId: null,
-      visitorId: await emailVisitorId(project.id, `forward:${emailId}`),
-      visitorName: null,
-      visitorEmail: null,
-      metadata: {
-        channel: "email",
-        subject: subject?.replace(/^\s*(?:(?:re|fwd?|fw)\s*:\s*)+/i, "").trim() || undefined,
-        inboundAddress,
-        forwardedBy: forwardingTeammate.userId,
-      },
-    });
-  } else if (decision.kind === "create") {
+  if (decision.kind === "create") {
     const visitorId = await emailVisitorId(project.id, senderEmail);
     const banned = await new VisitorBanService(db).isVisitorBanned(
       project.id,
@@ -234,75 +219,17 @@ export async function processInboundMessage(
       : c.json({ ok: true });
   }
 
-  // ─── Determine inbound role: visitor vs. agent ───────────────────────
+  // ─── Only the conversation's customer may write here ─────────────────
   const visitorEmail = inboundConversation.visitorEmail?.toLowerCase() ?? null;
   const isVisitor = visitorEmail !== null && visitorEmail === senderEmail;
-
-  let agentUser: {
-    id: string;
-    name: string;
-    email: string;
-    avatar: string | null;
-  } | null = null;
   if (!isVisitor) {
-    // Trust Resend's MX-level filtering for SPF/DKIM/DMARC enforcement —
-    // their API doesn't surface auth verdicts to webhook consumers, so we
-    // rely on them to reject hard-fail mail before forwarding. We still
-    // require the sender's email to match a stored user account that has
-    // explicit access to this project (owner or accepted team member).
-    const userRows = await db
-      .select({
-        id: users.id,
-        name: users.name,
-        email: users.email,
-        profilePicture: users.profilePicture,
-        image: users.image,
-      })
-      .from(users)
-      .where(eq(users.email, senderEmail))
-      .limit(1);
-    const candidate = userRows[0];
-    if (candidate) {
-      const isOwner = candidate.id === project.userId;
-      let hasAccess = isOwner;
-      if (!isOwner) {
-        // Sender access is about this specific project's owner, independent of
-        // whichever team the sender currently has active.
-        const teamService = new TeamService(db);
-        const membership = await teamService.getMembershipForOwner(
-          candidate.id,
-          project.userId,
-        );
-        hasAccess = Boolean(
-          membership &&
-          (
-            membership.accessAllProjects ||
-            await teamService.memberHasProjectAccess(
-              membership.id,
-              project.id,
-            )
-          ),
-        );
-      }
-      if (hasAccess) {
-        agentUser = {
-          id: candidate.id,
-          name: candidate.name,
-          email: candidate.email,
-          avatar: candidate.profilePicture ?? candidate.image ?? null,
-        };
-      }
-    }
-  }
-
-  if (!isVisitor && !agentUser) {
     console.error(
-      `[InboundEmail] Sender ${senderEmail} is neither the visitor nor a project member`,
+      `[InboundEmail] Sender ${senderEmail} is not this conversation's customer`,
     );
     return input.api ? c.json({ error: "Sender does not belong to this conversation" }, 403) : c.json({ ok: true });
   }
 
-  if (isVisitor && input.api) {
+  if (input.api) {
     const ban = await new VisitorBanService(db).isVisitorBanned(project.id, inboundConversation.visitorId, senderEmail);
     if (ban || inboundConversation.closeReason === "spam") return c.json({ error: "Customer is blocked" }, 403);
     const failure = await input.api.prepareVisitor(inboundConversation);
@@ -313,284 +240,225 @@ export async function processInboundMessage(
     await chatService.reopen(project.id, inboundConversation.id);
   }
 
-
-  if (isVisitor) {
-    // ─── Visitor reply branch ─────────────────────────────────────────
-    let storedAttachments = {
-      imageUrls: [] as string[],
-      attachments: [] as Array<{
-        url: string;
-        filename: string;
-        contentType: string;
-        size: number;
-      }>,
-      skipped: [] as Array<{ filename: string; reason: string }>,
-    };
-    if (inboundAttachments.length > 0) {
-      try {
-        storedAttachments = await storeInboundAttachments({
-          request: c.req.raw,
-          projectId: project.id,
-          conversationId: inboundConversation.id,
-          attachments: inboundAttachments,
-          async fetchAttachment(id) {
-            const result = await resend.emails.receiving.attachments.get({
-              emailId,
-              id,
-            });
-            const data = result.data as { download_url?: string } | null;
-            if (result.error || !data?.download_url) {
-              throw new Error(result.error?.message ?? "Attachment URL missing");
-            }
-            const downloaded = await fetch(data.download_url);
-            if (!downloaded.ok || !downloaded.body) {
-              throw new Error(`Attachment download failed: ${downloaded.status}`);
-            }
-            return downloaded;
-          },
-          async putObject(key, body, contentType) {
-            await c.env.UPLOADS.put(key, body, {
-              httpMetadata: { contentType },
-              customMetadata: {
-                ownerType: "conversation",
-                ownerId: inboundConversation.id,
-                projectId: project.id,
-              },
-            });
-          },
-        });
-      } catch (error) {
-        logError("inbound_email.attachment_failed", error, {
-          emailId,
-          projectId: project.id,
-          conversationId: inboundConversation.id,
-        });
-        return c.json({ error: "Could not store attachments" }, 502);
-      }
-    }
-    const skippedNote = skippedAttachmentNote(storedAttachments.skipped);
-    const visitorContent = [input.api?.visitorText ?? cleanedText, skippedNote].filter(Boolean).join("\n\n");
-    const inboundEmailMessage = await chatService.addPublicMessage(
-      {
-        conversationId: inboundConversation.id,
-        role: "visitor",
-        content: visitorContent,
-        imageUrls: storedAttachments.imageUrls,
-        attachments: storedAttachments.attachments,
-        sources: null,
-        idempotencyKey: `email:${emailId}`,
-        origin: "email",
-        externalReplyTo: referencedMessageId,
-        rfcMessageId,
-        senderName: senderName ?? inboundConversation.visitorName,
-      },
-      project.id,
-    );
-    if (!inboundEmailMessage) return c.json({ ok: true });
-    acceptedMessageId = inboundEmailMessage.id;
-    c.executionCtx.waitUntil(
-      touchLinkedCustomerAfterVisitorMessage({
+  let storedAttachments = {
+    imageUrls: [] as string[],
+    attachments: [] as Array<{
+      url: string;
+      filename: string;
+      contentType: string;
+      size: number;
+    }>,
+    skipped: [] as Array<{ filename: string; reason: string }>,
+  };
+  if (inboundAttachments.length > 0) {
+    try {
+      storedAttachments = await storeInboundAttachments({
+        request: c.req.raw,
         projectId: project.id,
-        customerId: inboundConversation.customerId,
-        visitorId: inboundConversation.visitorId,
-        occurredAt: new Date(inboundEmailMessage.createdAt),
-        identityService: new CustomerIdentityService(
-          db,
-          createPublicConversationStore({ db, env: c.env }),
-        ),
-        logFailure(error) {
-          logError("inbound_email.customer_last_seen_failed", error, {
-            projectId: project.id,
-            conversationId: inboundConversation.id,
-            customerId: inboundConversation.customerId,
+        conversationId: inboundConversation.id,
+        attachments: inboundAttachments,
+        async fetchAttachment(id) {
+          const result = await resend.emails.receiving.attachments.get({
+            emailId,
+            id,
+          });
+          const data = result.data as { download_url?: string } | null;
+          if (result.error || !data?.download_url) {
+            throw new Error(result.error?.message ?? "Attachment URL missing");
+          }
+          const downloaded = await fetch(data.download_url);
+          if (!downloaded.ok || !downloaded.body) {
+            throw new Error(`Attachment download failed: ${downloaded.status}`);
+          }
+          return downloaded;
+        },
+        async putObject(key, body, contentType) {
+          await c.env.UPLOADS.put(key, body, {
+            httpMetadata: { contentType },
+            customMetadata: {
+              ownerType: "conversation",
+              ownerId: inboundConversation.id,
+              projectId: project.id,
+            },
           });
         },
-        onTouched(customerId) {
-          broadcastCustomerChanges(c, project.id, [customerId]);
-        },
-      }),
-    );
-    const stillOperational = await chatService.getOperational(
-      project.id,
-      inboundConversation.id,
-    );
-    if (!stillOperational) return c.json({ ok: true });
-
-    const chatState = await chatService.getChatState(
-      project.id,
-      inboundConversation.id,
-    );
-    if (
-      chatState.aiParticipation === "human_only" &&
-      chatState.activeHumanRoutes.length > 0
-    ) {
-      try {
-        const telegramService = new TelegramService(db, c.env.ENCRYPTION_KEY);
-        const slackService = new SlackService(db, c.env.ENCRYPTION_KEY);
-        const [tgSettings, slackSettings] = await Promise.all([
-          telegramService.getTelegramSettings(project.id),
-          slackService.getSlackSettings(project.id),
-        ]);
-        const channels = listEnabledAgentChannels({
-          email: buildEmailChannelEnablement({
-            env: c.env,
-            projectService,
-            chatService,
-            project: { id: project.id, slug: project.slug, name: project.name },
-            botName: null,
-          }),
-          telegram: tgSettings?.telegramBotToken && tgSettings.telegramChatId
-            ? {
-                storedBotToken: tgSettings.telegramBotToken,
-                chatId: tgSettings.telegramChatId,
-                service: telegramService,
-                recordMessage: telegramMessageRecorder(c.env, project.id),
-              }
-            : null,
-          slack: slackSettings?.slackBotToken && slackSettings.slackChannelId
-            ? {
-                storedBotToken: slackSettings.slackBotToken,
-                channelId: slackSettings.slackChannelId,
-                service: slackService,
-              }
-            : null,
-        });
-        await forwardVisitorToJoinedHumans({
-          channels,
-          activeHumanRoutes: chatState.activeHumanRoutes,
-          conversationId: inboundConversation.id,
-          conversationLink:
-            `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations?filter=needs-you&id=${inboundConversation.id}`,
-          visitorName: inboundConversation.visitorName ?? senderEmail,
-          content: input.api ? input.api.visitorText : `[via email] ${cleanedText}`,
-          channelThreads: inboundConversation.channelThreads,
-          telegramThreadId: inboundConversation.telegramThreadId,
-          email: { db, projectId: project.id },
-        });
-      } catch (err) {
-        console.error("[InboundEmail] Joined-route forward failed:", err);
-      }
-    } else if (chatState.aiParticipation !== "human_only") {
-      const settings = await projectService.getSettings(project.id);
-      const channelMeta = readConversationChannelMetadata(
-        stillOperational.metadata,
-      );
-      c.executionCtx.waitUntil((async () => {
-        const botMessage = await runChannelTurn({
-          db,
-          env: c.env,
-          executionCtx: c.executionCtx,
-          chatService,
-          projectService,
-          project: {
-            id: project.id,
-            userId: project.userId,
-            name: project.name,
-          },
-          settings,
-          conversation: stillOperational,
-          currentMessage: visitorContent,
-          isNewConversation: decision.kind === "create",
-          channel: channelMeta.channel,
-          aiParticipation: chatState.aiParticipation,
-        });
-        if (
-          !botMessage ||
-          !inboundConversation.visitorEmail ||
-          !c.env.RESEND_API_KEY
-        ) {
-          return;
-        }
-        const threadMessages = await chatService.getMessages(
-          project.id,
-          inboundConversation.id,
-        );
-        const referencesRfcIds = threadMessages
-          .map((message) => message.rfcMessageId)
-          .filter((id): id is string => Boolean(id));
-        const emailService = new EmailService(c.env.RESEND_API_KEY);
-        const sent = await emailService.sendAgentMessageEmail({
-          to: inboundConversation.visitorEmail,
-          projectSlug: project.slug,
-          projectName: project.name,
-          conversationId: inboundConversation.id,
-          messageId: botMessage.id,
-          messageContent: botMessage.content,
-          inReplyToRfcId: rfcMessageId,
-          referencesRfcIds,
-          subject: channelMeta.subject ?? subject,
-          autoSubmitted: true,
-          authorName: botMessage.senderName ?? "Maven",
-          customerName: inboundConversation.visitorName,
-        });
-        await chatService.markEmailed({
-          projectId: project.id,
-          conversationId: inboundConversation.id,
-          messageId: botMessage.id,
-          rfcMessageId: await emailService.resolveRfcMessageId(sent.id),
-        });
-      })().catch((error: unknown) => {
-        logError("inbound_email.channel_turn_failed", error, {
-          projectId: project.id,
-          conversationId: inboundConversation.id,
-        });
-      }));
-    }
-  } else if (agentUser) {
-    // ─── Teammate branch: the mail is a message to the team thread ────
-    const emailEnablement = buildEmailChannelEnablement({
-      env: c.env,
-      projectService,
-      chatService,
-      project: { id: project.id, slug: project.slug, name: project.name },
-      botName: (await projectService.getSettings(project.id))?.botName,
-    });
-    if (!emailEnablement) return c.json({ ok: true });
-    // No saved thread subject (the first send could not record one): keep
-    // the subject the teammate is replying under so Maven's answer threads.
-    const replySubject = subject
-      ?.replace(/^\s*(?:(?:re|fwd?|fw)\s*:\s*)+/i, "")
-      .trim();
-    if (
-      !forwardingTeammate &&
-      replySubject &&
-      !inboundConversation.channelThreads?.email
-    ) {
-      await emailEnablement.writeThread({
-        conversationId: inboundConversation.id,
-        userId: agentUser.id,
-        rfcMessageId,
-        subject: replySubject,
-      }).catch((error: unknown) => {
-        logError("inbound_email.thread_subject_failed", error, {
-          conversationId: inboundConversation.id,
-        });
       });
-    }
-    await ingestTeammateMessage({
-      adapter: createEmailAgentChannel(emailEnablement),
-      inbound: buildEmailInbound({
+    } catch (error) {
+      logError("inbound_email.attachment_failed", error, {
         emailId,
-        // The quoted part is the point of a forward; keep it there.
-        text: forwardingTeammate ? emailText.slice(0, 20_000) : cleanedText,
-        rfcMessageId,
+        projectId: project.id,
         conversationId: inboundConversation.id,
-        author: {
-          userId: agentUser.id,
-          displayName: agentUser.name,
-          email: agentUser.email,
-        },
-      }),
-      botName: emailEnablement.botName,
+      });
+      return c.json({ error: "Could not store attachments" }, 502);
+    }
+  }
+  const skippedNote = skippedAttachmentNote(storedAttachments.skipped);
+  const visitorContent = [input.api?.visitorText ?? cleanedText, skippedNote].filter(Boolean).join("\n\n");
+  const inboundEmailMessage = await chatService.addPublicMessage(
+    {
+      conversationId: inboundConversation.id,
+      role: "visitor",
+      content: visitorContent,
+      imageUrls: storedAttachments.imageUrls,
+      attachments: storedAttachments.attachments,
+      sources: null,
+      idempotencyKey: `email:${emailId}`,
+      origin: "email",
+      externalReplyTo: referencedMessageId,
+      rfcMessageId,
+      senderName: senderName ?? inboundConversation.visitorName,
+    },
+    project.id,
+  );
+  if (!inboundEmailMessage) return c.json({ ok: true });
+  acceptedMessageId = inboundEmailMessage.id;
+  c.executionCtx.waitUntil(
+    touchLinkedCustomerAfterVisitorMessage({
       projectId: project.id,
-      project: { id: project.id, slug: project.slug, name: project.name },
-      actorUserId: agentUser.id,
-      db,
-      chatService,
-      env: c.env,
-      getAgentModeConversations: () => chatService.listAgentMode(project.id),
-      findByChannelThread: async () => null,
-    });
+      customerId: inboundConversation.customerId,
+      visitorId: inboundConversation.visitorId,
+      occurredAt: new Date(inboundEmailMessage.createdAt),
+      identityService: new CustomerIdentityService(
+        db,
+        createPublicConversationStore({ db, env: c.env }),
+      ),
+      logFailure(error) {
+        logError("inbound_email.customer_last_seen_failed", error, {
+          projectId: project.id,
+          conversationId: inboundConversation.id,
+          customerId: inboundConversation.customerId,
+        });
+      },
+      onTouched(customerId) {
+        broadcastCustomerChanges(c, project.id, [customerId]);
+      },
+    }),
+  );
+  const stillOperational = await chatService.getOperational(
+    project.id,
+    inboundConversation.id,
+  );
+  if (!stillOperational) return c.json({ ok: true });
+
+  const chatState = await chatService.getChatState(
+    project.id,
+    inboundConversation.id,
+  );
+  if (
+    chatState.aiParticipation === "human_only" &&
+    chatState.activeHumanRoutes.length > 0
+  ) {
+    try {
+      const telegramService = new TelegramService(db, c.env.ENCRYPTION_KEY);
+      const slackService = new SlackService(db, c.env.ENCRYPTION_KEY);
+      const [tgSettings, slackSettings] = await Promise.all([
+        telegramService.getTelegramSettings(project.id),
+        slackService.getSlackSettings(project.id),
+      ]);
+      const channels = listEnabledAgentChannels({
+        email: buildEmailChannelEnablement({
+          env: c.env,
+          projectService,
+          chatService,
+          project: { id: project.id, slug: project.slug, name: project.name },
+          botName: null,
+        }),
+        telegram: tgSettings?.telegramBotToken && tgSettings.telegramChatId
+          ? {
+              storedBotToken: tgSettings.telegramBotToken,
+              chatId: tgSettings.telegramChatId,
+              service: telegramService,
+              recordMessage: telegramMessageRecorder(c.env, project.id),
+            }
+          : null,
+        slack: slackSettings?.slackBotToken && slackSettings.slackChannelId
+          ? {
+              storedBotToken: slackSettings.slackBotToken,
+              channelId: slackSettings.slackChannelId,
+              service: slackService,
+            }
+          : null,
+      });
+      await forwardVisitorToJoinedHumans({
+        channels,
+        activeHumanRoutes: chatState.activeHumanRoutes,
+        conversationId: inboundConversation.id,
+        conversationLink:
+          `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations?filter=needs-you&id=${inboundConversation.id}`,
+        visitorName: inboundConversation.visitorName ?? senderEmail,
+        content: input.api ? input.api.visitorText : `[via email] ${cleanedText}`,
+        channelThreads: inboundConversation.channelThreads,
+        telegramThreadId: inboundConversation.telegramThreadId,
+        email: { db, projectId: project.id },
+      });
+    } catch (err) {
+      console.error("[InboundEmail] Joined-route forward failed:", err);
+    }
+  } else if (chatState.aiParticipation !== "human_only") {
+    const settings = await projectService.getSettings(project.id);
+    const channelMeta = readConversationChannelMetadata(
+      stillOperational.metadata,
+    );
+    c.executionCtx.waitUntil((async () => {
+      const botMessage = await runChannelTurn({
+        db,
+        env: c.env,
+        executionCtx: c.executionCtx,
+        chatService,
+        projectService,
+        project: {
+          id: project.id,
+          userId: project.userId,
+          name: project.name,
+        },
+        settings,
+        conversation: stillOperational,
+        currentMessage: visitorContent,
+        isNewConversation: decision.kind === "create",
+        channel: channelMeta.channel,
+        aiParticipation: chatState.aiParticipation,
+      });
+      if (
+        !botMessage ||
+        !inboundConversation.visitorEmail ||
+        !c.env.RESEND_API_KEY
+      ) {
+        return;
+      }
+      const threadMessages = await chatService.getMessages(
+        project.id,
+        inboundConversation.id,
+      );
+      const referencesRfcIds = threadMessages
+        .map((message) => message.rfcMessageId)
+        .filter((id): id is string => Boolean(id));
+      const emailService = new EmailService(c.env.RESEND_API_KEY);
+      const sent = await emailService.sendAgentMessageEmail({
+        to: inboundConversation.visitorEmail,
+        projectSlug: project.slug,
+        projectName: project.name,
+        conversationId: inboundConversation.id,
+        messageId: botMessage.id,
+        messageContent: botMessage.content,
+        inReplyToRfcId: rfcMessageId,
+        referencesRfcIds,
+        subject: channelMeta.subject ?? subject,
+        autoSubmitted: true,
+        authorName: botMessage.senderName ?? "Maven",
+        customerName: inboundConversation.visitorName,
+      });
+      await chatService.markEmailed({
+        projectId: project.id,
+        conversationId: inboundConversation.id,
+        messageId: botMessage.id,
+        rfcMessageId: await emailService.resolveRfcMessageId(sent.id),
+      });
+    })().catch((error: unknown) => {
+      logError("inbound_email.channel_turn_failed", error, {
+        projectId: project.id,
+        conversationId: inboundConversation.id,
+      });
+    }));
   }
 
   // Mark this email_id as fully processed (24h TTL). Done last so synchronous
@@ -606,4 +474,176 @@ export async function processInboundMessage(
   return input.api
     ? c.json({ ok: true, conversationId: inboundConversation.id, messageId: acceptedMessageId }, 202)
     : c.json({ ok: true });
+}
+
+// ─── Teammate email ─────────────────────────────────────────────────────────
+// Mail from a teammate is a message to Maven: in a customer conversation's
+// Sidechat when it answers one, otherwise in the teammate's own thread. It is
+// trusted only when Amazon SES passed the sender's domain.
+
+const NEW_TEAMMATE_THREAD_LIMIT_PER_HOUR = 30;
+
+async function handleTeammateEmail(
+  c: Context<HonoAppContext>,
+  input: InboundMessageInput,
+  teammate: ResolvedTeammate,
+): Promise<Response> {
+  const { project, emailId, emailText, cleanedText, headers, subject,
+    rfcMessageId, envelopeRecipient, idempotencyKey } = input;
+  const db = drizzle(c.env.DB);
+  const markProcessed = () =>
+    c.env.CONVERSATIONS_CACHE.put(idempotencyKey, "1", {
+      expirationTtl: 60 * 60 * 24,
+    });
+
+  let rawHeaders: string | null = null;
+  if (input.rawEmailUrl) {
+    try {
+      rawHeaders = await fetchRawHeaderBlock(input.rawEmailUrl);
+    } catch (error) {
+      logError("inbound_email.raw_fetch_failed", error, { emailId });
+      return c.json({ error: "Could not read the inbound email" }, 502);
+    }
+  }
+  if (!rawHeaders || !isAuthenticatedSender(rawHeaders, input.senderEmail)) {
+    logWarn("inbound_email.teammate_unverified", {
+      emailId,
+      projectId: project.id,
+      headersRead: rawHeaders !== null,
+    });
+    await markProcessed();
+    return c.json({ ok: true });
+  }
+
+  const chatService = createPublicConversationStore({ db, env: c.env });
+  const projectService = new ProjectService(db);
+  const replySubject = subject
+    ?.replace(/^\s*(?:(?:re|fwd?|fw)\s*:\s*)+/i, "")
+    .trim() || null;
+
+  // ─── A reply in a customer conversation ──────────────────────────────
+  if (!envelopeRecipient.sidechatThreadId) {
+    const referencedMessageId = input.replyToMessageId ??
+      parseEmailMessageId(headers["in-reply-to"]) ??
+      parseEmailMessageId(headers.references, { source: "references" });
+    const referenced = referencedMessageId
+      ? await chatService.getPublicMessageById(referencedMessageId, project.id)
+      : null;
+    const conversationId = referenced?.conversationId ??
+      envelopeRecipient.conversationId ??
+      parseReplyMavenRef(emailText) ??
+      parseConversationReference(emailText);
+    const conversation = conversationId
+      ? await chatService.get(project.id, conversationId)
+      : null;
+    if (conversation?.archivedAt) {
+      await markProcessed();
+      return c.json({ ok: true });
+    }
+    if (conversation) {
+      if (conversation.status === "closed") {
+        await chatService.reopen(project.id, conversation.id);
+      }
+      const emailEnablement = buildEmailChannelEnablement({
+        env: c.env,
+        projectService,
+        chatService,
+        project: { id: project.id, slug: project.slug, name: project.name },
+        botName: (await projectService.getSettings(project.id))?.botName,
+      });
+      if (!emailEnablement) return c.json({ ok: true });
+      // No saved thread subject (the first send could not record one): keep
+      // the subject the teammate is replying under so Maven's answer threads.
+      if (replySubject && !conversation.channelThreads?.email) {
+        await emailEnablement.writeThread({
+          conversationId: conversation.id,
+          userId: teammate.userId,
+          rfcMessageId,
+          subject: replySubject,
+        }).catch((error: unknown) => {
+          logError("inbound_email.thread_subject_failed", error, {
+            conversationId: conversation.id,
+          });
+        });
+      }
+      await ingestTeammateMessage({
+        adapter: createEmailAgentChannel(emailEnablement),
+        inbound: buildEmailInbound({
+          emailId,
+          text: cleanedText,
+          rfcMessageId,
+          conversationId: conversation.id,
+          author: {
+            userId: teammate.userId,
+            displayName: teammate.name,
+            email: teammate.email,
+          },
+        }),
+        botName: emailEnablement.botName,
+        projectId: project.id,
+        project: { id: project.id, slug: project.slug, name: project.name },
+        db,
+        chatService,
+        env: c.env,
+        findByChannelThread: async () => null,
+      });
+      await markProcessed();
+      return c.json({ ok: true });
+    }
+  }
+
+  // ─── The teammate's own thread ───────────────────────────────────────
+  const existingThreadId = envelopeRecipient.sidechatThreadId ?? null;
+  if (
+    existingThreadId === null &&
+    !input.checkRateLimit(
+      `teammate-thread:${project.id}:${teammate.userId}`,
+      NEW_TEAMMATE_THREAD_LIMIT_PER_HOUR,
+      60 * 60 * 1000,
+    )
+  ) {
+    return c.json({ ok: true });
+  }
+  // A new thread keeps the whole mail, quoted part included: a forward is
+  // material to read. A reply keeps only what is new.
+  const text = (existingThreadId === null
+    ? emailText.slice(0, 20_000)
+    : cleanedText).trim();
+  if (!text) {
+    await markProcessed();
+    return c.json({ ok: true });
+  }
+  const threadId = existingThreadId ??
+    await deriveTeammateThreadId(project.id, "email", emailId);
+  const started = await startTeammateThreadTurn({
+    projectId: project.id,
+    env: c.env,
+    conversationId: threadId,
+    text,
+    origin: "email",
+    actorUserId: teammate.userId,
+    authorUserId: teammate.userId,
+    authorDisplayName: teammate.name,
+    channelMessageId: `email:${emailId}`,
+    replyThreadId: rfcMessageId,
+    replyRecipient: teammate.email,
+    createdBy: teammate.userId,
+    telegramRootId: null,
+    slackRootTs: null,
+    emailThread: existingThreadId === null && replySubject
+      ? {
+        subject: replySubject,
+        byUser: rfcMessageId ? { [teammate.userId]: rfcMessageId } : {},
+      }
+      : null,
+  });
+  if (!started.accepted && started.reason !== "duplicate") {
+    logWarn("inbound_email.teammate_thread_not_started", {
+      emailId,
+      projectId: project.id,
+      reason: started.reason,
+    });
+  }
+  await markProcessed();
+  return c.json({ ok: true });
 }

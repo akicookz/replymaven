@@ -31,6 +31,21 @@ export interface EmailChannelEnablement {
     rfcMessageId: string | null;
     subject: string;
   }): Promise<void>;
+  // A teammate thread replies through its own address and carries no
+  // conversation link.
+  isTeammateThread(conversationId: string): Promise<boolean>;
+}
+
+// Thread storage for teammate threads, which have no public conversation.
+export interface TeammateThreadEmailStore {
+  has(threadId: string): boolean;
+  read(threadId: string): { subject: string; byUser: Record<string, string> } | null;
+  write(input: {
+    threadId: string;
+    userId: string;
+    rfcMessageId: string | null;
+    subject: string;
+  }): void;
 }
 
 const EMAIL_DOMAIN = "updates.replymaven.com";
@@ -61,10 +76,13 @@ export function createEmailAgentChannel(
     },
     async post(fields) {
       const threads = await input.readThreads(fields.conversationId);
-      const recipients = fields.recipient
-        ? await resolveRecipient(input, fields.recipient)
+      const named = fields.recipients ?? [];
+      const recipients = named.length > 0
+        ? await resolveRecipients(input, named)
         : await input.recipients();
       if (recipients.length === 0) return null;
+      const teammateThread = await input.isTeammateThread(fields.conversationId);
+      const addressTag = teammateThread ? "s" : "c";
 
       const storedSubject = threads?.subject ?? null;
       const givenSubject = fields.subject ?? null;
@@ -79,20 +97,24 @@ export function createEmailAgentChannel(
       const botName = input.botName?.trim() || "Maven";
       let lastRfcId: string | null = null;
       for (const recipient of recipients) {
-        const inReplyTo = fields.recipient
-          ? fields.threadId ?? threads?.byUser[recipient.userId] ?? null
-          : threads?.byUser[recipient.userId] ?? null;
+        const inReplyTo = replyParentFor({
+          namedCount: named.length,
+          answeredRfcId: fields.threadId,
+          lastSentRfcId: threads?.byUser[recipient.userId] ?? null,
+        });
         // Replies route by the reply-to address; only the link is shown.
         const composed = composeEmail({
           bodyMarkdown: body,
           recipientName: firstName(recipient.name),
-          links: [{ label: "Open the conversation", url: fields.conversationLink }],
+          links: fields.conversationLink
+            ? [{ label: "Open the conversation", url: fields.conversationLink }]
+            : [],
           signature: [botName],
         });
         try {
           const sent = await input.service.sendTeammateEmail({
             from: `${botName} <${input.project.slug}@${EMAIL_DOMAIN}>`,
-            replyTo: `${input.project.slug}+c${fields.conversationId}@${EMAIL_DOMAIN}`,
+            replyTo: `${input.project.slug}+${addressTag}${fields.conversationId}@${EMAIL_DOMAIN}`,
             to: recipient.email,
             subject: inReplyTo ? `Re: ${subject}` : subject,
             text: composed.text,
@@ -121,15 +143,28 @@ export function createEmailAgentChannel(
   };
 }
 
-async function resolveRecipient(
+// One named recipient is the teammate being answered: reply to their mail.
+// Others in the thread continue from the last mail they got.
+function replyParentFor(input: {
+  namedCount: number;
+  answeredRfcId: string | null;
+  lastSentRfcId: string | null;
+}): string | null {
+  if (input.namedCount === 1) return input.answeredRfcId ?? input.lastSentRfcId;
+  if (input.namedCount > 1) return input.lastSentRfcId ?? input.answeredRfcId;
+  return input.lastSentRfcId;
+}
+
+// Only teammates who may see the project: an address that is not one of
+// them gets nothing.
+async function resolveRecipients(
   input: EmailChannelEnablement,
-  email: string,
+  emails: string[],
 ): Promise<EmailChannelRecipient[]> {
-  const wanted = email.trim().toLowerCase();
-  const known = (await input.recipients()).find((candidate) =>
-    candidate.email.toLowerCase() === wanted
+  const wanted = new Set(emails.map((email) => email.trim().toLowerCase()));
+  return (await input.recipients()).filter((candidate) =>
+    wanted.has(candidate.email.toLowerCase())
   );
-  return known ? [known] : [];
 }
 
 export function buildEmailInbound(input: {
@@ -157,16 +192,25 @@ export function buildEmailChannelEnablement(input: {
   chatService: PublicConversationStore;
   project: { id: string; slug: string; name: string };
   botName: string | null | undefined;
+  // Only the project Agent sends in teammate threads, so only it passes this.
+  teammateThreads?: TeammateThreadEmailStore;
 }): EmailChannelEnablement | null {
   if (!input.env.RESEND_API_KEY) return null;
   const service = new EmailService(input.env.RESEND_API_KEY);
+  const teammateThreads = input.teammateThreads;
   return {
     service,
     project: input.project,
     botName: input.botName,
     recipients: () =>
       input.projectService.getEscalationRecipients(input.project.id),
+    async isTeammateThread(conversationId) {
+      return teammateThreads?.has(conversationId) ?? false;
+    },
     async readThreads(conversationId) {
+      if (teammateThreads?.has(conversationId)) {
+        return teammateThreads.read(conversationId);
+      }
       const conversation = await input.chatService.getOperational(
         input.project.id,
         conversationId,
@@ -178,6 +222,10 @@ export function buildEmailChannelEnablement(input: {
       return subject ? { subject, byUser: {} } : null;
     },
     async writeThread(fields) {
+      if (teammateThreads?.has(fields.conversationId)) {
+        teammateThreads.write({ ...fields, threadId: fields.conversationId });
+        return;
+      }
       await input.chatService.updateEmailThread(
         input.project.id,
         fields.conversationId,
