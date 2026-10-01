@@ -85,15 +85,9 @@ const COUNTED_VIEWS = new Set<DashboardNavItem["id"]>(["needs-you", "inbox", "sn
 function RowCount({ item }: { item: DashboardNavItem }) {
   const count = item.count ?? 0;
   if (!COUNTED_VIEWS.has(item.id) || count <= 0) return null;
-  if (item.id === "needs-you") {
-    return (
-      <span className="ml-auto rounded-full bg-brand/15 px-1.5 text-[11px] font-medium leading-[18px] tabular-nums text-brand">
-        {count}
-      </span>
-    );
-  }
+  // One box for every count so the numbers line up down the column.
   return (
-    <span className="ml-auto text-[11px] font-medium tabular-nums text-ink-7">
+    <span className="ml-auto min-w-[18px] rounded-full bg-ink-1/10 px-1.5 text-center text-[11px] font-medium leading-[18px] tabular-nums text-ink-2">
       {count}
     </span>
   );
