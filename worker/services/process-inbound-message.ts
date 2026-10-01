@@ -67,6 +67,18 @@ export async function processInboundMessage(
   const projectService = new ProjectService(db);
   const resend = new Resend(c.env.RESEND_API_KEY);
   let acceptedMessageId: string | null = null;
+  // Mail forwarded from an inbox the owner chose to ignore is dropped.
+  if (
+    !input.api &&
+    originatingAddress &&
+    await new InboundAddressService(db).isIgnored(project.id, originatingAddress)
+  ) {
+    logWarn("inbound_email.ignored_address", { emailId, projectId: project.id });
+    await c.env.CONVERSATIONS_CACHE.put(idempotencyKey, "1", {
+      expirationTtl: 60 * 60 * 24,
+    });
+    return c.json({ ok: true });
+  }
   // ─── Teammates first ─────────────────────────────────────────────────
   // A teammate is never treated as a customer. API messages always come
   // from customers.

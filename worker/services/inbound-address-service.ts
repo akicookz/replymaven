@@ -16,6 +16,20 @@ export class InboundAddressService {
       .orderBy(desc(projectInboundAddresses.lastSeenAt));
   }
 
+  async isIgnored(projectId: string, address: string): Promise<boolean> {
+    const rows = await this.db
+      .select({ ignored: projectInboundAddresses.ignored })
+      .from(projectInboundAddresses)
+      .where(
+        and(
+          eq(projectInboundAddresses.projectId, projectId),
+          eq(projectInboundAddresses.address, address.trim().toLowerCase()),
+        ),
+      )
+      .limit(1);
+    return rows[0]?.ignored === true;
+  }
+
   // Runs on every inbound email, so it is one statement rather than a
   // select/update/select round trip.
   async discover(

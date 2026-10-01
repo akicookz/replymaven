@@ -15,12 +15,12 @@ const SLUG_ADDRESS = new RegExp(
 );
 const ADDRESS_IN_TEXT = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 
+// Where a forwarded mail was first addressed, in order of trust.
 const HEADER_ORIGIN_KEYS = [
   "to",
-  "cc",
-  "delivered-to",
   "x-forwarded-to",
   "x-original-to",
+  "delivered-to",
   "resent-to",
 ] as const;
 
@@ -135,11 +135,20 @@ export function parseEnvelopeRecipient(
   return null;
 }
 
+// The company's own address a mail was forwarded from, such as
+// support@acme.com. Mail sent straight to us names our address in To or Cc;
+// only a forward hides it, so anything else (a customer's CC'd colleague)
+// is never taken for the company's inbox.
 export function originatingAddressFromHeaders(
   headers: Record<string, string>,
   envelopeRaw: string,
 ): string | null {
   const envelope = extractEmailAddress(envelopeRaw);
+  const named = [headers.to, headers.cc]
+    .flatMap((value) => (value ? extractEmailAddresses(value) : []));
+  if (named.some((address) => isEnvelopeDomain(address) || address === envelope)) {
+    return null;
+  }
   for (const key of HEADER_ORIGIN_KEYS) {
     const value = headers[key];
     if (!value) continue;
